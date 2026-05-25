@@ -1,0 +1,4 @@
+# Ralph Wiggum Loop Build System — .gitignore
+__pycache__/
+*.pyc
+.DS_Store

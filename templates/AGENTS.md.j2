@@ -1,0 +1,121 @@
+# AGENTS.md — {{ PROJECT_NAME }}
+
+> **{{ PROJECT_NAME }}** — {{ PROJECT_DESCRIPTION }}
+
+## Project Overview
+
+{{ PROJECT_DESCRIPTION }}
+
+## Build & Test
+
+```bash
+# Run validation (tests + lint + type-check on changed files)
+bash scripts/ralph/ralph_validate.sh --tier=targeted
+
+# Run unit tests only
+{{ TEST_COMMAND_UNIT }}
+
+# Check git status
+git status --short
+```
+
+## Key Decisions
+
+<!-- Document your key architectural decisions here -->
+
+## Conventions
+
+- Language: {{ PROJECT_LANGUAGE }}
+- {{ LINT_CONVENTIONS }}
+- Configuration via env vars + config files.
+- Secrets in `.env` only (never committed).
+
+## Beads Ticket Hierarchy & Rules
+
+### Hierarchy
+```
+EPIC (type: epic, labels: epic, meta-grouping, <phase-tag>) - not to be closed
+└── FEATURE (type: feature, labels: <phase-tag>, meta-grouping) - not to be closed
+    ├── WORK tickets (type: task|bug|test|docs, labels: <phase-tag> ONLY)
+    │   - Use `bug` for regressions/defects; `task` for new work
+    │   - Must have description with acceptance criteria
+    │   - Dependencies set explicitly via `bd dep add`
+    └── EXIT ticket (type: task, labels: exit, <phase-tag>)
+        - Last ticket before feature is complete
+        - Regression test and wired (e2e) for the whole feature
+        - Blocks the NEXT phase's first work ticket(s)
+```
+
+### Label Rules
+| Ticket Type | Allowed Labels |
+|-------------|----------------|
+| EPIC | `epic`, `meta-grouping`, optional `<phase-tag>` |
+| FEATURE | `<phase-tag>`, `meta-grouping` |
+| WORK (task, bug, test, docs) | `<phase-tag>` **only** |
+| EXIT | `exit`, `<phase-tag>` |
+
+### Dependency Rules
+1. **FEATURE parents are pure containers** — they MUST NOT carry blocking dependencies.
+2. **Phase gating** — a phase's first work ticket(s) depend on the previous phase's EXIT ticket ONLY.
+3. **EXIT tickets** depend only on their own phase's work tickets.
+4. **Work tickets** MUST have exactly one label (`<phase-tag>`). EXIT tickets are the exception: `exit, <phase-tag>`.
+5. **Phase labels** use `phase-<N>`. Non-numeric suffixes break Ralph's build-doc lookup.
+6. **No redundant transitive dependencies**.
+7. **Ralph deterministic selection** — the Ralph loop skips `epic` and `feature` tickets, then sorts ready work tickets by feature number ascending, then task number ascending.
+
+<!-- BEGIN RALPH LOOP INTEGRATION v:{{ RALPH_VERSION }} -->
+## Ralph Wiggum Loop System
+
+This project uses the **Ralph Wiggum Loop System** for agentic development.
+
+### Quick Reference
+
+```bash
+# Background daemon wrapper
+bash scripts/ralph/run_ralph_loop.sh
+
+# Direct harness (single-shot)
+bash scripts/ralph/ralph_loop.sh --ticket=<id> --agent={{ AGENT_CMD }}
+
+# Validate current work
+bash scripts/ralph/ralph_validate.sh --tier=targeted
+
+# Check loop health
+bash scripts/ralph/ralph_health.sh --verbose
+```
+
+**Preflight guardrails:** `config/ralph_preflight.sh` gates ticket selection.
+It must output exactly `READY` to stdout; anything else skips the ticket.
+<!-- END RALPH LOOP INTEGRATION -->
+
+<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal -->
+## Beads Issue Tracker
+
+This project uses **bd (beads)** for issue tracking.
+
+### Quick Reference
+
+```bash
+bd ready              # Find available work
+bd show <id>          # View issue details
+bd update <id> --claim  # Claim work
+bd close <id>         # Complete work
+```
+
+### Rules
+
+- Use `bd` for ALL task tracking
+- Run `bd prime` for command reference
+- Use `bd remember <key>` for persistent notes
+
+## Session Completion
+
+**When ending a work session**, you MUST complete ALL steps below:
+
+1. **File issues for remaining work**
+2. **Run quality gates** (if code changed)
+3. **Commit all changes**: `git add -A && git commit -m "descriptive message"`
+4. **Update issue status**
+5. **PUSH TO REMOTE**: `git pull --rebase && bd dolt push && git push`
+6. **Verify**: `git status` MUST show "up to date with origin"
+<!-- END BEADS INTEGRATION -->

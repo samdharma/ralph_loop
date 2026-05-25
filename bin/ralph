@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# ralph — Ralph Wiggum Loop Build System CLI
+#
+# Usage:
+#   ralph init               Initialize a new project
+#   ralph status             Show project health dashboard
+#   ralph version            Show version
+#   ralph help               Show help
+
+set -euo pipefail
+
+RALPH_HOME="${RALPH_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+export RALPH_HOME
+
+case "${1:-}" in
+    init)
+        shift
+        exec python3 "${RALPH_HOME}/init.py" "$@"
+        ;;
+    status)
+        exec python3 "${RALPH_HOME}/init.py" --status
+        ;;
+    version|--version|-v)
+        echo "ralph v1.0.0"
+        ;;
+    help|--help|-h|"")
+        cat <<'EOF'
+╔══════════════════════════════════════════════════════════════╗
+║         Ralph Wiggum Loop Build System v1.0.0               ║
+║         "I'm helping!"                                      ║
+╚══════════════════════════════════════════════════════════════╝
+
+Commands:
+  ralph init       Initialize a new project with the Ralph build system
+  ralph status     Show project health dashboard
+  ralph version    Show version
+  ralph help       Show this help
+
+Project commands (inside an initialized project):
+  bash scripts/ralph/ralph_loop.sh      Run the agentic build loop
+  bash scripts/ralph/run_ralph_loop.sh  Run as background daemon
+  bash scripts/ralph/ralph_validate.sh  Run validation gate
+  bash scripts/ralph/ralph_health.sh    Check loop health
+  bash scripts/ralph/ralph_report.sh    Generate operational report
+
+Quick start:
+  ralph init                   # Answer a few questions
+  cd <your-project>
+  bash scripts/ralph/run_ralph_loop.sh  # Start building!
+EOF
+        ;;
+    *)
+        echo "ralph: unknown command '${1}'"
+        echo "Run 'ralph help' for usage."
+        exit 1
+        ;;
+esac

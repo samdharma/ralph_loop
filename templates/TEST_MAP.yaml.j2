@@ -1,0 +1,20 @@
+# {{ PROJECT_NAME }} — Test Map
+# Maps source files to their corresponding test files for targeted testing.
+# Used by detect_affected_tests.py when running --tier=targeted.
+#
+# Format:
+#   mappings:
+#     - source: path/to/source.py
+#       tests:
+#         - tests/path/to/test_source.py
+#   default_tests:
+#     - tests/unit/
+
+mappings:
+  # Add your source → test mappings here
+  # - source: src/{{ PROJECT_PACKAGE }}/main.py
+  #   tests:
+  #     - tests/unit/test_main.py
+
+default_tests:
+  - {{ TEST_DIR }}/
