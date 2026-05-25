@@ -1,0 +1,1180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ralph Wiggum Loop Build System — Documentation v1.0.0</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+/* ================================================================
+   GitHub Modern Dark Theme — Primer Design System Inspired
+   No bright backgrounds. Optimized for on-screen reading.
+   ================================================================ */
+
+:root {
+  --color-bg-default: #0d1117;
+  --color-bg-subtle: #161b22;
+  --color-bg-inset: #010409;
+  --color-bg-overlay: #21262d;
+  --color-bg-canvas: #0d1117;
+  --color-border-default: #30363d;
+  --color-border-muted: #21262d;
+  --color-fg-default: #e6edf3;
+  --color-fg-muted: #8b949e;
+  --color-fg-subtle: #6e7681;
+  --color-accent-fg: #58a6ff;
+  --color-accent-emphasis: #1f6feb;
+  --color-accent-muted: rgba(56,139,253,0.15);
+  --color-accent-subtle: rgba(56,139,253,0.10);
+  --color-success-fg: #3fb950;
+  --color-success-emphasis: #238636;
+  --color-success-muted: rgba(46,160,67,0.15);
+  --color-attention-fg: #d29922;
+  --color-attention-emphasis: #9e6a03;
+  --color-attention-muted: rgba(187,128,9,0.15);
+  --color-danger-fg: #f85149;
+  --color-danger-emphasis: #da3633;
+  --color-danger-muted: rgba(248,81,73,0.15);
+  --color-done-fg: #a371f7;
+  --color-done-emphasis: #8957e5;
+  --color-done-muted: rgba(163,113,247,0.15);
+  --color-neutral-muted: rgba(110,118,129,0.4);
+  --font-mono: 'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+  --font-sans: -apple-system,BlinkMacSystemFont,'Segoe UI','Noto Sans',Helvetica,Arial,sans-serif;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --shadow-resting: 0 0 0 1px rgba(255,255,255,0.04), 0 1px 3px rgba(0,0,0,0.3);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { font-size: 15px; scroll-behavior: smooth; scroll-padding-top: 80px; }
+body {
+  font-family: var(--font-sans);
+  background: var(--color-bg-canvas);
+  color: var(--color-fg-default);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Header */
+.site-header {
+  position: sticky; top: 0; z-index: 100;
+  background: rgba(13,17,23,0.92);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--color-border-default);
+  padding: 0 24px; height: 64px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.site-header .logo { font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 10px; }
+.site-header .logo .icon {
+  width: 32px; height: 32px; background: var(--color-accent-emphasis);
+  border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center;
+  font-size: 1rem; color: #fff; font-weight: 800;
+}
+.site-header .version { font-size: 0.75rem; color: var(--color-fg-muted); background: var(--color-bg-overlay); border: 1px solid var(--color-border-default); border-radius: 20px; padding: 2px 10px; }
+
+/* Layout */
+.app-layout { display: flex; max-width: 1400px; margin: 0 auto; min-height: calc(100vh - 64px); }
+
+/* Sidebar */
+.sidebar {
+  width: 260px; min-width: 260px; border-right: 1px solid var(--color-border-default);
+  background: var(--color-bg-subtle); padding: 24px 16px;
+  position: sticky; top: 64px; height: calc(100vh - 64px); overflow-y: auto;
+}
+.sidebar::-webkit-scrollbar { width: 6px; }
+.sidebar::-webkit-scrollbar-track { background: transparent; }
+.sidebar::-webkit-scrollbar-thumb { background: var(--color-border-default); border-radius: 3px; }
+.sidebar-section { margin-bottom: 20px; }
+.sidebar-section-title { font-size: 0.7rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--color-fg-muted); padding: 0 8px; margin-bottom: 8px; }
+.sidebar a { display: block; padding: 6px 8px; border-radius: var(--radius-sm); font-size: 0.85rem; color: var(--color-fg-muted); text-decoration: none; transition: all 0.12s; }
+.sidebar a:hover { color: var(--color-fg-default); background: var(--color-accent-muted); }
+.sidebar a.active { color: var(--color-accent-fg); background: var(--color-accent-subtle); font-weight: 500; }
+
+/* Main */
+.main-content { flex: 1; min-width: 0; padding: 40px 48px 80px; max-width: 900px; }
+
+/* Typography */
+h1 { font-size: 2rem; font-weight: 700; padding-bottom: 0.3em; border-bottom: 1px solid var(--color-border-default); margin-bottom: 16px; }
+h2 { font-size: 1.45rem; font-weight: 600; margin: 48px 0 16px; padding-bottom: 0.3em; border-bottom: 1px solid var(--color-border-muted); }
+h3 { font-size: 1.15rem; font-weight: 600; margin: 32px 0 12px; }
+h4 { font-size: 1rem; font-weight: 600; margin: 24px 0 8px; color: var(--color-fg-muted); }
+p { margin: 0 0 16px; }
+a { color: var(--color-accent-fg); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+code { font-family: var(--font-mono); font-size: 0.85em; background: var(--color-neutral-muted); border-radius: var(--radius-sm); padding: 0.15em 0.4em; color: #c9d1d9; }
+pre { background: var(--color-bg-inset); border: 1px solid var(--color-border-default); border-radius: var(--radius-md); padding: 16px; overflow-x: auto; margin: 0 0 16px; font-size: 0.82rem; line-height: 1.55; box-shadow: var(--shadow-resting); }
+pre code { background: none; padding: 0; font-size: inherit; color: #c9d1d9; }
+
+blockquote { border-left: 3px solid var(--color-accent-emphasis); padding: 8px 16px; margin: 0 0 16px; background: var(--color-accent-subtle); border-radius: 0 var(--radius-sm) var(--radius-sm) 0; color: var(--color-fg-muted); }
+
+/* Tables */
+.data-table-wrapper { overflow-x: auto; margin: 0 0 24px; border: 1px solid var(--color-border-default); border-radius: var(--radius-md); }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th { background: var(--color-bg-subtle); color: var(--color-fg-muted); font-weight: 600; text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--color-border-default); }
+td { padding: 10px 16px; border-bottom: 1px solid var(--color-border-muted); }
+tr:last-child td { border-bottom: none; }
+
+/* Cards */
+.card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin: 0 0 24px; }
+.card { background: var(--color-bg-subtle); border: 1px solid var(--color-border-default); border-radius: var(--radius-md); padding: 20px; transition: border-color 0.15s; }
+.card:hover { border-color: var(--color-fg-subtle); }
+.card h3 { margin: 0 0 8px; font-size: 1rem; }
+.card p { margin: 0; color: var(--color-fg-muted); font-size: 0.85rem; }
+.card .icon-circle { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; margin-bottom: 12px; font-size: 1.1rem; }
+.ic-blue { background: var(--color-accent-muted); color: var(--color-accent-fg); }
+.ic-green { background: var(--color-success-muted); color: var(--color-success-fg); }
+.ic-yellow { background: var(--color-attention-muted); color: var(--color-attention-fg); }
+.ic-purple { background: var(--color-done-muted); color: var(--color-done-fg); }
+.ic-red { background: var(--color-danger-muted); color: var(--color-danger-fg); }
+
+/* Badges */
+.badge { display: inline-block; font-size: 0.72rem; font-weight: 600; padding: 2px 8px; border-radius: 20px; }
+.badge-green { background: var(--color-success-muted); color: var(--color-success-fg); }
+.badge-blue { background: var(--color-accent-muted); color: var(--color-accent-fg); }
+.badge-yellow { background: var(--color-attention-muted); color: var(--color-attention-fg); }
+.badge-red { background: var(--color-danger-muted); color: var(--color-danger-fg); }
+.badge-purple { background: var(--color-done-muted); color: var(--color-done-fg); }
+
+/* Mermaid */
+.mermaid-wrapper { background: var(--color-bg-inset); border: 1px solid var(--color-border-default); border-radius: var(--radius-md); padding: 24px; margin: 0 0 24px; overflow-x: auto; text-align: center; box-shadow: var(--shadow-resting); }
+.mermaid-wrapper svg { max-width: 100%; }
+
+/* Steps */
+.steps { list-style: none; padding: 0; margin: 0 0 24px; }
+.steps li { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--color-border-muted); align-items: flex-start; }
+.steps li:last-child { border-bottom: none; }
+.steps .step-num { width: 28px; height: 28px; min-width: 28px; background: var(--color-accent-emphasis); color: #fff; font-weight: 700; font-size: 0.82rem; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+.steps .step-content { flex: 1; }
+.steps .step-content strong { display: block; margin-bottom: 2px; }
+
+/* Alerts */
+.alert { border-radius: var(--radius-md); padding: 12px 16px; margin: 0 0 16px; border: 1px solid; font-size: 0.88rem; }
+.alert-info { background: var(--color-accent-subtle); border-color: var(--color-accent-emphasis); color: var(--color-accent-fg); }
+.alert-success { background: var(--color-success-muted); border-color: var(--color-success-emphasis); color: var(--color-success-fg); }
+.alert-warning { background: var(--color-attention-muted); border-color: var(--color-attention-emphasis); color: var(--color-attention-fg); }
+.alert-danger { background: var(--color-danger-muted); border-color: var(--color-danger-emphasis); color: var(--color-danger-fg); }
+
+.section-divider { margin: 56px 0 32px; border: none; border-top: 2px solid var(--color-border-default); }
+
+/* Footer */
+.site-footer { border-top: 1px solid var(--color-border-default); padding: 24px 48px; color: var(--color-fg-muted); font-size: 0.8rem; max-width: 1400px; margin: 0 auto; }
+
+@media (max-width: 860px) { .sidebar { display: none; } .main-content { padding: 24px 20px 60px; } .card-grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="logo"><div class="icon">R</div> Ralph Wiggum Loop Build System</div>
+  <span class="version">v1.0.0</span>
+</header>
+
+<div class="app-layout">
+
+<nav class="sidebar">
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Overview</div>
+    <a href="#what-is-ralph">What is Ralph?</a>
+    <a href="#how-it-works">How It Works</a>
+    <a href="#architecture">Architecture</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Get Started</div>
+    <a href="#deployment">Deploy on New Computer</a>
+    <a href="#first-project">Your First Project</a>
+    <a href="#must-have-files">Must-Have Files</a>
+    <a href="#app-spec-files">App Spec Files</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Daily Use</div>
+    <a href="#daily-workflow">Daily Workflow</a>
+    <a href="#starting-building">Start Building</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Tickets</div>
+    <a href="#ticket-management">Ticket Management</a>
+    <a href="#ticket-naming">Naming Rules</a>
+    <a href="#ticket-patterns">Common Patterns</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Operations</div>
+    <a href="#monitoring">Monitoring</a>
+    <a href="#troubleshooting">Troubleshooting</a>
+    <a href="#stuck-recovery">Stuck Recovery &amp; Git Cleanup</a>
+    <a href="#git-scenarios">General Git Scenarios</a>
+  </div>
+  <div class="sidebar-section">
+    <div class="sidebar-section-title">Reference</div>
+    <a href="#config-reference">Configuration</a>
+    <a href="#faq">FAQ</a>
+  </div>
+</nav>
+
+<main class="main-content">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="what-is-ralph">What is Ralph?</h1>
+
+<div class="alert alert-info">
+  <strong>"I'm helping!"</strong> — Ralph is an <strong>AI-agent-powered continuous build loop</strong>
+  that turns your beads ticket queue into working, tested, committed code — one iteration at a time.
+</div>
+
+<p>You write the tickets. You define the rules. <strong>Ralph builds the code.</strong></p>
+
+<div class="card-grid">
+  <div class="card"><div class="icon-circle ic-blue">&#x1F504;</div><h3>Automatic Loop</h3><p>Pulls the next ready ticket, invokes your AI agent, validates output, commits. Repeats 24/7.</p></div>
+  <div class="card"><div class="icon-circle ic-green">&#x1F6E1;</div><h3>Guardrails Built-In</h3><p>Preflight checks skip blocked/wrong-time tickets. Validation gate catches broken code before commit.</p></div>
+  <div class="card"><div class="icon-circle ic-purple">&#x1F4CA;</div><h3>Full Observability</h3><p>JSONL metrics, health checks, daily/weekly reports. Know exactly what Ralph built and when.</p></div>
+  <div class="card"><div class="icon-circle ic-yellow">&#x1F50C;</div><h3>Language Agnostic</h3><p>Python, Node, Go, Rust, or custom. One <code>ralph init</code> scaffolds the right config for your stack.</p></div>
+</div>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="how-it-works">How It Works</h1>
+
+<p>Ralph runs a continuous loop. Each iteration has 6 steps:</p>
+
+<div class="mermaid-wrapper"><div class="mermaid">
+graph LR
+    A["1. bd ready<br>Pull queue"] --> B["2. PREFLIGHT<br>Guardrails"]
+    B --> C["3. PROMPT<br>Assemble context"]
+    C --> D["4. AGENT<br>kimi or pi"]
+    D --> E["5. VALIDATE<br>Tests + lint"]
+    E --> F["6. COMMIT<br>and Repeat"]
+
+    style A fill:#1f2937,stroke:#388bfd,color:#c9d1d9
+    style B fill:#1f2937,stroke:#d29922,color:#c9d1d9
+    style C fill:#1f2937,stroke:#a371f7,color:#c9d1d9
+    style D fill:#1f2937,stroke:#3fb950,color:#c9d1d9
+    style E fill:#1f2937,stroke:#f85149,color:#c9d1d9
+    style F fill:#1f2937,stroke:#58a6ff,color:#c9d1d9
+</div></div>
+
+<ol class="steps">
+  <li><span class="step-num">1</span><span class="step-content"><strong>Pull</strong>Queries <code>bd ready --json</code> for unblocked open tickets. Skips epics/features (containers). Sorts deterministically: feature ascending, then task ascending.</span></li>
+  <li><span class="step-num">2</span><span class="step-content"><strong>Preflight</strong>Iterates candidates through <code>config/ralph_preflight.sh</code>. First ticket that outputs <code>READY</code> gets selected. Others are skipped with a reason.</span></li>
+  <li><span class="step-num">3</span><span class="step-content"><strong>Assemble Prompt</strong>Builds an adaptive prompt: base (<code>PROMPT.md</code>) + type-specific guidance + build phase reference doc + task context.</span></li>
+  <li><span class="step-num">4</span><span class="step-content"><strong>Invoke Agent</strong>Calls <code>kimi --print -p "..."</code> or <code>pi --print "..."</code>. The agent implements the task. Checkpoint saved before invocation for crash recovery.</span></li>
+  <li><span class="step-num">5</span><span class="step-content"><strong>Validate</strong>Runs pytest (tiered: targeted by default), black, isort, flake8, mypy — only on changed files.</span></li>
+  <li><span class="step-num">6</span><span class="step-content"><strong>Commit & Repeat</strong>If worktree is clean, clears checkpoint. Logs metrics. Sleeps 5 seconds. Loops back to step 1.</span></li>
+</ol>
+
+<h3>Single Iteration — Detailed Sequence</h3>
+
+<div class="mermaid-wrapper"><div class="mermaid">
+sequenceDiagram
+    participant Loop as ralph_loop.sh
+    participant Beads as beads (bd)
+    participant PF as ralph_preflight.sh
+    participant Agent as AI Agent
+    participant Val as ralph_validate.sh
+    participant Git as git
+
+    Loop->>Beads: bd ready --json
+    Beads-->>Loop: [ticket1, ticket2, ...]
+
+    Loop->>Loop: Deterministic sort
+
+    loop For each candidate
+        Loop->>PF: Check labels + type
+        PF-->>Loop: READY or BLOCKED
+        alt READY
+            Loop->>Loop: Select this ticket
+        end
+    end
+
+    Loop->>Beads: bd update --claim + in_progress
+    Loop->>Loop: Write checkpoint
+    Loop->>Loop: Assemble adaptive prompt
+    Loop->>Agent: Invoke with prompt
+    Agent-->>Loop: Done
+    Loop->>Val: bash ralph_validate.sh --tier=targeted
+
+    alt Pass and clean
+        Loop->>Loop: Clear checkpoint
+    else Pass and dirty or Fail
+        Loop->>Loop: Retain checkpoint
+    end
+
+    Loop->>Loop: Log metrics, sleep 5s
+</div></div>
+
+<h3>What Ralph Does NOT Do</h3>
+
+<table>
+  <tr><td style="color:var(--color-danger-fg)">&#x274C;</td><td>Write your tickets — you define them in beads</td></tr>
+  <tr><td style="color:var(--color-danger-fg)">&#x274C;</td><td>Design your architecture — you define that in <code>AGENTS.md</code></td></tr>
+  <tr><td style="color:var(--color-danger-fg)">&#x274C;</td><td>Replace you as the developer — it replaces the <em>mechanical</em> steps</td></tr>
+  <tr><td style="color:var(--color-danger-fg)">&#x274C;</td><td>Run in production — it is a development tool</td></tr>
+</table>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="architecture">Architecture</h1>
+
+<h3>System Overview</h3>
+
+<div class="mermaid-wrapper"><div class="mermaid">
+graph TB
+    subgraph S1 ["User Computer"]
+        CLI["ralph CLI"]
+        WIZ["init.py Wizard"]
+    end
+
+    subgraph S2 ["Ralph Home (~/.ralph)"]
+        CORE["core/ - 12 scripts"]
+        TMPL["templates/ - 11 files"]
+    end
+
+    subgraph S3 ["User Project"]
+        subgraph S3A ["scripts/ralph/"]
+            LOOP["ralph_loop.sh (Harness)"]
+            DAEMON["run_ralph_loop.sh (Daemon)"]
+            PF2["ralph_preflight.sh (Guard)"]
+            VAL2["ralph_validate.sh (Gate)"]
+            HLTH["ralph_health.sh (Monitor)"]
+            MET2["ralph_metrics.sh (Logger)"]
+        end
+        subgraph S3B ["Config"]
+            AGENTS["AGENTS.md"]
+            PROMPT["PROMPT.md"]
+            PFC["config/ralph_preflight.sh"]
+        end
+        BD["beads (bd)"]
+        GIT2["git"]
+        KIMI["kimi CLI"]
+        PI2["pi CLI"]
+    end
+
+    CLI --> WIZ
+    WIZ -->|copies| CORE
+    WIZ -->|renders| TMPL
+    CORE --> LOOP
+    TMPL --> AGENTS
+    TMPL --> PROMPT
+    LOOP -->|bd ready| BD
+    LOOP -->|preflight| PF2
+    PF2 -->|sources| PFC
+    LOOP -->|invokes| KIMI
+    LOOP -->|invokes| PI2
+    LOOP -->|validates| VAL2
+    LOOP -->|logs| MET2
+    LOOP -->|commits| GIT2
+    DAEMON -->|wraps| LOOP
+
+    style LOOP fill:#1f2937,stroke:#a371f7,color:#e6edf3
+    style DAEMON fill:#1f2937,stroke:#388bfd,color:#e6edf3
+    style PF2 fill:#1f2937,stroke:#d29922,color:#e6edf3
+    style VAL2 fill:#1f2937,stroke:#3fb950,color:#e6edf3
+</div></div>
+
+<h3>Component Summary</h3>
+
+<div class="data-table-wrapper"><table>
+  <thead><tr><th>Component</th><th>File</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Loop Harness</strong></td><td><code>ralph_loop.sh</code></td><td>Ticket selection, prompt assembly, agent invocation, checkpoint/resume</td></tr>
+    <tr><td><strong>Daemon</strong></td><td><code>run_ralph_loop.sh</code></td><td>PID-file singleton wrapper, nohup backgrounding</td></tr>
+    <tr><td><strong>Preflight</strong></td><td><code>ralph_preflight.sh</code></td><td>Two-layer guardrails: core + project-specific config</td></tr>
+    <tr><td><strong>Validation Gate</strong></td><td><code>ralph_validate.sh</code></td><td>5-step quality check: pytest, black, isort, flake8, mypy</td></tr>
+    <tr><td><strong>Health Check</strong></td><td><code>ralph_health.sh</code></td><td>5-point health: metrics, checkpoint, beads DB, git, sync</td></tr>
+    <tr><td><strong>Metrics</strong></td><td><code>ralph_metrics.sh</code></td><td>JSONL event logger</td></tr>
+    <tr><td><strong>Metrics Viewer</strong></td><td><code>ralph_metrics_viewer.py</code></td><td>Text/HTML analytics from metrics JSONL</td></tr>
+    <tr><td><strong>Report</strong></td><td><code>ralph_report.sh/.py</code></td><td>Daily/weekly operational reports</td></tr>
+    <tr><td><strong>Spec Checker</strong></td><td><code>ralph_check_specs.py</code></td><td>SPEC.md verification runner</td></tr>
+    <tr><td><strong>Performance Gate</strong></td><td><code>ralph_performance_check.sh</code></td><td>Performance regression gate</td></tr>
+    <tr><td><strong>Test Mapper</strong></td><td><code>detect_affected_tests.py</code></td><td>Git diff to affected test paths via TEST_MAP.yaml</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Validation Gate: 5-Step Pipeline</h3>
+
+<div class="mermaid-wrapper"><div class="mermaid">
+graph LR
+    A["Changed .py files"] --> B["1. pytest (tiered)"]
+    B --> C["2. black --check"]
+    C --> D["3. isort --check-only"]
+    D --> E["4. flake8"]
+    E --> F["5. mypy"]
+    F --> G{PASS / FAIL}
+
+    style A fill:#1f2937,stroke:#6e7681,color:#c9d1d9
+    style B fill:#1f2937,stroke:#3fb950,color:#c9d1d9
+    style C fill:#1f2937,stroke:#388bfd,color:#c9d1d9
+    style D fill:#1f2937,stroke:#a371f7,color:#c9d1d9
+    style E fill:#1f2937,stroke:#d29922,color:#c9d1d9
+    style F fill:#1f2937,stroke:#f85149,color:#c9d1d9
+    style G fill:#1f2937,stroke:#58a6ff,color:#e6edf3
+</div></div>
+
+<div class="data-table-wrapper"><table>
+  <thead><tr><th>Tier</th><th>Scope</th><th>Use Case</th></tr></thead>
+  <tbody>
+    <tr><td><code>smoke</code></td><td>Unit tests, fail-fast</td><td>Fastest feedback</td></tr>
+    <tr><td><code>targeted</code></td><td>Only affected tests (via TEST_MAP.yaml)</td><td><span class="badge badge-green">Default in loop</span></td></tr>
+    <tr><td><code>integration</code></td><td>Integration marker tests</td><td>Pre-merge check</td></tr>
+    <tr><td><code>full</code></td><td>All tests except e2e/perf</td><td>Operator only</td></tr>
+    <tr><td><code>e2e</code></td><td>End-to-end tests</td><td>Blocked in loop*</td></tr>
+    <tr><td><code>performance</code></td><td>Performance benchmarks</td><td>Blocked in loop*</td></tr>
+  </tbody>
+</table></div>
+<p style="font-size:0.85rem;color:var(--color-fg-muted)">* Set <code>RALPH_ALLOW_E2E=1</code> to override.</p>
+
+<h3>Data Flow: ralph init Template Rendering</h3>
+
+<div class="mermaid-wrapper"><div class="mermaid">
+graph TD
+    Q["User answers 7 Q and A prompts"] --> VARS["Variables dict (30+ values)"]
+    VARS --> T1["AGENTS.md.j2"]
+    VARS --> T2["PROMPT.md.j2"]
+    VARS --> T3["PROGRESS.md.j2"]
+    VARS --> T4["ralph_preflight.sh.j2"]
+    VARS --> T5["TEST_MAP.yaml.j2"]
+    VARS --> T6["gitignore.j2"]
+    VARS --> T7["prompts (5 md files)"]
+
+    T1 -->|render| O1["AGENTS.md"]
+    T2 -->|render| O2["docs/agent/PROMPT.md"]
+    T3 -->|render| O3["docs/agent/PROGRESS.md"]
+    T4 -->|render| O4["config/ralph_preflight.sh"]
+    T5 -->|render| O5["config/TEST_MAP.yaml"]
+    T6 -->|render| O6[".gitignore"]
+    T7 -->|copy| O7["docs/agent/prompts/"]
+
+    CORE2["core/ scripts"] -->|copy| SCRIPTS["scripts/ralph/"]
+
+    style Q fill:#1f2937,stroke:#a371f7,color:#e6edf3
+    style VARS fill:#1f2937,stroke:#58a6ff,color:#e6edf3
+</div></div>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="deployment">Deploy on a New Computer</h1>
+
+<h3>High-Level Steps</h3>
+
+<div class="mermaid-wrapper"><div class="mermaid">
+graph LR
+    A["1. Install Prerequisites"] --> B["2. Clone Ralph to ~/.ralph"]
+    B --> C["3. Run install.sh"]
+    C --> D["4. Verify ralph version"]
+    D --> E["5. ralph init first project"]
+    E --> F["6. Start building"]
+
+    style A fill:#1f2937,stroke:#6e7681,color:#c9d1d9
+    style B fill:#1f2937,stroke:#388bfd,color:#c9d1d9
+    style C fill:#1f2937,stroke:#388bfd,color:#c9d1d9
+    style D fill:#1f2937,stroke:#3fb950,color:#c9d1d9
+    style E fill:#1f2937,stroke:#a371f7,color:#c9d1d9
+    style F fill:#1f2937,stroke:#3fb950,color:#c9d1d9
+</div></div>
+
+<h3>Step-by-Step Instructions</h3>
+
+<h4>Step 1: Prerequisites</h4>
+
+<div class="data-table-wrapper"><table>
+  <thead><tr><th>Tool</th><th>Check</th><th>Install (macOS)</th></tr></thead>
+  <tbody>
+    <tr><td><strong>git</strong></td><td><code>git --version</code></td><td><code>brew install git</code></td></tr>
+    <tr><td><strong>Python 3.10+</strong></td><td><code>python3 --version</code></td><td><code>brew install python@3.12</code></td></tr>
+    <tr><td><strong>beads (bd)</strong></td><td><code>bd --version</code></td><td>See beads docs</td></tr>
+    <tr><td><strong>kimi or pi</strong></td><td><code>which kimi</code> / <code>which pi</code></td><td>Follow agent install guide</td></tr>
+  </tbody>
+</table></div>
+
+<h4>Step 2: Clone Ralph</h4>
+<pre><code>git clone https://github.com/samdharma/Ralph_loop.git ~/.ralph</code></pre>
+
+<h4>Step 3: Install</h4>
+<pre><code>bash ~/.ralph/scripts/install.sh</code></pre>
+<p>Creates a symlink at <code>/usr/local/bin/ralph</code> and adds <code>RALPH_HOME</code> to your shell profile.</p>
+
+<h4>Step 4: Make Available System-Wide</h4>
+<pre><code># Restart your shell or source your profile
+source ~/.zshrc    # if using zsh
+# OR
+source ~/.bashrc   # if using bash
+
+# If ~/.local/bin was used, add to PATH
+export PATH="$HOME/.local/bin:$PATH"</code></pre>
+
+<h4>Step 5: Verify Installation</h4>
+<pre><code>ralph version        # shows: ralph v1.0.0
+echo $RALPH_HOME     # shows: /Users/you/.ralph
+which ralph          # shows: /usr/local/bin/ralph</code></pre>
+
+<h4>Step 6: Initialize First Project</h4>
+<pre><code>ralph init</code></pre>
+<div class="alert alert-info"><strong>What gets scaffolded:</strong> Git repo, beads DB, 12 Ralph scripts, AGENTS.md, PROMPT.md, preflight config, TEST_MAP.yaml, .gitignore, prompt extensions, test directories, source directories.</div>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="first-project">Your First Project</h1>
+
+<h3>After ralph init</h3>
+<p>Your project is scaffolded but <strong>not ready to build</strong>. You must customize 3 files:</p>
+
+<h4 id="must-have-files">Must-Have Files (Mandatory)</h4>
+
+<div class="mermaid-wrapper"><div class="mermaid">
+graph TD
+    subgraph REQ ["Required - Ralph will not run without these"]
+        R1["docs/agent/PROMPT.md - Agent prompt (loop checks this)"]
+        R2["AGENTS.md - Project rules (agent reads first)"]
+        R3["config/ralph_preflight.sh - Guardrail rules"]
+        R4[".gitignore - Must exclude .ralph_ files"]
+    end
+
+    subgraph REC ["Strongly Recommended"]
+        R5["config/TEST_MAP.yaml - Source to test mapping"]
+        R6["docs/reference/ - Architecture docs"]
+        R7[".env - Secrets and config"]
+    end
+
+    style R1 fill:#1f2937,stroke:#f85149,color:#e6edf3
+    style R2 fill:#1f2937,stroke:#f85149,color:#e6edf3
+    style R3 fill:#1f2937,stroke:#f85149,color:#e6edf3
+    style R4 fill:#1f2937,stroke:#f85149,color:#e6edf3
+</div></div>
+
+<div class="data-table-wrapper"><table>
+  <thead><tr><th>File</th><th>Why Required</th><th>Failure if Missing</th></tr></thead>
+  <tbody>
+    <tr><td><code>docs/agent/PROMPT.md</code></td><td>Fed to agent every iteration</td><td>Loop exits with error</td></tr>
+    <tr><td><code>AGENTS.md</code></td><td>Agent reads on iteration start</td><td>Agent lacks project context</td></tr>
+    <tr><td><code>config/ralph_preflight.sh</code></td><td>Sourced by preflight step</td><td>Uses defaults (skips epics/features only)</td></tr>
+    <tr><td><code>.gitignore</code></td><td>Must exclude .ralph_ runtime files</td><td>Checkpoint/PID could be committed</td></tr>
+  </tbody>
+</table></div>
+
+<h4 id="app-spec-files">Application Spec Files</h4>
+<p>Project-specific files YOU create to define what the AI agent should build:</p>
+
+<div class="data-table-wrapper"><table>
+  <thead><tr><th>File</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td><code>docs/reference/ARCHITECTURE.md</code></td><td>Single source of truth: tech stack, component diagram, data model, design decisions</td></tr>
+    <tr><td><code>docs/reference/BUILD_PHASE_1.md</code></td><td>Pre-researched API types, patterns, test specs for Phase 1</td></tr>
+    <tr><td><code>docs/reference/BUILD_PHASE_2.md</code></td><td>Same for Phase 2 — auto-injected when ticket has phase-2 label</td></tr>
+    <tr><td><code>docs/agent/TICKET_PLAN.md</code></td><td>Ticket dependency tree — agent reads at session start</td></tr>
+    <tr><td><code>.env</code></td><td>Secrets and configuration (never committed)</td></tr>
+    <tr><td><code>pyproject.toml</code></td><td>Dependencies and tool configs (Python)</td></tr>
+  </tbody>
+</table></div>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="daily-workflow">Daily Workflow</h1>
+
+<h3 id="starting-building">Start Building</h3>
+
+<div class="mermaid-wrapper"><div class="mermaid">
+graph TD
+    MORNING["Morning"] --> START["Start Ralph daemon"]
+    START --> CHECK["Check ralph status"]
+    CHECK --> DAY["Let Ralph run throughout the day"]
+    DAY --> EVENING["Evening"]
+    EVENING --> REVIEW["Review git log and closed tickets"]
+    REVIEW --> REPORT["Generate daily report"]
+    REPORT --> STOP{"More tickets?"}
+    STOP -->|Yes| START
+    STOP -->|No| KILL["Stop Ralph daemon"]
+
+    style MORNING fill:#1f2937,stroke:#d29922,color:#e6edf3
+    style EVENING fill:#1f2937,stroke:#a371f7,color:#e6edf3
+</div></div>
+
+<h4>Morning — Start</h4>
+<pre><code>cd ~/Dev/my-project
+git pull --rebase
+bd dolt pull
+bd ready
+bash scripts/ralph/run_ralph_loop.sh</code></pre>
+
+<h4>During the Day — Monitor</h4>
+<pre><code>ralph status
+tail -f logs/ralph_loop.log
+bd list
+git log --oneline -10</code></pre>
+
+<h4>Evening — Review and Stop</h4>
+<pre><code>cat .ralph_loop.pid | xargs kill
+git log --oneline --since="1 day ago"
+bd list --status closed
+bash scripts/ralph/ralph_report.sh --daily
+git push && bd dolt push</code></pre>
+
+<h3>Run Modes</h3>
+
+<div class="data-table-wrapper"><table>
+  <thead><tr><th>Mode</th><th>Command</th><th>When to Use</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Background daemon</strong></td><td><code>bash scripts/ralph/run_ralph_loop.sh</code></td><td>Normal daily use. One instance only.</td></tr>
+    <tr><td><strong>Foreground single ticket</strong></td><td><code>bash scripts/ralph/ralph_loop.sh --ticket=&lt;id&gt; --agent=kimi</code></td><td>Testing, manual intervention.</td></tr>
+    <tr><td><strong>Tag-filtered</strong></td><td><code>bash scripts/ralph/run_ralph_loop.sh --tag=phase-1</code></td><td>Only build a specific phase.</td></tr>
+    <tr><td><strong>Force mode</strong></td><td><code>... --force</code></td><td>Skip dirty-worktree check (risky).</td></tr>
+  </tbody>
+</table></div>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="ticket-management">Ticket Management</h1>
+
+<h3 id="ticket-naming">Naming Rules</h3>
+
+<div class="alert alert-info"><strong>Format:</strong> <code>&lt;PROJECT-SLUG&gt;.&lt;FEATURE-NUMBER&gt;.&lt;TASK-NUMBER&gt;</code></div>
+
+<div class="data-table-wrapper"><table>
+  <thead><tr><th>ID</th><th>Meaning</th><th>Sort Order</th></tr></thead>
+  <tbody>
+    <tr><td><code>mybot.1.1</code></td><td>Feature 1, Task 1</td><td><span class="badge badge-green">1st</span></td></tr>
+    <tr><td><code>mybot.1.2</code></td><td>Feature 1, Task 2</td><td>2nd</td></tr>
+    <tr><td><code>mybot.1.3</code></td><td>Feature 1, EXIT task</td><td>3rd (blocks next feature)</td></tr>
+    <tr><td><code>mybot.2.1</code></td><td>Feature 2, Task 1</td><td>4th</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Ticket Hierarchy</h3>
+
+<div class="mermaid-wrapper"><div class="mermaid">
+graph TD
+    EPIC["EPIC - type: epic - labels: epic, meta-grouping - NEVER CLOSED"]
+    FEAT1["FEATURE - type: feature - labels: phase-1, meta-grouping - NEVER CLOSED"]
+    FEAT2["FEATURE - type: feature - labels: phase-2, meta-grouping - NEVER CLOSED"]
+    T1["WORK: 1.1 - type: task - labels: phase-1"]
+    T2["WORK: 1.2 - type: task - labels: phase-1"]
+    EXIT1["EXIT: 1.3 - type: task - labels: exit, phase-1"]
+    T3["WORK: 2.1 - type: task - labels: phase-2"]
+
+    EPIC --> FEAT1
+    EPIC --> FEAT2
+    FEAT1 --> T1
+    FEAT1 --> T2
+    FEAT1 --> EXIT1
+    T1 --> EXIT1
+    T2 --> EXIT1
+    EXIT1 -.->|blocks| T3
+    FEAT2 --> T3
+
+    style EPIC fill:#1f2937,stroke:#a371f7,color:#e6edf3
+    style FEAT1 fill:#1f2937,stroke:#a371f7,color:#e6edf3
+    style FEAT2 fill:#1f2937,stroke:#a371f7,color:#e6edf3
+    style EXIT1 fill:#1f2937,stroke:#d29922,color:#e6edf3
+</div></div>
+
+<h3>Label Rules</h3>
+
+<div class="data-table-wrapper"><table>
+  <thead><tr><th>Ticket Type</th><th>Allowed Labels</th><th>Example</th></tr></thead>
+  <tbody>
+    <tr><td><strong>EPIC</strong></td><td><code>epic</code>, <code>meta-grouping</code></td><td><code>epic,meta-grouping</code></td></tr>
+    <tr><td><strong>FEATURE</strong></td><td><code>&lt;phase-tag&gt;</code>, <code>meta-grouping</code></td><td><code>phase-1,meta-grouping</code></td></tr>
+    <tr><td><strong>WORK</strong> (task/bug/test/docs)</td><td><code>&lt;phase-tag&gt;</code> only</td><td><code>phase-1</code></td></tr>
+    <tr><td><strong>EXIT</strong></td><td><code>exit</code>, <code>&lt;phase-tag&gt;</code></td><td><code>exit,phase-1</code></td></tr>
+  </tbody>
+</table></div>
+
+<h3>Beads Quick Reference</h3>
+<pre><code># Create tickets
+bd new "P1: Implement data model" --type task --labels "phase-1"
+bd new "[EXIT] P1: Integration tests" --type task --labels "exit,phase-1"
+
+# Dependencies
+bd dep add &lt;child-id&gt; &lt;parent-id&gt;
+bd dep tree &lt;id&gt;
+
+# Queue
+bd ready
+bd ready --label phase-1
+bd ready --json
+
+# Status management
+bd update &lt;id&gt; --claim
+bd update &lt;id&gt; --status in_progress
+bd update &lt;id&gt; --status closed --notes="All tests pass"
+bd update &lt;id&gt; --status blocked --notes="Waiting for API key"
+
+# Persistent notes across sessions
+bd remember checkpoint "Last: phase-1 EXIT done"
+bd recall checkpoint</code></pre>
+
+<h3 id="ticket-patterns">Common Ticket Patterns</h3>
+
+<h4>Sequential Build Phase</h4>
+<pre><code>phase-1, meta-grouping (FEATURE)
+  phase-1 (TASK) mybot.1.1  -- First task
+  phase-1 (TASK) mybot.1.2  -- Depends on 1.1
+  phase-1 (TASK) mybot.1.3  -- Depends on 1.2
+  exit, phase-1 (TASK) mybot.1.4  -- EXIT: depends on 1.1,1.2,1.3
+                                    Blocks mybot.2.1</code></pre>
+
+<h4>Parallel Work Within a Phase</h4>
+<pre><code>phase-1, meta-grouping (FEATURE)
+  phase-1 (TASK) mybot.1.1  -- No deps (parallel with 1.2)
+  phase-1 (TASK) mybot.1.2  -- No deps (parallel with 1.1)
+  phase-1 (TASK) mybot.1.3  -- Depends on 1.1 AND 1.2 (merge)
+  exit, phase-1 (TASK) mybot.1.4  -- EXIT: depends on 1.3</code></pre>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="monitoring">Monitoring</h1>
+
+<h3>Real-Time</h3>
+<pre><code># Live loop log
+tail -f logs/ralph_loop.log
+
+# Filter for key events
+tail -f logs/ralph_loop.log | grep -E "Iteration|GATE|ERROR"
+
+# Live metrics
+tail -f logs/ralph_metrics.jsonl | python3 -m json.tool</code></pre>
+
+<h3>Dashboard</h3>
+<pre><code>ralph status</code></pre>
+<p>Shows: Ralph loop status (RUNNING/IDLE/STALE), checkpoint age, metrics (iterations today, pass rate), beads queue breakdown, git branch/dirty status, and health check summary.</p>
+
+<h3>Periodic Health Check (crontab)</h3>
+<pre><code># Run hourly
+0 * * * * cd /path/to/project && bash scripts/ralph/ralph_health.sh >> logs/health.log 2>&1</code></pre>
+
+<h3>Metrics Analytics</h3>
+<pre><code># Text summary
+python3 scripts/ralph/ralph_metrics_viewer.py
+
+# HTML report
+python3 scripts/ralph/ralph_metrics_viewer.py --output html --save /tmp/report.html
+
+# Daily report
+bash scripts/ralph/ralph_report.sh --daily
+
+# Weekly report
+bash scripts/ralph/ralph_report.sh --weekly</code></pre>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="troubleshooting">Troubleshooting</h1>
+
+<h3>Quick Diagnostic</h3>
+<pre><code>bash scripts/ralph/ralph_health.sh --verbose</code></pre>
+
+<h3>Scenario 1: Ralph Will Not Start</h3>
+
+<div class="mermaid-wrapper"><div class="mermaid">
+graph TD
+    A["Ralph will not start"] --> B{"PROMPT.md exists?"}
+    B -->|No| B1["Create docs/agent/PROMPT.md or run ralph init"]
+    B -->|Yes| C{"Agent in PATH?"}
+    C -->|No| C1["Install kimi or pi"]
+    C -->|Yes| D{"beads installed?"}
+    D -->|No| D1["Install beads (bd --version to check)"]
+    D -->|Yes| E{"Dirty worktree?"}
+    E -->|Yes| E1["git stash or commit, or use --force"]
+    E -->|No| F["Check logs/ralph_loop.log for details"]
+    style A fill:#1f2937,stroke:#f85149,color:#e6edf3
+</div></div>
+
+<h3>Scenario 2: Loop is Stuck</h3>
+<pre><code># Check if running
+cat .ralph_loop.pid
+ps -p $(cat .ralph_loop.pid)
+
+# Kill stuck process
+kill $(cat .ralph_loop.pid)
+
+# Clear stale state
+rm -f .ralph_loop.pid .ralph_checkpoint.json
+
+# Restart
+bash scripts/ralph/run_ralph_loop.sh</code></pre>
+
+<h3>Scenario 3: Agent Keeps Failing Validation</h3>
+<pre><code># Check what is failing
+bash scripts/ralph/ralph_validate.sh --tier=targeted
+
+# Fix manually if lint issue
+black src/ tests/
+isort src/ tests/
+
+# Block the ticket and move on
+bd update &lt;id&gt; --status blocked --notes="Needs manual intervention"
+rm -f .ralph_checkpoint.json
+bash scripts/ralph/run_ralph_loop.sh</code></pre>
+
+<h3>Scenario 4: Preflight Blocking All Tickets</h3>
+<pre><code># Test a ticket manually
+bash scripts/ralph/ralph_preflight.sh "phase-1" "task"
+# Should output: READY
+# If BLOCKED, check config/ralph_preflight.sh</code></pre>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="stuck-recovery">Stuck Session Recovery and Git Cleanup</h1>
+
+<div class="alert alert-warning"><strong>When Ralph gets stuck, follow these procedures in order.</strong> Always verify git status between steps.</div>
+
+<h3>Quick Recovery — Loop Is Hung</h3>
+
+<pre><code># Step 1: Check what is running
+cat .ralph_loop.pid 2>/dev/null && echo "PID exists" || echo "No PID file"
+ps aux | grep ralph_loop
+
+# Step 2: Kill the loop
+kill $(cat .ralph_loop.pid 2>/dev/null) 2>/dev/null || true
+sleep 2
+
+# Step 3: Force kill if still alive
+kill -9 $(cat .ralph_loop.pid 2>/dev/null) 2>/dev/null || true
+
+# Step 4: Clean up runtime files
+rm -f .ralph_loop.pid
+rm -f .ralph_checkpoint.json
+
+# Step 5: Verify git is clean
+git status
+# Should show: nothing to commit, working tree clean</code></pre>
+
+<h3>Full Reset — Agent Left Dirty Worktree</h3>
+
+<div class="alert alert-danger"><strong>WARNING:</strong> This discards ALL uncommitted changes. Use only when you are sure.</div>
+
+<pre><code># Step 1: Kill everything
+kill -9 $(cat .ralph_loop.pid 2>/dev/null) 2>/dev/null || true
+rm -f .ralph_loop.pid .ralph_checkpoint.json
+
+# Step 2: See what is dirty
+git status
+git diff --stat
+
+# Step 3: If you want to KEEP any changes, stash them
+git stash save "ralph-recovery-$(date +%Y%m%d-%H%M%S)"
+
+# Step 4: Hard reset to last clean commit
+git checkout -- .
+git clean -fd
+
+# Step 5: Verify clean
+git status
+# Should show: nothing to commit, working tree clean
+
+# Step 6: Re-open in-progress tickets
+bd list --status in_progress --json | python3 -c "
+import json, sys, subprocess
+try:
+    tickets = json.load(sys.stdin)
+    for t in tickets if isinstance(tickets, list) else []:
+        tid = t.get('id','')
+        if tid:
+            subprocess.run(['bd','update',tid,'--status','open'])
+except: pass
+"
+
+# Step 7: Restart
+bash scripts/ralph/run_ralph_loop.sh</code></pre>
+
+<h3>Recovering Lost Work from Checkpoint</h3>
+
+<p>If Ralph rolled back work and you want to recover it:</p>
+
+<pre><code># See what commits exist (including rolled-back ones)
+git reflog
+
+# Find the commit hash of lost work
+git reflog | head -20
+
+# Recover a specific commit
+git cherry-pick &lt;commit-hash&gt;
+
+# Or create a branch from the lost commit to inspect
+git branch recovery-branch &lt;commit-hash&gt;
+git checkout recovery-branch
+# Inspect the code, then
+git checkout main
+git cherry-pick &lt;commit-hash&gt;  # if you want to keep it</code></pre>
+
+<h3>Cleaning Up After Multiple Failed Iterations</h3>
+
+<pre><code># Check how many commits Ralph made today
+git log --oneline --since="today" --author="$(git config user.name)"
+
+# Squash many small Ralph commits into one
+# (Use with caution — rewrites history)
+git rebase -i HEAD~10
+# In the editor: keep first as 'pick', change rest to 'squash'
+
+# Or just reset to a known good point and recommit
+git reset --soft HEAD~5    # Undo last 5 commits, keep changes staged
+git commit -m "Batch: Phase 1 work from Ralph loop"
+
+# Clean up stale branches
+git branch --merged | grep -v "main\|master" | xargs git branch -d 2>/dev/null || true
+
+# Clean up remote tracking
+git remote prune origin</code></pre>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="git-scenarios">General Git Workflow Scenarios</h1>
+
+<h3>Scenario: You Want to Commit Ralph's Work and Push</h3>
+<pre><code># 1. Stop the loop temporarily
+cat .ralph_loop.pid | xargs kill
+
+# 2. Review what Ralph did
+git status
+git diff --stat
+git log --oneline -5
+
+# 3. If everything looks good, push
+git push
+
+# 4. Sync beads state
+bd dolt push
+
+# 5. Restart the loop
+bash scripts/ralph/run_ralph_loop.sh</code></pre>
+
+<h3>Scenario: You Need to Pull Remote Changes While Ralph Is Running</h3>
+<pre><code># 1. Stop the loop
+cat .ralph_loop.pid | xargs kill
+rm -f .ralph_loop.pid
+
+# 2. Stash any uncommitted Ralph work
+git stash
+
+# 3. Pull remote changes
+git pull --rebase
+bd dolt pull
+
+# 4. Restore stashed work
+git stash pop
+
+# 5. Restart
+bash scripts/ralph/run_ralph_loop.sh</code></pre>
+
+<h3>Scenario: Ralph Created a Commit You Do Not Want</h3>
+<pre><code># Undo the last commit, keep changes in working directory
+git reset --soft HEAD~1
+
+# Or remove the last commit entirely
+git reset --hard HEAD~1
+
+# If already pushed (dangerous — only if you are the only user)
+git reset --hard HEAD~1
+git push --force-with-lease</code></pre>
+
+<h3>Scenario: You Made Manual Changes and Need to Commit Them</h3>
+<pre><code># While Ralph is stopped:
+git add -A
+git commit -m "Manual fix: description of what you changed"
+
+# Important: update ticket status in beads
+bd update &lt;ticket-id&gt; --status closed --notes="Fixed manually. Commit: $(git rev-parse HEAD)"
+
+# Verify
+git status   # Should be clean
+
+# Resume
+bash scripts/ralph/run_ralph_loop.sh</code></pre>
+
+<h3>Scenario: Merge Conflict from Ralph and Manual Work</h3>
+<pre><code># 1. Stop Ralph
+cat .ralph_loop.pid | xargs kill
+rm -f .ralph_loop.pid
+
+# 2. See conflicted files
+git status
+
+# 3. Resolve conflicts in each file
+# Edit files, remove <<<<<<<, =======, >>>>>>> markers
+
+# 4. Mark as resolved
+git add &lt;resolved-files&gt;
+
+# 5. Complete the merge
+git commit -m "Merge: resolved conflict between Ralph and manual work"
+
+# 6. Verify
+git status   # Should be clean
+bash scripts/ralph/ralph_validate.sh --tier=targeted
+
+# 7. Restart
+bash scripts/ralph/run_ralph_loop.sh</code></pre>
+
+<h3>Scenario: Complete Disaster Recovery</h3>
+
+<div class="alert alert-danger"><strong>Last resort.</strong> This throws away everything and clones fresh.</div>
+
+<pre><code># 1. Kill everything
+kill -9 $(cat .ralph_loop.pid 2>/dev/null) 2>/dev/null || true
+
+# 2. Save any manual work you did
+cd ..
+cp -r my-project my-project-backup-$(date +%Y%m%d)
+
+# 3. Clone fresh
+rm -rf my-project
+git clone &lt;your-repo-url&gt; my-project
+cd my-project
+
+# 4. Re-init Ralph (does not overwrite existing files)
+ralph init
+
+# 5. Restore any manual files from backup
+cp my-project-backup-*/docs/agent/PROMPT.md my-project/docs/agent/
+cp my-project-backup-*/config/ralph_preflight.sh my-project/config/
+
+# 6. Re-init beads
+bd init
+bd dolt pull
+
+# 7. Start fresh
+bash scripts/ralph/run_ralph_loop.sh</code></pre>
+
+<h3>Debug Data Collection</h3>
+<pre><code># When reporting issues, collect this data first:
+echo "=== RALPH DEBUG BUNDLE ===" > /tmp/ralph_debug.txt
+echo "Date: $(date)" >> /tmp/ralph_debug.txt
+echo "" >> /tmp/ralph_debug.txt
+echo "=== VERSION ===" >> /tmp/ralph_debug.txt
+ralph version >> /tmp/ralph_debug.txt 2>&1
+echo "=== GIT STATUS ===" >> /tmp/ralph_debug.txt
+git status >> /tmp/ralph_debug.txt 2>&1
+git log --oneline -10 >> /tmp/ralph_debug.txt 2>&1
+echo "=== GIT REFLOG ===" >> /tmp/ralph_debug.txt
+git reflog -10 >> /tmp/ralph_debug.txt 2>&1
+echo "=== BEADS ===" >> /tmp/ralph_debug.txt
+bd list >> /tmp/ralph_debug.txt 2>&1
+echo "=== LAST 50 LOOP LINES ===" >> /tmp/ralph_debug.txt
+tail -50 logs/ralph_loop.log >> /tmp/ralph_debug.txt 2>&1
+echo "=== HEALTH CHECK ===" >> /tmp/ralph_debug.txt
+bash scripts/ralph/ralph_health.sh --verbose >> /tmp/ralph_debug.txt 2>&1
+echo "Bundle saved to /tmp/ralph_debug.txt"</code></pre>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="config-reference">Configuration Reference</h1>
+
+<h3>Loop Harness — ralph_loop.sh</h3>
+<div class="data-table-wrapper"><table>
+  <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>RALPH_PROJECT_DIR</code></td><td>Auto-detected</td><td>Path to project root</td></tr>
+    <tr><td><code>RALPH_PROMPT_BASE</code></td><td><code>docs/agent/PROMPT.md</code></td><td>Base agent prompt file</td></tr>
+    <tr><td><code>RALPH_PROMPT_DIR</code></td><td><code>docs/agent/prompts</code></td><td>Type-specific prompt extensions</td></tr>
+    <tr><td><code>RALPH_CHECKPOINT</code></td><td><code>.ralph_checkpoint.json</code></td><td>Crash-recovery checkpoint</td></tr>
+    <tr><td><code>RALPH_LOG_DIR</code></td><td><code>logs</code></td><td>Log directory</td></tr>
+    <tr><td><code>RALPH_ALLOW_E2E</code></td><td><code>0</code></td><td>Set to 1 to allow e2e/performance test tiers</td></tr>
+    <tr><td><code>RALPH_METRICS_FILE</code></td><td><code>logs/ralph_metrics.jsonl</code></td><td>Metrics JSONL path</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Validation Gate — ralph_validate.sh</h3>
+<div class="data-table-wrapper"><table>
+  <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>RALPH_PYTHON_CMD</code></td><td>Auto-detected</td><td>Python executable</td></tr>
+    <tr><td><code>RALPH_VENV_PATH</code></td><td><code>.venv</code></td><td>Virtual env directory</td></tr>
+    <tr><td><code>RALPH_TEST_DIR</code></td><td><code>tests</code></td><td>Root test directory</td></tr>
+    <tr><td><code>RALPH_LINT_TOOLS</code></td><td><code>black isort flake8 mypy</code></td><td>Space-separated lint tools</td></tr>
+  </tbody>
+</table></div>
+
+<h3>Health Check — ralph_health.sh</h3>
+<div class="data-table-wrapper"><table>
+  <thead><tr><th>Variable</th><th>Default</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td><code>RALPH_MAX_METRICS_AGE_SEC</code></td><td><code>7200</code> (2 hours)</td><td>Max metrics age before stale</td></tr>
+    <tr><td><code>RALPH_MAX_CHECKPOINT_AGE_SEC</code></td><td><code>1800</code> (30 minutes)</td><td>Max checkpoint age before crashed</td></tr>
+  </tbody>
+</table></div>
+
+<hr class="section-divider">
+
+<!-- ═══════════════════════════════════════════════════════ -->
+<h1 id="faq">FAQ</h1>
+
+<h3>General</h3>
+<p><strong>Q: Is this CI/CD?</strong><br>No. Ralph is a <strong>development-time</strong> tool. It runs on your dev machine, not a CI server.</p>
+<p><strong>Q: Can I use Ralph without beads?</strong><br>No. Ralph depends on <code>bd</code> for ticket management.</p>
+<p><strong>Q: Does Ralph work on Windows?</strong><br>Use WSL2. Ralph is bash-based.</p>
+<p><strong>Q: How many tickets per day?</strong><br>10-30 depending on complexity. Each iteration is 5-30 minutes.</p>
+
+<h3>Setup</h3>
+<p><strong>Q: ralph command not found after install?</strong></p>
+<pre><code>ls -la /usr/local/bin/ralph ~/.local/bin/ralph
+source ~/.zshrc
+echo $PATH | tr ':' '\n'</code></pre>
+<p><strong>Q: Already have a project?</strong></p>
+<pre><code>cd my-existing-project && ralph init</code></pre>
+
+<h3>Tickets</h3>
+<p><strong>Q: Why are tickets skipped?</strong><br>Check <code>config/ralph_preflight.sh</code>. Default skips epics and features. Your rules may also block.</p>
+<p><strong>Q: How small should tickets be?</strong><br>Completable in a single agent iteration (5-30 min). If a ticket cycles, break it into two.</p>
+
+<h3>Troubleshooting</h3>
+<p><strong>Q: Ralph keeps failing on the same ticket?</strong></p>
+<pre><code>bash scripts/ralph/ralph_validate.sh --tier=targeted
+bd update &lt;id&gt; --status blocked --notes="Manual fix needed"
+rm -f .ralph_checkpoint.json
+bash scripts/ralph/run_ralph_loop.sh</code></pre>
+<p><strong>Q: Computer slept — what happens?</strong><br>Agent pauses. On wake, continues. If agent times out, checkpoint is retained.</p>
+
+</main></div>
+
+<footer class="site-footer">
+  <p>Ralph Wiggum Loop Build System v1.0.0 · Documentation · <a href="https://github.com/samdharma/Ralph_loop" style="color:var(--color-accent-fg)">GitHub</a></p>
+</footer>
+
+<script>
+mermaid.initialize({
+  startOnLoad: true,
+  theme: 'dark',
+  themeVariables: {
+    primaryColor: '#1f6feb', primaryTextColor: '#c9d1d9', primaryBorderColor: '#30363d',
+    lineColor: '#484f58', secondaryColor: '#161b22', tertiaryColor: '#0d1117',
+    background: '#0d1117', mainBkg: '#161b22', nodeBorder: '#30363d',
+    clusterBkg: '#161b22', clusterBorder: '#30363d', titleColor: '#e6edf3',
+    edgeLabelBackground: '#161b22', nodeTextColor: '#e6edf3'
+  },
+  flowchart: { useMaxWidth: true, htmlLabels: true, curve: 'basis' },
+  sequence: { useMaxWidth: true, boxMargin: 8, mirrorActors: false }
+});
+
+// Active sidebar tracking
+const links = document.querySelectorAll('.sidebar a');
+const headings = document.querySelectorAll('h1[id], h2[id], h3[id], h4[id]');
+window.addEventListener('scroll', function() {
+  let current = '';
+  headings.forEach(function(h) { if (h.getBoundingClientRect().top <= 120) current = h.id; });
+  links.forEach(function(l) {
+    l.classList.remove('active');
+    if (l.getAttribute('href') === '#' + current) l.classList.add('active');
+  });
+}, { passive: true });
+
+// Smooth scroll
+links.forEach(function(l) {
+  l.addEventListener('click', function(e) {
+    e.preventDefault();
+    var t = document.querySelector(this.getAttribute('href'));
+    if (t) { t.scrollIntoView({ behavior: 'smooth' }); history.pushState(null, '', this.getAttribute('href')); }
+  });
+});
+</script>
+</body>
+</html>

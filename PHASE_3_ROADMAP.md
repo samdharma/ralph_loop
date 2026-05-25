@@ -189,7 +189,7 @@ This is Phase 4+ and out of scope for now.
 - [x] `docs/TICKET_MANAGEMENT.md` — naming rules, beads workflow, monitoring
 - [x] `docs/CONFIGURATION.md` — all env vars and defaults
 - [x] `docs/FAQ.md` — common questions
-- [x] `docs/html/index.html` — single-page HTML docs with dark theme + Mermaid diagrams
+- [x] `docs/ralph_documentation.html` — single-page HTML docs with dark theme + 10 Mermaid diagrams
 - [x] `scripts/install.sh` — one-liner installer
 - [x] `bin/ralph status` — project health command
 - [ ] `bin/ralph update` — self-update (deferred: trivial git-pull wrapper)

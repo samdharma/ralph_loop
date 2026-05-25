@@ -80,7 +80,7 @@ bash scripts/ralph/ralph_loop.sh --ticket=<id> --agent=kimi  # Single-shot
 
 ### 📖 HTML (Recommended — Open in Browser)
 
-**[`docs/html/index.html`](docs/html/index.html)** — Complete single-page documentation with:
+**[`docs/ralph_documentation.html`](docs/ralph_documentation.html)** — Complete single-page documentation with:
 - GitHub dark theme (no bright backgrounds, optimized for screen reading)
 - Mermaid.js diagrams, flowcharts, and sequence diagrams
 - Sidebar navigation, search-friendly headings, responsive layout
