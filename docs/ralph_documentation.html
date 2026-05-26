@@ -177,7 +177,7 @@ tr:last-child td { border-bottom: none; }
   <div class="card"><div class="icon-circle ic-blue">&#x1F504;</div><h3>Automatic Loop</h3><p>Pulls the next ready ticket, invokes your AI agent, validates output, commits. Repeats 24/7.</p></div>
   <div class="card"><div class="icon-circle ic-green">&#x1F6E1;</div><h3>Guardrails Built-In</h3><p>Preflight checks skip blocked/wrong-time tickets. Validation gate catches broken code before commit.</p></div>
   <div class="card"><div class="icon-circle ic-purple">&#x1F4CA;</div><h3>Full Observability</h3><p>JSONL metrics, health checks, daily/weekly reports. Know exactly what Ralph built and when.</p></div>
-  <div class="card"><div class="icon-circle ic-yellow">&#x1F50C;</div><h3>Self-Contained Repos</h3><p>Build scripts in <code>scripts/ralph/</code>, config in <code>config/</code>. Clone, init beads, and build. Works with any language.</p></div>
+  <div class="card"><div class="icon-circle ic-yellow">&#x1F50C;</div><h3>Self-Contained Repos</h3><p>Build scripts live globally in <code>~/.ralph/core/</code>. Projects carry only <code>.ralph/config.toml</code> and project-specific configs. Works with any language.</p></div>
 </div>
 
 <hr class="section-divider">
@@ -264,7 +264,7 @@ sequenceDiagram
 
 <div class="alert alert-success">
   <strong>Ralph core scripts live in <code>~/.ralph/core/</code></strong> — never in your project repo.
-  Projects carry <code>scripts/ralph/</code> build scripts and project-specific config files in <code>config/</code>.
+  Projects carry only <code>.ralph/config.toml</code> and project-specific config files in <code>config/</code>.
 </div>
 
 <div class="mermaid-wrapper"><div class="mermaid">
@@ -402,7 +402,7 @@ which ralph        # → /usr/local/bin/ralph</code></pre>
 <h1 id="clone-project">Clone an Existing Ralph Project</h1>
 
 <div class="alert alert-success">
-  <strong>Ralph scripts live in <code>scripts/ralph/</code> within the project.</strong>
+  <strong>Ralph scripts live globally in <code>~/.ralph/core/</code>.</strong>
   Clone, init beads, and start building.
 </div>
 
@@ -436,7 +436,7 @@ ralph daemon</code></pre>
 │   ├── PROMPT.md            ← Agent context (committed)
 │   ├── PROGRESS.md          ← Auto-generated iteration log
 │   └── prompts/             ← Type-specific guidance
-├── scripts/ralph/           ← 12 Ralph build scripts (committed)
+├── .ralph/<br>│   └── config.toml          ← Ralph project config (committed)
 ├── src/                     ← Your code
 └── tests/                   ← Your tests</code></pre>
 
@@ -459,7 +459,7 @@ ralph daemon</code></pre>
   <li>Git + Beads initialized</li>
 </ul>
 
-<div class="alert alert-info"><strong>Ralph scripts are copied into <code>scripts/ralph/</code> during init.</strong> Use the <code>ralph</code> CLI from anywhere inside the project: <code>ralph loop</code>, <code>ralph daemon</code>, <code>ralph validate</code>, etc. The CLI auto-discovers the project root and dispatches to the correct scripts.</div>
+<div class="alert alert-info"><strong>Ralph scripts live globally in <code>~/.ralph/core/</code>.</strong> The <code>ralph</code> CLI auto-discovers the project root via <code>.ralph/config.toml</code> and dispatches from the global core. Projects carry only config files.</div>
 
 <h3 id="must-have-files">Must-Have Files (Mandatory Before Building)</h3>
 
@@ -512,7 +512,7 @@ You create tickets in beads, Ralph picks them up and builds them.</p>
   </tbody>
 </table></div>
 
-<div class="alert alert-info"><strong>How it works:</strong> <code>ralph loop</code> walks up from your current directory looking for <code>scripts/ralph/ralph_loop.sh</code>. When found, it dispatches to that project's local scripts. You can run <code>ralph validate</code>, <code>ralph health</code>, etc. from anywhere inside the project tree.</div>
+<div class="alert alert-info"><strong>How it works:</strong> <code>ralph loop</code> walks up from your current directory looking for <code>.ralph/config.toml</code>. When found, it dispatches from <code>~/.ralph/core/</code> with the project directory set. You can run <code>ralph validate</code>, <code>ralph health</code>, etc. from anywhere inside the project tree.</div>
 
 <h4>Morning — Start</h4>
 <pre><code>cd ~/Dev/my-project
@@ -782,7 +782,7 @@ Use WSL2 (Windows Subsystem for Linux). Ralph is bash-based and assumes a Unix-l
 10–30 depending on ticket complexity. Each iteration (one ticket) takes 5–30 minutes. A typical day: 15–20 iterations with 8–12 unique tickets.</p>
 
 <p><strong>Q: Where do Ralph scripts live? In my project or globally?</strong><br>
-Both. The <code>ralph</code> CLI lives at <code>~/.ralph/bin/ralph</code> (global). The 12 build scripts are copied into <code>scripts/ralph/</code> inside each project during <code>ralph init</code>. This keeps each project self-contained and version-controlled.</p>
+Both. The <code>ralph</code> CLI lives at <code>~/.ralph/bin/ralph</code> (global). Build scripts live globally in <code>~/.ralph/core/</code>. Each project carries only <code>.ralph/config.toml</code> for configuration. No build scripts are committed to the project repo.</p>
 
 <p><strong>Q: Can I run Ralph on multiple projects at once?</strong><br>
 Yes. Each project has its own PID file (<code>.ralph_loop.pid</code>) and checkpoint. Start the daemon in each project directory and they run independently.</p>
@@ -836,7 +836,7 @@ Three checks will <strong>exit the loop with an error</strong> if they fail:</p>
 │       ├── ARCHITECTURE.md      ← Create: your system design
 │       ├── BUILD_PHASE_1.md     ← Create: phase-specific API refs
 │       └── BUILD_PHASE_2.md
-├── scripts/ralph/               ← Ready (12 scripts from init)
+├── .ralph/<br>│   └── config.toml          ← Ready (project config)
 ├── src/&lt;package&gt;/               ← Your source code
 ├── tests/
 │   ├── unit/                    ← Write your tests
@@ -892,7 +892,7 @@ Four layers, from quick glance to deep dive:</p>
     <tr><td><strong>Dashboard</strong></td><td><code>ralph status</code></td><td>Loop status, iterations today, pass rate, queue depth, git status, health</td></tr>
     <tr><td><strong>Health check</strong></td><td><code>ralph health --verbose</code></td><td>5-point diagnostic: metrics age, checkpoint, beads DB, git, sync</td></tr>
     <tr><td><strong>Live log</strong></td><td><code>tail -f logs/ralph_loop.log</code></td><td>Real-time loop output, GATE results, errors</td></tr>
-    <tr><td><strong>Metrics analytics</strong></td><td><code>python3 scripts/ralph/ralph_metrics_viewer.py</code></td><td>Iterations per day, pass rate, avg duration, tier breakdown</td></tr>
+    <tr><td><strong>Metrics analytics</strong></td><td><code>ralph metrics</code></td><td>Iterations per day, pass rate, avg duration, tier breakdown</td></tr>
   </tbody>
 </table></div>
 

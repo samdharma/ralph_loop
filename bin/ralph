@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # ralph — Ralph Wiggum Loop Build System CLI v1.0.1
 #
-# Global tool that operates on any Ralph-initialized project.
-# Scripts live in scripts/ralph/ within each project.
+# Global tool. All build scripts live in ~/.ralph/core/.
+# Projects carry only .ralph/config.toml and project-specific config files.
 #
 # Usage:
 #   ralph init               Scaffold a new project
+#   ralph setup              Post-clone setup (beads init + dolt pull)
 #   ralph status             Show project health dashboard
 #   ralph loop [opts]        Run build loop (foreground)
 #   ralph daemon [opts]      Run build loop (background daemon)
@@ -13,6 +14,7 @@
 #   ralph health [opts]      Check loop and project health
 #   ralph report [opts]      Generate daily/weekly report
 #   ralph metrics [opts]     View loop metrics analytics
+#   ralph migrate            Convert legacy project to new config format
 #   ralph version            Show version
 #   ralph help               Show this help
 
@@ -20,14 +22,20 @@ set -euo pipefail
 
 RALPH_HOME="${RALPH_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 export RALPH_HOME
+CORE_DIR="${RALPH_HOME}/core"
 
 # ──────────────────────────────────────────────────────────────
 # Walk up from cwd to find a Ralph project root.
-# A Ralph project is any directory containing scripts/ralph/ralph_loop.sh
+# A Ralph project has .ralph/config.toml (or legacy scripts/ralph/).
 # ──────────────────────────────────────────────────────────────
 find_project_dir() {
     local dir="${PWD}"
     while [[ "${dir}" != "/" ]]; do
+        if [[ -f "${dir}/.ralph/config.toml" ]]; then
+            echo "${dir}"
+            return 0
+        fi
+        # Legacy fallback
         if [[ -f "${dir}/scripts/ralph/ralph_loop.sh" ]]; then
             echo "${dir}"
             return 0
@@ -37,33 +45,26 @@ find_project_dir() {
     return 1
 }
 
-# ──────────────────────────────────────────────────────────────
-# Require we are in a Ralph project. Exit with help if not.
-# ──────────────────────────────────────────────────────────────
 require_project() {
     PROJECT_DIR="$(find_project_dir)"
     if [[ -z "${PROJECT_DIR}" ]]; then
         echo "ralph: not in a Ralph project."
-        echo "  No scripts/ralph/ralph_loop.sh found in $(pwd) or any parent."
-        echo "  Run 'ralph init' first to create a project, then cd into it."
+        echo "  No .ralph/config.toml found in $(pwd) or any parent."
+        echo "  Run 'ralph init' first, or 'ralph setup' after cloning."
         exit 1
     fi
     export RALPH_PROJECT_DIR="${PROJECT_DIR}"
-    SCRIPT_DIR="${PROJECT_DIR}/scripts/ralph"
 }
 
-# ──────────────────────────────────────────────────────────────
-# Run a project script with proper env vars and forwarded args
-# ──────────────────────────────────────────────────────────────
-run_script() {
-    local name="$1"
+run_core() {
+    local script="$1"
     shift
-    if [[ ! -f "${SCRIPT_DIR}/${name}" ]]; then
-        echo "ralph: internal error — ${name} not found in ${SCRIPT_DIR}"
+    if [[ ! -f "${CORE_DIR}/${script}" ]]; then
+        echo "ralph: error — core script not found: ${CORE_DIR}/${script}"
+        echo "  Is RALPH_HOME set correctly? (current: ${RALPH_HOME})"
         exit 1
     fi
-    cd "${PROJECT_DIR}"
-    exec bash "${SCRIPT_DIR}/${name}" "$@"
+    exec bash "${CORE_DIR}/${script}" "$@"
 }
 
 # ──────────────────────────────────────────────────────────────
@@ -76,6 +77,11 @@ case "${1:-}" in
         exec python3 "${RALPH_HOME}/init.py" "$@"
         ;;
 
+    setup)
+        shift
+        exec python3 "${RALPH_HOME}/init.py" --setup "$@"
+        ;;
+
     status)
         exec python3 "${RALPH_HOME}/init.py" --status
         ;;
@@ -83,56 +89,47 @@ case "${1:-}" in
     loop)
         shift
         require_project
-        # Auto-check: beads database exists?
         if [[ ! -d "${PROJECT_DIR}/.beads" ]]; then
-            echo "ralph: beads not initialized in this project."
-            echo "  Run: bd init && bd dolt pull"
+            echo "ralph: beads not initialized. Run 'ralph setup' first."
             exit 1
         fi
-        run_script "ralph_loop.sh" "$@"
+        run_core "ralph_loop.sh" "$@"
         ;;
 
     daemon)
         shift
         require_project
         if [[ ! -d "${PROJECT_DIR}/.beads" ]]; then
-            echo "ralph: beads not initialized in this project."
-            echo "  Run: bd init && bd dolt pull"
+            echo "ralph: beads not initialized. Run 'ralph setup' first."
             exit 1
         fi
-        run_script "run_ralph_loop.sh" "$@"
+        export RALPH_PROJECT_DIR="${PROJECT_DIR}"
+        exec bash "${CORE_DIR}/run_ralph_loop.sh" "$@"
         ;;
 
     validate)
         shift
         require_project
-        run_script "ralph_validate.sh" "$@"
+        run_core "ralph_validate.sh" "$@"
         ;;
 
     health)
         shift
         require_project
-        run_script "ralph_health.sh" "$@"
+        run_core "ralph_health.sh" "$@"
         ;;
 
     report)
         shift
         require_project
-        run_script "ralph_report.sh" "$@"
+        run_core "ralph_report.sh" "$@"
         ;;
 
     metrics)
         shift
         require_project
-        if [[ ! -f "${SCRIPT_DIR}/ralph_metrics_viewer.py" ]]; then
-            echo "ralph: internal error — ralph_metrics_viewer.py not found in ${SCRIPT_DIR}"
-            exit 1
-        fi
-        cd "${PROJECT_DIR}"
-
-        # Detect Python
-        VENV_PATH="${RALPH_VENV_PATH:-${PROJECT_DIR}/.venv}"
         PYTHON_CMD="${RALPH_PYTHON_CMD:-}"
+        VENV_PATH="${PROJECT_DIR}/.venv"
         if [[ -z "${PYTHON_CMD}" ]]; then
             if [[ -f "${VENV_PATH}/bin/python" ]]; then
                 PYTHON_CMD="${VENV_PATH}/bin/python"
@@ -141,11 +138,20 @@ case "${1:-}" in
             elif command -v python3 &>/dev/null; then
                 PYTHON_CMD="python3"
             else
-                echo "ralph: no Python found. Set RALPH_PYTHON_CMD or create a venv."
+                echo "ralph: no Python found."
                 exit 1
             fi
         fi
-        exec "${PYTHON_CMD}" "${SCRIPT_DIR}/ralph_metrics_viewer.py" "$@"
+        if [[ ! -f "${CORE_DIR}/ralph_metrics_viewer.py" ]]; then
+            echo "ralph: error — ralph_metrics_viewer.py not found in ${CORE_DIR}"
+            exit 1
+        fi
+        cd "${PROJECT_DIR}"
+        exec "${PYTHON_CMD}" "${CORE_DIR}/ralph_metrics_viewer.py" "$@"
+        ;;
+
+    migrate)
+        exec python3 "${RALPH_HOME}/init.py" --migrate
         ;;
 
     version|--version|-v)
@@ -159,15 +165,20 @@ case "${1:-}" in
 ║         "I'm helping!"                                      ║
 ╚══════════════════════════════════════════════════════════════╝
 
+  Global tool — core scripts live in ~/.ralph/core/.
+  Projects carry only .ralph/config.toml and project config files.
+
 Commands:
-  ralph init        Scaffold a new project (git + beads + templates)
+  ralph init        Scaffold a new project (git + beads + config + templates)
+  ralph setup       Post-clone setup (beads init, dolt pull, checks)
   ralph status      Show project health dashboard
   ralph loop        Run build loop — foreground, continuous
-  ralph daemon      Run build loop — background daemon
+  ralph daemon      Run build loop — background daemon (PID-file gated)
   ralph validate    Run validation gate (tests + lint + type-check)
-  ralph health      Check loop and project health (5-point diagnostic)
+  ralph health      Check loop health (5-point diagnostic)
   ralph report      Generate daily/weekly operational report
   ralph metrics     View loop metrics and analytics
+  ralph migrate     Convert legacy project (scripts/ralph/) to new config
   ralph version     Show version
   ralph help        Show this help
 
@@ -187,21 +198,17 @@ Report options (ralph report):
   --output text|html  Output format
   --save <path>     Save to file
 
-Metrics options (ralph metrics):
-  --output text|html  Output format (default: text)
-  --save <path>     Save to file
-
 Quick Start:
-  ralph init                          # Create a new project
+  ralph init                    # Create a new project
   cd <your-project>
-  ralph daemon                        # Start building (background)
-  ralph status                        # Check progress
+  ralph daemon                  # Start building (background)
+  ralph status                  # Check progress
 
 New System Setup:
   git clone https://github.com/samdharma/Ralph_loop.git ~/.ralph
   bash ~/.ralph/scripts/install.sh
-  source ~/.zshrc                     # or ~/.bashrc
-  ralph version                       # Verify: ralph v1.0.1
+  source ~/.zshrc               # or ~/.bashrc
+  ralph version                 # Verify: ralph v1.0.1
 EOF
         ;;
 
