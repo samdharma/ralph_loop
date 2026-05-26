@@ -10,7 +10,7 @@
 
 ```bash
 # Run validation (tests + lint + type-check on changed files)
-bash scripts/ralph/ralph_validate.sh --tier=targeted
+ralph validate --tier=targeted
 
 # Run unit tests only
 {{ TEST_COMMAND_UNIT }}
@@ -31,6 +31,9 @@ git status --short
 - Secrets in `.env` only (never committed).
 
 ## Beads Ticket Hierarchy & Rules
+
+Ralph depends on [beads](https://github.com/beadsboard/beads) (`bd`) for ticket management.
+All work is driven by beads tickets. No tickets = nothing to build.
 
 ### Hierarchy
 ```
@@ -63,37 +66,20 @@ EPIC (type: epic, labels: epic, meta-grouping, <phase-tag>) - not to be closed
 6. **No redundant transitive dependencies**.
 7. **Ralph deterministic selection** — the Ralph loop skips `epic` and `feature` tickets, then sorts ready work tickets by feature number ascending, then task number ascending.
 
-<!-- BEGIN RALPH LOOP INTEGRATION v:{{ RALPH_VERSION }} -->
-## Ralph Wiggum Loop System
+## Ralph Commands (Global CLI)
 
-This project uses the **Ralph Wiggum Loop System** for agentic development.
-
-### Quick Reference
+Ralph is a global tool installed at `~/.ralph/`. Commands work from any Ralph project:
 
 ```bash
-# Background daemon wrapper
-bash scripts/ralph/run_ralph_loop.sh
-
-# Direct harness (single-shot)
-bash scripts/ralph/ralph_loop.sh --ticket=<id> --agent={{ AGENT_CMD }}
-
-# Validate current work
-bash scripts/ralph/ralph_validate.sh --tier=targeted
-
-# Check loop health
-bash scripts/ralph/ralph_health.sh --verbose
+ralph loop       # Run build loop (foreground)
+ralph daemon     # Run build loop (background)
+ralph validate   # Run validation gate
+ralph health     # Check loop health
+ralph report     # Generate daily/weekly report
+ralph status     # Project dashboard
 ```
 
-**Preflight guardrails:** `config/ralph_preflight.sh` gates ticket selection.
-It must output exactly `READY` to stdout; anything else skips the ticket.
-<!-- END RALPH LOOP INTEGRATION -->
-
-<!-- BEGIN BEADS INTEGRATION v:1 profile:minimal -->
-## Beads Issue Tracker
-
-This project uses **bd (beads)** for issue tracking.
-
-### Quick Reference
+## Beads Quick Reference
 
 ```bash
 bd ready              # Find available work
@@ -101,12 +87,6 @@ bd show <id>          # View issue details
 bd update <id> --claim  # Claim work
 bd close <id>         # Complete work
 ```
-
-### Rules
-
-- Use `bd` for ALL task tracking
-- Run `bd prime` for command reference
-- Use `bd remember <key>` for persistent notes
 
 ## Session Completion
 
@@ -118,4 +98,3 @@ bd close <id>         # Complete work
 4. **Update issue status**
 5. **PUSH TO REMOTE**: `git pull --rebase && bd dolt push && git push`
 6. **Verify**: `git status` MUST show "up to date with origin"
-<!-- END BEADS INTEGRATION -->

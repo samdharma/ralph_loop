@@ -24,6 +24,15 @@
 
 set -euo pipefail
 
+# Detect ralph core location
+if [[ -n "${RALPH_CORE_DIR:-}" ]]; then
+    CORE_DIR="${RALPH_CORE_DIR}"
+elif [[ -d "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" ]]; then
+    CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    CORE_DIR=""
+fi
+
 PROJECT_DIR="${RALPH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "${PROJECT_DIR}"
 
@@ -112,7 +121,7 @@ case "${TIER}" in
         set -e
         ;;
     targeted|targetted)
-        DETECT_SCRIPT="${PROJECT_DIR}/scripts/ralph/detect_affected_tests.py"
+        DETECT_SCRIPT="${CORE_DIR:-${PROJECT_DIR}/scripts/ralph}/detect_affected_tests.py"
         if [[ -f "${DETECT_SCRIPT}" ]]; then
             AFFECTED_TESTS=$(${PYTHON_CMD} "${DETECT_SCRIPT}" 2>/dev/null || echo "${TEST_DIR}/unit/")
         else

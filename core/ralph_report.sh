@@ -14,6 +14,15 @@
 
 set -euo pipefail
 
+# Detect ralph core location
+if [[ -n "${RALPH_CORE_DIR:-}" ]]; then
+    CORE_DIR="${RALPH_CORE_DIR}"
+elif [[ -d "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" ]]; then
+    CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    CORE_DIR=""
+fi
+
 PROJECT_DIR="${RALPH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "${PROJECT_DIR}"
 
@@ -38,12 +47,12 @@ if [[ -z "${VIRTUAL_ENV:-}" && -f "${VENV_PATH}/bin/activate" ]]; then
     source "${VENV_PATH}/bin/activate"
 fi
 
-# Find ralph_report.py (could be in core/ or scripts/ralph/)
+# Find ralph_report.py (check CORE_DIR first, then legacy scripts/ralph/)
 REPORT_PY=""
-if [[ -f "${PROJECT_DIR}/scripts/ralph/ralph_report.py" ]]; then
+if [[ -f "${CORE_DIR:-${PROJECT_DIR}/scripts/ralph}/ralph_report.py" ]]; then
+    REPORT_PY="${CORE_DIR:-${PROJECT_DIR}/scripts/ralph}/ralph_report.py"
+elif [[ -f "${PROJECT_DIR}/scripts/ralph/ralph_report.py" ]]; then
     REPORT_PY="${PROJECT_DIR}/scripts/ralph/ralph_report.py"
-elif [[ -f "${CORE_DIR:-/dev/null}/ralph_report.py" ]]; then
-    REPORT_PY="${CORE_DIR}/ralph_report.py"
 else
     echo "[RALPH REPORT] ERROR: ralph_report.py not found."
     exit 1

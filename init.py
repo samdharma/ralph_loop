@@ -2,20 +2,19 @@
 """
 Ralph Wiggum Loop Build System — Project Initializer
 
-Interactive Q&A wizard that scaffolds a new project with:
-- Git + Beads initialized
-- Ralph core scripts copied into scripts/ralph/
-- All templates rendered with user's answers
-- Language-specific validation gate configured
+Global tool architecture: core scripts live in ~/.ralph/core/.
+Projects carry only config files (.ralph/config.toml + project-specific configs).
 
 Usage:
-    ralph init                  # Interactive mode
+    ralph init                  # Interactive mode — scaffold a new project
+    ralph init --status         # Show project health dashboard
+    ralph init --migrate        # Convert legacy project (scripts/ralph/) to new format
     python3 init.py             # Direct invocation
-    python3 init.py --status    # Show project health dashboard
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -77,7 +76,6 @@ def package_name(name: str) -> str:
     name = name.lower().strip()
     name = re.sub(r'[^a-z0-9]+', '_', name)
     name = name.strip('_')
-    # Must start with a letter or underscore
     if name and name[0].isdigit():
         name = '_' + name
     return name
@@ -117,7 +115,6 @@ def check_prerequisites() -> list[str]:
     if py_version.major < 3 or (py_version.major == 3 and py_version.minor < 10):
         missing.append("python 3.10+ (current: {}.{})".format(py_version.major, py_version.minor))
 
-    # At least one agent must be available
     has_kimi = which("kimi") is not None
     has_pi = which("pi") is not None
     if not has_kimi and not has_pi:
@@ -227,7 +224,6 @@ def wizard() -> dict[str, str]:
     print(BANNER)
     print()
 
-    # --- Prerequisites ---
     missing = check_prerequisites()
     if missing:
         print(f"{red('Missing prerequisites:')}")
@@ -237,7 +233,6 @@ def wizard() -> dict[str, str]:
         print("Install the above and run 'ralph init' again.")
         sys.exit(1)
 
-    # --- Project Name ---
     print(f"{bold('Project name')}: ", end="")
     project_name = input().strip()
     while not project_name:
@@ -248,13 +243,11 @@ def wizard() -> dict[str, str]:
     project_slug = slugify(project_name)
     project_package = package_name(project_name)
 
-    # --- Project Directory ---
     default_dir = str(Path.cwd() / project_slug)
     print(f"{bold('Project directory')} [{default_dir}]: ", end="")
     project_dir_input = input().strip()
     project_dir = Path(project_dir_input) if project_dir_input else Path(default_dir)
 
-    # --- Language ---
     print(f"{bold('Primary language')} [python]:")
     langs = list(LANGUAGE_PROFILES.keys())
     for i, lang in enumerate(langs, 1):
@@ -270,7 +263,6 @@ def wizard() -> dict[str, str]:
 
     profile = LANGUAGE_PROFILES[language]
 
-    # --- AI Agent ---
     agents = detect_available_agents()
     print(f"{bold('AI agent')}:")
     agent_list = list(agents.keys())
@@ -297,14 +289,11 @@ def wizard() -> dict[str, str]:
     else:
         agent_cmd = agent_list[default_agent - 1]
 
-    # --- Test Framework ---
     default_test = profile["test_framework"]
     print(f"{bold('Test framework')} [{default_test}]: ", end="")
     test_framework = input().strip() or default_test
 
-    # Test commands based on framework
     if test_framework != profile["test_framework"]:
-        # User overrode — use sensible defaults
         tc_unit = f"# TODO: add your unit test command using {test_framework}"
         tc_smoke = f"# TODO: add your smoke test command using {test_framework}"
         tc_integration = f"# TODO: add your integration test command using {test_framework}"
@@ -315,30 +304,25 @@ def wizard() -> dict[str, str]:
         tc_integration = profile["test_command_integration"]
         tc_full = profile["test_command_full"]
 
-    # --- Lint Tools ---
     default_lint = profile["lint_tools"]
     print(f"{bold('Lint / format tools')} [{default_lint}]: ", end="")
     lint_tools = input().strip() or default_lint
 
-    # --- Description ---
     print(f"{bold('Brief project description')}:")
     print("  > ", end="")
     description = input().strip()
     if not description:
         description = f"A {language} project."
 
-    # --- Test directory ---
     default_test_dir = profile["test_dir"]
     print(f"{bold('Test directory')} [{default_test_dir}]: ", end="")
     test_dir = input().strip() or default_test_dir
 
-    # --- Source directory ---
     default_src = profile["source_dir"]
     src_dir_prompt = f"{bold('Source directory')} [{default_src}]: " if default_src else f"{bold('Source directory')} [.] : "
     print(src_dir_prompt, end="")
     source_dir = input().strip() or default_src
 
-    # --- Summary ---
     print()
     print(f"  {bold('Summary:')}")
     print(f"    Project:       {project_name}")
@@ -380,18 +364,20 @@ def wizard() -> dict[str, str]:
 
 
 # ──────────────────────────────────────────────────────────────────────
-# Scaffolder
+# Scaffolder — Global Tool Architecture
+# Core scripts live in ~/.ralph/core/, NOT copied into the project.
+# Project carries only config files.
 # ──────────────────────────────────────────────────────────────────────
 
 def scaffold(vars: dict[str, str]) -> None:
-    """Create the project from templates."""
+    """Create the project from templates (no script copying)."""
     project_dir = Path(vars["PROJECT_DIR"])
 
-    # --- Create directories ---
+    # ── Create directories ──────────────────────────────────────────
     print()
     dirs_to_create = [
         project_dir,
-        project_dir / "scripts" / "ralph",
+        project_dir / ".ralph",
         project_dir / "config",
         project_dir / "docs" / "agent" / "prompts",
         project_dir / "logs",
@@ -409,14 +395,14 @@ def scaffold(vars: dict[str, str]) -> None:
 
     print(f"  {checkmark()} Created project directory")
 
-    # --- Git init ---
+    # ── Git init ─────────────────────────────────────────────────────
     if not (project_dir / ".git").exists():
         run(["git", "init"], cwd=project_dir)
         print(f"  {checkmark()} Initialized git repository")
     else:
         print(f"  {checkmark()} Git repository already exists")
 
-    # --- Beads init ---
+    # ── Beads init ───────────────────────────────────────────────────
     if not (project_dir / ".beads").exists():
         result = run(["bd", "init"], cwd=project_dir)
         if result.returncode == 0:
@@ -426,42 +412,27 @@ def scaffold(vars: dict[str, str]) -> None:
     else:
         print(f"  {checkmark()} Beads already initialized")
 
-    # --- Run language-specific init commands ---
+    # ── Language-specific init ───────────────────────────────────────
     profile = LANGUAGE_PROFILES.get(vars["PROJECT_LANGUAGE"], LANGUAGE_PROFILES["other"])
     for cmd_template in profile["init_commands"]:
         cmd_str = render_template_str(cmd_template, vars)
         print(f"  → Running: {cmd_str}")
         run(cmd_str.split(), cwd=project_dir)
 
-    # --- Copy core scripts ---
-    core_dest = project_dir / "scripts" / "ralph"
-    core_scripts = [
-        "ralph_loop.sh",
-        "run_ralph_loop.sh",
-        "ralph_preflight.sh",
-        "ralph_validate.sh",
-        "ralph_health.sh",
-        "ralph_metrics.sh",
-        "ralph_metrics_viewer.py",
-        "ralph_report.sh",
-        "ralph_report.py",
-        "ralph_check_specs.py",
-        "ralph_performance_check.sh",
-        "detect_affected_tests.py",
-    ]
+    # ═════════════════════════════════════════════════════════════════
+    # NOTE: Core scripts are NOT copied into the project.
+    # They live in ~/.ralph/core/ and are invoked via the global
+    # `ralph` CLI (ralph loop, ralph validate, ralph health, etc.)
+    # ═════════════════════════════════════════════════════════════════
 
-    for script in core_scripts:
-        src = CORE_DIR / script
-        dst = core_dest / script
-        if src.exists():
-            shutil.copy2(src, dst)
-            # Ensure executable for shell scripts
-            if script.endswith(".sh"):
-                dst.chmod(dst.stat().st_mode | 0o111)
+    # ── Render .ralph/config.toml ────────────────────────────────────
+    config_template = TEMPLATES_DIR / "config.toml.j2"
+    if config_template.exists():
+        rendered = render_template(config_template, vars)
+        (project_dir / ".ralph" / "config.toml").write_text(rendered, encoding="utf-8")
+        print(f"  {checkmark()} Generated .ralph/config.toml")
 
-    print(f"  {checkmark()} Installed Ralph core scripts → scripts/ralph/")
-
-    # --- Render and write templates ---
+    # ── Render and write templates ──────────────────────────────────
     template_files = {
         TEMPLATES_DIR / "AGENTS.md.j2": project_dir / "AGENTS.md",
         TEMPLATES_DIR / "PROMPT.md.j2": project_dir / "docs" / "agent" / "PROMPT.md",
@@ -478,7 +449,7 @@ def scaffold(vars: dict[str, str]) -> None:
             if dest_path.name.endswith(".sh"):
                 dest_path.chmod(0o755)
 
-    # Copy prompt extensions
+    # ── Copy prompt extensions ───────────────────────────────────────
     prompts_src = TEMPLATES_DIR / "prompts"
     prompts_dst = project_dir / "docs" / "agent" / "prompts"
     if prompts_src.exists():
@@ -494,12 +465,12 @@ def scaffold(vars: dict[str, str]) -> None:
     print(f"  {checkmark()} Generated config/TEST_MAP.yaml")
     print(f"  {checkmark()} Generated .gitignore")
 
-    # --- Make config preflight executable ---
+    # ── Make config preflight executable ─────────────────────────────
     preflight_path = project_dir / "config" / "ralph_preflight.sh"
     if preflight_path.exists():
         preflight_path.chmod(0o755)
 
-    # --- Create initial test placeholder ---
+    # ── Create test/source placeholders ──────────────────────────────
     unit_test_dir = project_dir / vars["TEST_DIR"] / "unit"
     init_py = unit_test_dir / "__init__.py"
     if vars["PROJECT_LANGUAGE"] == "python" and not init_py.exists():
@@ -508,7 +479,6 @@ def scaffold(vars: dict[str, str]) -> None:
         integration_dir = project_dir / vars["TEST_DIR"] / "integration"
         (integration_dir / "__init__.py").write_text("# Integration tests\n")
 
-    # --- Create source placeholder ---
     if vars["SOURCE_DIR"] and vars["SOURCE_DIR"] != "." and vars["PROJECT_LANGUAGE"] == "python":
         src_init = project_dir / vars["SOURCE_DIR"] / vars["PROJECT_PACKAGE"] / "__init__.py"
         if not src_init.exists():
@@ -520,13 +490,24 @@ def scaffold(vars: dict[str, str]) -> None:
     print()
     print(f"  {bold('Quick start:')}")
     print(f"    cd {vars['PROJECT_DIR']}")
-    print(f"    bash scripts/ralph/ralph_loop.sh --agent={vars['AGENT_CMD']}")
+    print(f"    ralph loop --agent={vars['AGENT_CMD']}")
+    print()
+    print(f"  {bold('Background daemon:')}")
+    print(f"    ralph daemon")
     print()
     print(f"  {bold('Next steps:')}")
     print(f"    1. Review and customize AGENTS.md")
     print(f"    2. Review docs/agent/PROMPT.md for project-specific context")
     print(f"    3. Create your first ticket: bd new \"My first task\"")
-    print(f"    4. Start the loop: bash scripts/ralph/run_ralph_loop.sh")
+    print(f"    4. Start the loop: ralph daemon")
+    print()
+    print(f"  {bold('All Ralph commands (global):')}")
+    print(f"    ralph loop       — Run build loop (foreground)")
+    print(f"    ralph daemon     — Run build loop (background)")
+    print(f"    ralph validate   — Run validation gate")
+    print(f"    ralph health     — Check loop health")
+    print(f"    ralph report     — Generate report")
+    print(f"    ralph status     — Project dashboard")
 
 
 def render_template_str(template: str, vars: dict[str, str]) -> str:
@@ -539,15 +520,272 @@ def render_template_str(template: str, vars: dict[str, str]) -> str:
 
 
 # ──────────────────────────────────────────────────────────────────────
+# Migration: Convert legacy project to new config format
+# ──────────────────────────────────────────────────────────────────────
+
+def migrate_project() -> None:
+    """Convert a legacy project (with scripts/ralph/) to the new config format."""
+    project_dir = Path.cwd()
+
+    # Check if legacy project exists
+    legacy_scripts = project_dir / "scripts" / "ralph"
+    new_config = project_dir / ".ralph" / "config.toml"
+
+    if new_config.exists():
+        print(f"  {checkmark()} Project already uses new config format (.ralph/config.toml)")
+        if legacy_scripts.exists():
+            print(f"  {yellow('⚠')}  Legacy scripts/ralph/ still exists. Remove it?")
+            print(f"     rm -rf {legacy_scripts}")
+        return
+
+    if not legacy_scripts.exists():
+        print(f"{red('Not a Ralph project.')}")
+        print("No scripts/ralph/ directory found. Run 'ralph init' to create a new project.")
+        sys.exit(1)
+
+    # Extract info from existing files
+    print(f"  Migrating legacy project at: {project_dir}")
+    print()
+
+    # Try to read existing AGENTS.md for project name
+    agents_md = project_dir / "AGENTS.md"
+    project_name = project_dir.name
+    if agents_md.exists():
+        first_line = agents_md.read_text().splitlines()[0] if agents_md.read_text() else ""
+        if first_line.startswith("# AGENTS.md — "):
+            project_name = first_line.replace("# AGENTS.md — ", "").strip()
+
+    # Try to read existing PROMPT.md for project root, language
+    prompt_md = project_dir / "docs" / "agent" / "PROMPT.md"
+    project_language = "python"
+    if prompt_md.exists():
+        content = prompt_md.read_text(encoding="utf-8")
+        lang_match = re.search(r'\*\*Language\*\*:\s*(\S+)', content)
+        if lang_match:
+            project_language = lang_match.group(1).lower()
+
+    # Try to read preflight for test/lint hints
+    test_framework = "pytest"
+    lint_tools = "black isort flake8 mypy"
+    source_dir = "src"
+    test_dir = "tests"
+
+    profile = LANGUAGE_PROFILES.get(project_language, LANGUAGE_PROFILES["other"])
+
+    # Build a minimal vars dict
+    vars = {
+        "PROJECT_NAME": project_name,
+        "PROJECT_SLUG": slugify(project_name),
+        "PROJECT_PACKAGE": package_name(project_name),
+        "PROJECT_DIR": str(project_dir),
+        "PROJECT_DESCRIPTION": f"A {project_language} project.",
+        "PROJECT_LANGUAGE": project_language,
+        "PROJECT_ROOT": str(project_dir.resolve()),
+        "AGENT_CMD": "both",
+        "TEST_FRAMEWORK": test_framework,
+        "TEST_DIR": test_dir,
+        "SOURCE_DIR": source_dir,
+        "LINT_TOOLS": lint_tools,
+        "LINT_CONVENTIONS": profile["lint_conventions"],
+        "TEST_COMMAND_UNIT": profile["test_command_unit"],
+        "TEST_COMMAND_SMOKE": profile["test_command_smoke"],
+        "TEST_COMMAND_INTEGRATION": profile["test_command_integration"],
+        "TEST_COMMAND_FULL": profile["test_command_full"],
+        "RALPH_VERSION": RALPH_VERSION,
+        "INIT_DATE": "migrated-" + date.today().isoformat(),
+    }
+
+    # Create .ralph/ directory
+    (project_dir / ".ralph").mkdir(parents=True, exist_ok=True)
+
+    # Generate .ralph/config.toml
+    config_template = TEMPLATES_DIR / "config.toml.j2"
+    if config_template.exists():
+        rendered = render_template(config_template, vars)
+        (project_dir / ".ralph" / "config.toml").write_text(rendered, encoding="utf-8")
+        print(f"  {checkmark()} Generated .ralph/config.toml")
+
+    # Update AGENTS.md to remove Ralph integration block
+    if agents_md.exists():
+        content = agents_md.read_text(encoding="utf-8")
+        # Remove the old Ralph Loop Integration section
+        content = re.sub(
+            r'<!-- BEGIN RALPH LOOP INTEGRATION.*?<!-- END RALPH LOOP INTEGRATION -->',
+            '',
+            content,
+            flags=re.DOTALL
+        )
+        # Replace old script references with ralph commands
+        content = re.sub(
+            r'bash scripts/ralph/run_ralph_loop\.sh',
+            'ralph daemon',
+            content
+        )
+        content = re.sub(
+            r'bash scripts/ralph/ralph_loop\.sh.*',
+            'ralph loop --agent=pi',
+            content
+        )
+        content = re.sub(
+            r'bash scripts/ralph/ralph_validate\.sh.*',
+            'ralph validate --tier=targeted',
+            content
+        )
+        content = re.sub(
+            r'bash scripts/ralph/ralph_health\.sh.*',
+            'ralph health --verbose',
+            content
+        )
+        agents_md.write_text(content, encoding="utf-8")
+        print(f"  {checkmark()} Updated AGENTS.md (removed legacy Ralph references)")
+
+    # Update PROMPT.md
+    if prompt_md.exists():
+        content = prompt_md.read_text(encoding="utf-8")
+        content = re.sub(
+            r'bash scripts/ralph/ralph_validate\.sh',
+            'ralph validate',
+            content
+        )
+        content = content.replace(
+            '- **Validation gate**: `bash scripts/ralph/ralph_validate.sh`',
+            '- **Validation gate**: `ralph validate`'
+        )
+        prompt_md.write_text(content, encoding="utf-8")
+        print(f"  {checkmark()} Updated PROMPT.md (ralph validate command)")
+
+    print()
+    print(f"  {green('✓ Migration complete!')}")
+    print()
+    print(f"  {yellow('⚠')}  Legacy scripts/ralph/ can now be removed:")
+    print(f"     rm -rf {legacy_scripts}")
+    print()
+    print(f"  {bold('New commands available:')}")
+    print(f"    ralph loop      — replaces bash scripts/ralph/ralph_loop.sh")
+    print(f"    ralph daemon    — replaces bash scripts/ralph/run_ralph_loop.sh")
+    print(f"    ralph validate  — replaces bash scripts/ralph/ralph_validate.sh")
+    print(f"    ralph health    — replaces bash scripts/ralph/ralph_health.sh")
+    print(f"    ralph report    — replaces bash scripts/ralph/ralph_report.sh")
+
+
+# ──────────────────────────────────────────────────────────────────────
 # Status Dashboard
 # ──────────────────────────────────────────────────────────────────────
+
+# ──────────────────────────────────────────────────────────────────────
+# Setup: Post-clone initialization (beads init + dolt pull)
+# ──────────────────────────────────────────────────────────────────────
+
+def setup_project() -> None:
+    """Initialize beads and sync ticket data after cloning a Ralph project.
+    
+    Called via: ralph setup
+    
+    This handles everything a developer needs after cloning a Ralph project
+    for the first time on a new system. No manual beads steps required.
+    """
+    project_dir = Path.cwd()
+
+    # Check if this is a Ralph project
+    is_new = (project_dir / ".ralph" / "config.toml").exists()
+    is_legacy = (project_dir / "scripts" / "ralph").exists()
+
+    if not is_new and not is_legacy:
+        print(f"{red('Not a Ralph project.')}")
+        print("Run 'ralph init' to create a new project.")
+        sys.exit(1)
+
+    print()
+    print(f"  {bold('Ralph Setup')} — {project_dir.name}")
+    print()
+
+    all_ok = True
+
+    # ── Beads: init ──────────────────────────────────────────────────
+    if (project_dir / ".beads").exists():
+        print(f"  {checkmark()} Beads already initialized")
+    else:
+        print(f"  Initializing beads (bd init)...")
+        result = run(["bd", "init"], cwd=project_dir)
+        if result.returncode == 0:
+            print(f"  {checkmark()} Beads initialized")
+        else:
+            print(f"  {red('✗')} Beads init failed — run 'bd init' manually")
+            print(f"     {result.stderr.strip() if result.stderr else 'unknown error'}")
+            all_ok = False
+
+    # ── Beads: dolt pull (sync ticket data from remote) ─────────────
+    if (project_dir / ".beads").exists():
+        print(f"  Syncing beads data (bd dolt pull)...")
+        result = run(["bd", "dolt", "pull"], cwd=project_dir)
+        if result.returncode == 0:
+            # Check if we got data
+            result2 = run(["bd", "list", "--json"], cwd=project_dir)
+            if result2.returncode == 0 and result2.stdout.strip():
+                try:
+                    tickets = json.loads(result2.stdout)
+                    count = len(tickets) if isinstance(tickets, list) else 0
+                    print(f"  {checkmark()} Beads synced ({count} tickets)")
+                except json.JSONDecodeError:
+                    print(f"  {checkmark()} Beads synced (bd dolt pull OK)")
+            else:
+                print(f"  {checkmark()} Beads synced (no tickets yet — create some with 'bd new')")
+        else:
+            print(f"  {yellow('⚠')}  bd dolt pull failed — is there a Dolt remote?")
+            print(f"     If this is a brand new project, this is expected. Create a remote with 'bd dolt remote add'")
+            print(f"     If this is a clone, check your Dolt credentials.")
+
+    # ── Git: check remote ────────────────────────────────────────────
+    if (project_dir / ".git").exists():
+        result = run(["git", "remote", "-v"], cwd=project_dir)
+        if result.returncode == 0 and result.stdout.strip():
+            print(f"  {checkmark()} Git remote configured")
+        else:
+            print(f"  {yellow('⚠')}  No git remote — add one with 'git remote add origin <url>'")
+    else:
+        print(f"  {yellow('⚠')}  Not a git repository")
+
+    # ── Verify Ralph config ──────────────────────────────────────────
+    config_path = project_dir / ".ralph" / "config.toml"
+    if config_path.exists():
+        print(f"  {checkmark()} Ralph config found (.ralph/config.toml)")
+    elif is_legacy:
+        print(f"  {yellow('⚠')}  Legacy project detected. Run 'ralph migrate' to upgrade.")
+
+    # ── Prerequisites check ──────────────────────────────────────────
+    missing = check_prerequisites()
+    if missing:
+        print()
+        print(f"  {red('Missing prerequisites:')}")
+        for m in missing:
+            print(f"    {red('✗')} {m}")
+        all_ok = False
+    else:
+        print(f"  {checkmark()} All prerequisites found")
+
+    # ── Summary ──────────────────────────────────────────────────────
+    print()
+    if all_ok:
+        print(f"  {green('✓ Setup complete! Ready to build.')}")
+        print()
+        print(f"  {bold('Next:')}")
+        print(f"    ralph daemon      # Start background build loop")
+        print(f"    ralph status      # Check project health")
+        print(f"    bd new \"My first task\"  # Create your first ticket")
+    else:
+        print(f"  {yellow('⚠')}  Setup completed with warnings. Fix issues above, then run:")
+        print(f"    ralph daemon")
+
 
 def status_dashboard() -> None:
     """Show project health dashboard (ralph status command)."""
     project_dir = Path.cwd()
 
-    # Check if this is a ralph-initialized project
-    if not (project_dir / "scripts" / "ralph" / "ralph_loop.sh").exists():
+    # Check for new-style or legacy project
+    is_new = (project_dir / ".ralph" / "config.toml").exists()
+    is_legacy = (project_dir / "scripts" / "ralph" / "ralph_loop.sh").exists()
+
+    if not is_new and not is_legacy:
         print(f"{red('Not a Ralph-initialized project.')}")
         print("Run 'ralph init' first.")
         sys.exit(1)
@@ -563,9 +801,10 @@ def status_dashboard() -> None:
     print()
     print(f"  {bold('Project:')} {project_dir.name}")
     print(f"  {bold('Ralph version:')} {RALPH_VERSION}")
+    print(f"  {bold('Config type:')} {'global (.ralph/config.toml)' if is_new else 'legacy (scripts/ralph/)'}")
     print()
 
-    # Ralph Loop status
+    # ── Ralph Loop status ────────────────────────────────────────────
     print(f"  {bold('── Ralph Loop ──')}")
     checkpoint = project_dir / ".ralph_checkpoint.json"
     pidfile = project_dir / ".ralph_loop.pid"
@@ -588,11 +827,10 @@ def status_dashboard() -> None:
     else:
         print(f"  Checkpoint:    none (idle)")
 
-    # Metrics
+    # ── Metrics ──────────────────────────────────────────────────────
     metrics_file = project_dir / "logs" / "ralph_metrics.jsonl"
     if metrics_file.exists():
         try:
-            import json
             iterations = 0
             passes = 0
             fails = 0
@@ -627,13 +865,12 @@ def status_dashboard() -> None:
 
     print()
 
-    # Beads Queue
+    # ── Beads Queue ──────────────────────────────────────────────────
     print(f"  {bold('── Beads Queue ──')}")
     if (project_dir / ".beads").exists():
         result = run(["bd", "list", "--json"], cwd=project_dir)
         if result.returncode == 0 and result.stdout.strip():
             try:
-                import json
                 tickets = json.loads(result.stdout)
                 if isinstance(tickets, list):
                     statuses = {}
@@ -647,11 +884,9 @@ def status_dashboard() -> None:
             except json.JSONDecodeError:
                 print(f"  (unable to parse queue)")
         else:
-            # Try bd ready for a simpler view
             result2 = run(["bd", "ready", "--json"], cwd=project_dir)
             if result2.returncode == 0 and result2.stdout.strip():
                 try:
-                    import json
                     ready = json.loads(result2.stdout)
                     if isinstance(ready, list):
                         print(f"  Ready:          {len(ready)}")
@@ -662,20 +897,17 @@ def status_dashboard() -> None:
         print(f"  No beads database found")
     print()
 
-    # Git
+    # ── Git ──────────────────────────────────────────────────────────
     print(f"  {bold('── Git ──')}")
     if (project_dir / ".git").exists():
-        # Branch
         result = run(["git", "branch", "--show-current"], cwd=project_dir)
         branch = result.stdout.strip() if result.returncode == 0 else "unknown"
         print(f"  Branch:        {branch}")
 
-        # Dirty?
         result = run(["git", "status", "--porcelain"], cwd=project_dir)
         dirty = "yes" if result.stdout.strip() else "no"
         print(f"  Dirty:         {dirty}")
 
-        # Ahead/behind
         result = run(["git", "rev-list", "--count", "HEAD..@{u}"], cwd=project_dir)
         ahead = result.stdout.strip() if result.returncode == 0 else "?"
         result = run(["git", "rev-list", "--count", "@{u}..HEAD"], cwd=project_dir)
@@ -685,10 +917,15 @@ def status_dashboard() -> None:
         print(f"  Not a git repository")
     print()
 
-    # Health
+    # ── Health ───────────────────────────────────────────────────────
     print(f"  {bold('── Health ──')}")
-    health_script = project_dir / "scripts" / "ralph" / "ralph_health.sh"
-    if health_script.exists():
+    health_script = None
+    if is_new and (CORE_DIR / "ralph_health.sh").exists():
+        health_script = CORE_DIR / "ralph_health.sh"
+    elif is_legacy and (project_dir / "scripts" / "ralph" / "ralph_health.sh").exists():
+        health_script = project_dir / "scripts" / "ralph" / "ralph_health.sh"
+
+    if health_script:
         result = run(["bash", str(health_script)], cwd=project_dir)
         for line in result.stdout.splitlines():
             line = line.strip()
@@ -709,6 +946,14 @@ def status_dashboard() -> None:
 def main() -> int:
     if "--status" in sys.argv:
         status_dashboard()
+        return 0
+
+    if "--migrate" in sys.argv:
+        migrate_project()
+        return 0
+
+    if "--setup" in sys.argv:
+        setup_project()
         return 0
 
     vars = wizard()

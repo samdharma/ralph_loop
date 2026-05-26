@@ -12,7 +12,7 @@ This prompt is fed to you fresh every iteration. All state lives in the repo: fi
 ## System Context
 
 - **Project root**: {{ PROJECT_ROOT }}
-- **Validation gate**: `bash scripts/ralph/ralph_validate.sh` (must pass before you declare done)
+- **Validation gate**: `ralph validate` (must pass before you declare done)
 - **Test tiering**: The harness may run `--tier=smoke`, `--tier=targeted`, `--tier=integration`, or `--tier=full`. You should run the tier the harness specifies; if unspecified, default to `targeted`. **NEVER run `--tier=e2e` or `--tier=performance` in the Ralph loop. NEVER run the full test suite in the Ralph loop — that is operator-only.**
 - **Task tracker**: **beads** (`bd`). The harness assigns tasks via `bd ready`. You can query task status with `bd show <id>`.
 - **Language**: {{ PROJECT_LANGUAGE }}
@@ -83,7 +83,7 @@ For the selected task:
    - If `--tier=full`: `{{ TEST_COMMAND_FULL }}`
    - **NEVER run `e2e` or `performance` in Ralph loop.**
    - **NEVER run the full suite in the Ralph loop — default is targeted tests only.**
-5. **Lint / type-check** — run `bash scripts/ralph/ralph_validate.sh --tier=<TIER>`. Fix failures.
+5. **Lint / type-check** — run `ralph validate --tier=<TIER>`. Fix failures.
 6. **Update docs** — if behavior changes, update the relevant docs.
 7. **Update trackers** — see below.
 8. **Commit** — `git add` your changes and `git commit` with a descriptive message.
@@ -144,16 +144,16 @@ Do not print this until you have run the validation gate and updated the tracker
 
 ```bash
 # Validate (smoke — fastest, unit tests with fail-fast)
-bash scripts/ralph/ralph_validate.sh --tier=smoke
+ralph validate --tier=smoke
 
 # Validate (targeted — default, only affected tests)
-bash scripts/ralph/ralph_validate.sh
+ralph validate
 
 # Validate (integration)
-bash scripts/ralph/ralph_validate.sh --tier=integration
+ralph validate --tier=integration
 
 # Validate (full suite — explicit only, no e2e/performance)
-bash scripts/ralph/ralph_validate.sh --tier=full
+ralph validate --tier=full
 
 # Run unit tests
 {{ TEST_COMMAND_UNIT }}

@@ -1,28 +1,150 @@
 #!/usr/bin/env bash
 # ralph — Ralph Wiggum Loop Build System CLI
 #
+# Global tool that operates on any Ralph-initialized project.
+# Core scripts live in ~/.ralph/core/. Projects carry only config files.
+#
 # Usage:
 #   ralph init               Initialize a new project
 #   ralph status             Show project health dashboard
+#   ralph loop [options]     Run the agentic build loop (foreground)
+#   ralph daemon [options]   Run the loop as a background daemon
+#   ralph validate [options] Run validation gate
+#   ralph health [options]   Check loop/project health
+#   ralph report [options]   Generate operational report
+#   ralph migrate            Convert legacy project to new config format
 #   ralph version            Show version
-#   ralph help               Show help
+#   ralph help               Show this help
 
 set -euo pipefail
 
 RALPH_HOME="${RALPH_HOME:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 export RALPH_HOME
 
+CORE_DIR="${RALPH_HOME}/core"
+PROJECT_DIR="${PWD}"
+
+# ──────────────────────────────────────────────────────────────
+# Helper: detect if we are in a Ralph project
+# ──────────────────────────────────────────────────────────────
+is_ralph_project() {
+    # New-style: .ralph/config.toml exists
+    if [[ -f "${PROJECT_DIR}/.ralph/config.toml" ]]; then
+        return 0
+    fi
+    # Legacy: scripts/ralph/ exists
+    if [[ -d "${PROJECT_DIR}/scripts/ralph" ]]; then
+        return 0
+    fi
+    return 1
+}
+
+# ──────────────────────────────────────────────────────────────
+# Helper: run a core script from ~/.ralph/core/
+# ──────────────────────────────────────────────────────────────
+run_core() {
+    local script="$1"
+    shift
+    if [[ ! -f "${CORE_DIR}/${script}" ]]; then
+        echo "ralph: error — core script not found: ${CORE_DIR}/${script}"
+        echo "  Is RALPH_HOME set correctly? (current: ${RALPH_HOME})"
+        exit 1
+    fi
+    export RALPH_PROJECT_DIR="${PROJECT_DIR}"
+    export RALPH_CORE_DIR="${CORE_DIR}"
+    exec bash "${CORE_DIR}/${script}" "$@"
+}
+
+# ──────────────────────────────────────────────────────────────
+# Main dispatch
+# ──────────────────────────────────────────────────────────────
+
 case "${1:-}" in
     init)
         shift
         exec python3 "${RALPH_HOME}/init.py" "$@"
         ;;
+
     status)
         exec python3 "${RALPH_HOME}/init.py" --status
         ;;
+
+    setup)
+        # Post-clone / new-system setup: initialize everything needed to build
+        shift
+        exec python3 "${RALPH_HOME}/init.py" --setup "$@"
+        ;;
+
+    loop)
+        shift
+        if ! is_ralph_project; then
+            echo "ralph: not in a Ralph project (no .ralph/config.toml or scripts/ralph/ found)"
+            echo "  Run 'ralph init' first to create a project."
+            exit 1
+        fi
+        # Auto-check: beads missing? suggest setup
+        if [[ ! -d "${PROJECT_DIR}/.beads" ]]; then
+            echo "ralph: beads not initialized. Run 'ralph setup' first."
+            exit 1
+        fi
+        run_core "ralph_loop.sh" "$@"
+        ;;
+
+    daemon)
+        shift
+        if ! is_ralph_project; then
+            echo "ralph: not in a Ralph project (no .ralph/config.toml or scripts/ralph/ found)"
+            echo "  Run 'ralph init' first to create a project."
+            exit 1
+        fi
+        # Auto-check: beads missing? suggest setup
+        if [[ ! -d "${PROJECT_DIR}/.beads" ]]; then
+            echo "ralph: beads not initialized. Run 'ralph setup' first."
+            exit 1
+        fi
+        export RALPH_PROJECT_DIR="${PROJECT_DIR}"
+        export RALPH_CORE_DIR="${CORE_DIR}"
+        exec bash "${CORE_DIR}/run_ralph_loop.sh" "$@"
+        ;;
+
+    validate)
+        shift
+        if ! is_ralph_project; then
+            echo "ralph: not in a Ralph project (no .ralph/config.toml or scripts/ralph/ found)"
+            echo "  Run 'ralph init' first to create a project."
+            exit 1
+        fi
+        run_core "ralph_validate.sh" "$@"
+        ;;
+
+    health)
+        shift
+        if ! is_ralph_project; then
+            echo "ralph: not in a Ralph project (no .ralph/config.toml or scripts/ralph/ found)"
+            echo "  Run 'ralph init' first to create a project."
+            exit 1
+        fi
+        run_core "ralph_health.sh" "$@"
+        ;;
+
+    report)
+        shift
+        if ! is_ralph_project; then
+            echo "ralph: not in a Ralph project (no .ralph/config.toml or scripts/ralph/ found)"
+            echo "  Run 'ralph init' first to create a project."
+            exit 1
+        fi
+        run_core "ralph_report.sh" "$@"
+        ;;
+
+    migrate)
+        exec python3 "${RALPH_HOME}/init.py" --migrate
+        ;;
+
     version|--version|-v)
         echo "ralph v1.0.0"
         ;;
+
     help|--help|-h|"")
         cat <<'EOF'
 ╔══════════════════════════════════════════════════════════════╗
@@ -30,25 +152,55 @@ case "${1:-}" in
 ║         "I'm helping!"                                      ║
 ╚══════════════════════════════════════════════════════════════╝
 
+  Global tool — core scripts live in ~/.ralph/core/.
+  Projects carry only config files (.ralph/config.toml).
+
 Commands:
-  ralph init       Initialize a new project with the Ralph build system
-  ralph status     Show project health dashboard
-  ralph version    Show version
-  ralph help       Show this help
+  ralph init        Initialize a new project
+  ralph setup       Post-clone setup (beads init, dolt pull)
+  ralph status      Show project health dashboard
+  ralph loop        Run the agentic build loop (foreground)
+  ralph daemon      Run the loop as a background daemon
+  ralph validate    Run validation gate (tests + lint + type-check)
+  ralph health      Check loop and project health
+  ralph report      Generate daily/weekly operational report
+  ralph migrate     Convert legacy project to new config format
+  ralph version     Show version
+  ralph help        Show this help
 
-Project commands (inside an initialized project):
-  bash scripts/ralph/ralph_loop.sh      Run the agentic build loop
-  bash scripts/ralph/run_ralph_loop.sh  Run as background daemon
-  bash scripts/ralph/ralph_validate.sh  Run validation gate
-  bash scripts/ralph/ralph_health.sh    Check loop health
-  bash scripts/ralph/ralph_report.sh    Generate operational report
+Loop Options (ralph loop / ralph daemon):
+  --ticket=<id>     Run a single ticket and exit
+  --agent=kimi|pi   Specify AI agent (default: auto-detect)
+  --tier=<tier>     Test tier: smoke|targeted|integration|full
+  --tag=<tag>       Filter tickets by label (e.g., --tag=phase-1)
+  --force           Skip dirty-worktree check
 
-Quick start:
-  ralph init                   # Answer a few questions
+Validate Options (ralph validate):
+  --tier=<tier>     Test tier: smoke|targeted|integration|full|e2e|performance
+
+Report Options (ralph report):
+  --daily           Generate daily report (last 24h)
+  --weekly          Generate weekly report (last 7 days)
+
+Quick Start:
+  ralph init                    # Create a new project (beads included)
   cd <your-project>
-  bash scripts/ralph/run_ralph_loop.sh  # Start building!
+  ralph daemon                  # Start building (background)
+  ralph status                  # Check progress
+
+Clone & Build (someone else's Ralph project):
+  git clone <repo-url> && cd project
+  ralph setup                   # One command: beads init + dolt pull
+  ralph daemon                  # Start building
+
+New System Setup:
+  git clone https://github.com/samdharma/Ralph_loop.git ~/.ralph
+  bash ~/.ralph/scripts/install.sh
+  source ~/.zshrc               # (or ~/.bashrc)
+  ralph version                 # Verify: ralph v1.0.0
 EOF
         ;;
+
     *)
         echo "ralph: unknown command '${1}'"
         echo "Run 'ralph help' for usage."

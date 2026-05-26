@@ -8,7 +8,36 @@ tickets. Just `ralph init` and let the loop build your project.
 
 ---
 
-## What Ralph Does
+## Architecture: Global Tool, Thin Projects
+
+Ralph is a **global CLI tool** installed at `~/.ralph/`. Core build scripts live there.
+Your project carries **only config files** — no build system scripts in your repo.
+
+```
+~/.ralph/                          ← Global install (one per system)
+├── core/                          ← 12 build scripts live HERE
+├── templates/                     ← Project scaffolding templates
+└── bin/ralph                      ← CLI entry point
+
+my-project/                        ← Your GitHub repo (clean!)
+├── .ralph/config.toml             ← Project config (committed)
+├── AGENTS.md                      ← Project rules (committed)
+├── config/
+│   ├── ralph_preflight.sh         ← Your guardrails (committed)
+│   └── TEST_MAP.yaml              ← Test mapping (committed)
+├── docs/agent/
+│   ├── PROMPT.md                  ← Agent context (committed)
+│   └── PROGRESS.md                ← Auto-updated (gitignored)
+├── src/                           ← Your code
+└── tests/                         ← Your tests
+```
+
+**What someone clones:** just your code + config files. No Ralph build scripts.
+They install Ralph once globally, then `cd` into any Ralph project and run `ralph daemon`.
+
+---
+
+## How Ralph Works
 
 ```
 ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
@@ -31,73 +60,65 @@ tickets. Just `ralph init` and let the loop build your project.
 
 ---
 
-## Quick Start
+## Setting Up on a New System
 
 ### Prerequisites
 
 - **bash** 4+ (macOS/Linux)
 - **Python** 3.10+
 - **git**
-- **[beads](https://github.com/beadsboard/beads)** (`bd`) — issue tracker
+- **[beads](https://github.com/beadsboard/beads)** (`bd`) — issue tracker (Ralph requires beads for ticket management)
 - **kimi** or **pi** — at least one AI agent CLI
 
-### Install
+### Install Ralph Globally
 
 ```bash
-# Clone
+# Clone Ralph to ~/.ralph
 git clone https://github.com/samdharma/Ralph_loop.git ~/.ralph
 
-# Install (creates symlink, sets RALPH_HOME)
+# Run the installer (creates symlink, sets RALPH_HOME)
 bash ~/.ralph/scripts/install.sh
 
+# Reload your shell
+source ~/.zshrc    # or source ~/.bashrc
+
 # Verify
-ralph version
+ralph version      # → ralph v1.0.0
 ```
 
-### Create Your First Project
+### Clone an Existing Ralph Project
+
+```bash
+# Clone the project — it has NO Ralph build scripts, only config
+git clone https://github.com/your-org/my-trading-bot.git
+cd my-trading-bot
+
+# One command: initializes beads, syncs ticket data, checks everything
+ralph setup
+
+# Start building
+ralph daemon
+```
+
+That's it. `ralph setup` handles everything — no manual `bd init`, no `bd dolt pull`.
+
+### Create a New Project
 
 ```bash
 ralph init
 ```
 
 Answer 7 questions. Ralph scaffolds:
+- `.ralph/config.toml` — project configuration (committed to repo)
+- `AGENTS.md` — project rules and conventions
+- `docs/agent/PROMPT.md` — agent prompt (customize this!)
+- `config/ralph_preflight.sh` — guardrail rules
+- `config/TEST_MAP.yaml` — source-to-test mappings
+- `.gitignore` — ignores Ralph runtime artifacts
 - Git + Beads initialized
-- 12 core scripts in `scripts/ralph/`
-- `AGENTS.md`, `.gitignore`, prompt templates, preflight config, test map
 
-### Start Building
-
-```bash
-cd your-project
-bash scripts/ralph/run_ralph_loop.sh    # Background daemon
-# or
-bash scripts/ralph/ralph_loop.sh --ticket=<id> --agent=kimi  # Single-shot
-```
-
----
-
-## Documentation
-
-### 📖 HTML (Recommended — Open in Browser)
-
-**[`docs/ralph_documentation.html`](docs/ralph_documentation.html)** — Complete single-page documentation with:
-- GitHub dark theme (no bright backgrounds, optimized for screen reading)
-- Mermaid.js diagrams, flowcharts, and sequence diagrams
-- Sidebar navigation, search-friendly headings, responsive layout
-
-### 📝 Markdown
-
-| Doc | Topic |
-|-----|-------|
-| [BUILD_SYSTEM_OVERVIEW.md](docs/BUILD_SYSTEM_OVERVIEW.md) | Layman-friendly explanation of what Ralph is and does |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flow, component diagram |
-| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | New computer setup — high level & step-by-step |
-| [GETTING_STARTED.md](docs/GETTING_STARTED.md) | First project after install — complete walkthrough |
-| [DAILY_USAGE.md](docs/DAILY_USAGE.md) | Day-to-day building, must-have files, app specs |
-| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Failure scenarios, monitoring, cleanup, restart |
-| [TICKET_MANAGEMENT.md](docs/TICKET_MANAGEMENT.md) | Naming rules, beads workflow, monitoring |
-| [CONFIGURATION.md](docs/CONFIGURATION.md) | All environment variables and their defaults |
-| [FAQ.md](docs/FAQ.md) | Common questions and answers |
+**No build scripts are copied into the project.** Ralph scripts live in `~/.ralph/core/` and
+are invoked via the global `ralph` CLI.
 
 ---
 
@@ -105,55 +126,108 @@ bash scripts/ralph/ralph_loop.sh --ticket=<id> --agent=kimi  # Single-shot
 
 ```
 my-project/
-├── AGENTS.md                  # Project rules + Ralph quick reference
-├── .gitignore                 # Secrets, artifacts, Ralph runtime files
+├── .ralph/
+│   └── config.toml              # ← Single source of truth (committed)
+├── AGENTS.md                    # ← Project rules (committed)
+├── .gitignore                   # ← Ignores runtime artifacts only
 ├── config/
-│   ├── ralph_preflight.sh     # Your guardrail rules
-│   └── TEST_MAP.yaml          # Source → test file mappings
+│   ├── ralph_preflight.sh       # ← Your guardrail rules (committed)
+│   └── TEST_MAP.yaml            # ← Source → test file mappings (committed)
 ├── docs/
-│   ├── agent/
-│   │   ├── PROMPT.md          # Base agent prompt (customize this!)
-│   │   ├── PROGRESS.md        # Auto-updated iteration log
-│   │   └── prompts/           # Type-specific guidance (bugfix, docs, etc.)
-│   └── reference/             # Your phase build docs go here
-├── scripts/
-│   └── ralph/                 # 12 Ralph core scripts
-├── src/                       # Your source code
-├── tests/                     # Your test suite
-└── logs/                      # Ralph metrics + loop logs
+│   └── agent/
+│       ├── PROMPT.md            # ← Agent prompt — customize this! (committed)
+│       ├── PROGRESS.md          # ← Auto-updated iteration log (gitignored)
+│       └── prompts/             # ← Type-specific guidance (bugfix, docs, etc.)
+├── src/                         # ← Your source code
+├── tests/                       # ← Your test suite
+└── logs/                        # ← Ralph metrics + loop logs (gitignored)
 ```
+
+**What's NOT in the repo:** `scripts/ralph/` with 12 build scripts. They're in `~/.ralph/core/`.
 
 ---
 
-## Commands (inside a Ralph project)
+## Commands (Global CLI)
 
 ```bash
-# Loop (background daemon, one instance at a time)
-bash scripts/ralph/run_ralph_loop.sh
+# Initialize a new project (beads included)
+ralph init
 
-# Loop (foreground, single ticket)
-bash scripts/ralph/ralph_loop.sh --ticket=<id> --agent=kimi
+# Post-clone setup (beads init + dolt pull in one command)
+ralph setup
 
-# Validate current work (tests + lint + type-check)
-bash scripts/ralph/ralph_validate.sh --tier=targeted
+# Run the build loop (foreground, single ticket mode)
+ralph loop --ticket=<id> --agent=pi
+
+# Run the build loop (foreground, continuous)
+ralph loop
+
+# Run as background daemon (recommended)
+ralph daemon
+
+# Run validation gate on current work
+ralph validate --tier=targeted
 
 # Check loop health
-bash scripts/ralph/ralph_health.sh --verbose
+ralph health --verbose
 
 # Generate daily/weekly report
-bash scripts/ralph/ralph_report.sh --daily
+ralph report --daily
+
+# Project dashboard
+ralph status
+
+# Convert legacy project to new config format
+ralph migrate
+```
+
+### Loop Options
+
+| Flag | Description |
+|------|-------------|
+| `--ticket=<id>` | Run a single ticket and exit |
+| `--agent=kimi\|pi` | Specify AI agent |
+| `--tier=smoke\|targeted\|integration\|full` | Test tier (default: targeted) |
+| `--tag=<tag>` | Filter tickets by label (e.g., `--tag=phase-1`) |
+| `--force` | Skip dirty-worktree check |
+
+### Validate Options
+
+```
+ralph validate --tier=smoke        # Fastest (unit tests, fail-fast)
+ralph validate --tier=targeted     # Only affected tests (default)
+ralph validate --tier=integration  # Integration tests
+ralph validate --tier=full         # All tests except e2e/perf (operator only)
 ```
 
 ---
 
-## CLI Reference
+## Comparison: Before vs After
+
+| Aspect | Before (Embedded) | After (Global Tool) |
+|--------|-------------------|---------------------|
+| **Build scripts in repo** | 12 scripts in `scripts/ralph/` | Zero (in `~/.ralph/core/`) |
+| **Git noise on Ralph updates** | Every project changes | One global update |
+| **Clone & build** | Clone, install Ralph, hope versions match | Clone, `ralph daemon` |
+| **Commands** | `bash scripts/ralph/ralph_loop.sh` | `ralph loop` |
+| **Config** | Scattered across scripts, env vars | `.ralph/config.toml` |
+| **CI/CD pollution** | Ralph scripts in CI context | No Ralph in CI (dev tool only) |
+
+---
+
+## Migration: Legacy → New Format
+
+If you have an existing project with `scripts/ralph/`:
 
 ```bash
-ralph init       # Scaffold a new project
-ralph status     # Health dashboard for current project
-ralph version    # Show version
-ralph help       # Show this help
+cd your-project
+ralph migrate
 ```
+
+This:
+- Creates `.ralph/config.toml` from your existing setup
+- Updates `AGENTS.md` and `PROMPT.md` to use `ralph` commands
+- You can then `rm -rf scripts/ralph/` to clean up
 
 ---
 
@@ -163,9 +237,33 @@ ralph help       # Show this help
 |-------|--------|
 | Phase 1 — Extract & Clean | ✅ Complete |
 | Phase 2 — `ralph init` Wizard | ✅ Complete |
-| Phase 3 — Documentation & Polish | 🚧 In Progress |
+| Phase 3 — Documentation & Polish | ✅ Complete |
+| Phase 4 — Global Tool Decoupling | ✅ Complete |
 
-See `PHASE_1_ROADMAP.md`, `PHASE_2_ROADMAP.md`, `PHASE_3_ROADMAP.md`.
+---
+
+## Documentation
+
+### 📖 HTML (Recommended — Open in Browser)
+
+**[`docs/ralph_documentation.html`](docs/ralph_documentation.html)** — Complete single-page documentation with:
+- GitHub dark theme
+- Mermaid.js diagrams and flowcharts
+- Sidebar navigation, search-friendly headings, responsive layout
+
+### 📝 Markdown
+
+| Doc | Topic |
+|-----|-------|
+| [BUILD_SYSTEM_OVERVIEW.md](docs/BUILD_SYSTEM_OVERVIEW.md) | Layman-friendly explanation |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flow |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | New system setup |
+| [GETTING_STARTED.md](docs/GETTING_STARTED.md) | First project walkthrough |
+| [DAILY_USAGE.md](docs/DAILY_USAGE.md) | Day-to-day workflow |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Failure scenarios, recovery |
+| [TICKET_MANAGEMENT.md](docs/TICKET_MANAGEMENT.md) | Beads workflow |
+| [CONFIGURATION.md](docs/CONFIGURATION.md) | All environment variables |
+| [FAQ.md](docs/FAQ.md) | Common questions |
 
 ---
 

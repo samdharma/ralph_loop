@@ -7,6 +7,15 @@
 
 set -euo pipefail
 
+# Detect ralph core location
+if [[ -n "${RALPH_CORE_DIR:-}" ]]; then
+    CORE_DIR="${RALPH_CORE_DIR}"
+elif [[ -d "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" ]]; then
+    CORE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    CORE_DIR=""
+fi
+
 PROJECT_DIR="${RALPH_PROJECT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "${PROJECT_DIR}"
 
@@ -28,7 +37,7 @@ if [[ -f "${PIDFILE}" ]]; then
 fi
 
 # Determine ralph_loop.sh location
-RALPH_LOOP_SCRIPT="${RALPH_LOOP_SCRIPT:-${PROJECT_DIR}/scripts/ralph/ralph_loop.sh}"
+RALPH_LOOP_SCRIPT="${RALPH_LOOP_SCRIPT:-${CORE_DIR}/ralph_loop.sh}"
 
 # Start ralph_loop.sh in background
 echo "[run_ralph_loop] Starting ralph_loop.sh..."
