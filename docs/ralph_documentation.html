@@ -415,14 +415,14 @@ bd init
 bd dolt pull
 
 # Start building
-bash scripts/ralph/run_ralph_loop.sh</code></pre>
+ralph daemon</code></pre>
 
 <h3>Post-Clone Setup Steps</h3>
 <ol>
   <li><code>bd init</code> — initializes the local beads database</li>
   <li><code>bd dolt pull</code> — syncs ticket data from the Dolt remote</li>
   <li>Review <code>AGENTS.md</code> and <code>docs/agent/PROMPT.md</code> for project context</li>
-  <li>Start the loop: <code>bash scripts/ralph/run_ralph_loop.sh</code></li>
+  <li>Start the loop: <code>ralph daemon</code></li>
 </ol>
 
 <h3>What's in the Repo</h3>
@@ -459,7 +459,7 @@ bash scripts/ralph/run_ralph_loop.sh</code></pre>
   <li>Git + Beads initialized</li>
 </ul>
 
-<div class="alert alert-info"><strong>Ralph scripts are copied into <code>scripts/ralph/</code> during init.</strong> They are invoked as <code>bash scripts/ralph/&lt;command&gt;.sh</code> from within the project.</div>
+<div class="alert alert-info"><strong>Ralph scripts are copied into <code>scripts/ralph/</code> during init.</strong> Use the <code>ralph</code> CLI from anywhere inside the project: <code>ralph loop</code>, <code>ralph daemon</code>, <code>ralph validate</code>, etc. The CLI auto-discovers the project root and dispatches to the correct scripts.</div>
 
 <h3 id="must-have-files">Must-Have Files (Mandatory Before Building)</h3>
 
@@ -496,26 +496,30 @@ You create tickets in beads, Ralph picks them up and builds them.</p>
   </tbody>
 </table></div>
 
-<h4>Project Scripts (inside project directory)</h4>
+<h4>Project Commands (run from inside any Ralph project)</h4>
 <div class="data-table-wrapper"><table>
   <thead><tr><th>Command</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td><code>bash scripts/ralph/run_ralph_loop.sh</code></td><td>Run build loop as background daemon</td></tr>
-    <tr><td><code>bash scripts/ralph/ralph_loop.sh --ticket=&lt;id&gt; --agent=pi</code></td><td>Single ticket, foreground</td></tr>
-    <tr><td><code>bash scripts/ralph/ralph_loop.sh --tag=phase-1</code></td><td>Filter by label, continuous</td></tr>
-    <tr><td><code>bash scripts/ralph/ralph_validate.sh --tier=targeted</code></td><td>Run validation gate</td></tr>
-    <tr><td><code>bash scripts/ralph/ralph_health.sh --verbose</code></td><td>Check loop health</td></tr>
-    <tr><td><code>bash scripts/ralph/ralph_report.sh --daily</code></td><td>Generate daily report</td></tr>
-    <tr><td><code>python3 scripts/ralph/ralph_metrics_viewer.py</code></td><td>View metrics analytics</td></tr>
+    <tr><td><code>ralph loop</code></td><td>Run build loop — foreground, picks next ready ticket each iteration</td></tr>
+    <tr><td><code>ralph loop --ticket=&lt;id&gt; --agent=pi</code></td><td>Single ticket, foreground, one iteration</td></tr>
+    <tr><td><code>ralph loop --tag=phase-1</code></td><td>Filter by label, continuous</td></tr>
+    <tr><td><code>ralph daemon</code></td><td>Run build loop as background daemon (PID-file gated)</td></tr>
+    <tr><td><code>ralph validate --tier=targeted</code></td><td>Run validation gate (pytest + lint + type-check)</td></tr>
+    <tr><td><code>ralph health --verbose</code></td><td>5-point health diagnostic</td></tr>
+    <tr><td><code>ralph report --daily</code></td><td>Generate daily operational report</td></tr>
+    <tr><td><code>ralph report --weekly</code></td><td>Generate weekly operational report</td></tr>
+    <tr><td><code>ralph metrics</code></td><td>View loop metrics and analytics</td></tr>
   </tbody>
 </table></div>
+
+<div class="alert alert-info"><strong>How it works:</strong> <code>ralph loop</code> walks up from your current directory looking for <code>scripts/ralph/ralph_loop.sh</code>. When found, it dispatches to that project's local scripts. You can run <code>ralph validate</code>, <code>ralph health</code>, etc. from anywhere inside the project tree.</div>
 
 <h4>Morning — Start</h4>
 <pre><code>cd ~/Dev/my-project
 git pull --rebase
 bd dolt pull
 bd ready
-bash scripts/ralph/run_ralph_loop.sh</code></pre>
+ralph daemon</code></pre>
 
 <h4>During the Day — Monitor</h4>
 <pre><code>ralph status
@@ -527,7 +531,7 @@ git log --oneline -10</code></pre>
 <pre><code>cat .ralph_loop.pid | xargs kill
 git log --oneline --since="1 day ago"
 bd list --status closed
-bash scripts/ralph/ralph_report.sh --daily
+ralph report --daily
 git push && bd dolt push</code></pre>
 
 
@@ -618,12 +622,12 @@ tail -f logs/ralph_metrics.jsonl | python3 -m json.tool</code></pre>
 <pre><code>ralph status</code></pre>
 
 <h3>Periodic Health Check (crontab)</h3>
-<pre><code>0 * * * * cd /path/to/project && bash scripts/ralph/ralph_health.sh >> logs/health.log 2>&1</code></pre>
+<pre><code>0 * * * * cd /path/to/project && ralph health >> logs/health.log 2>&1</code></pre>
 
 <h3>Metrics Analytics</h3>
-<pre><code>python3 scripts/ralph/ralph_metrics_viewer.py
-bash scripts/ralph/ralph_report.sh --daily
-bash scripts/ralph/ralph_report.sh --weekly</code></pre>
+<pre><code>ralph metrics
+ralph report --daily
+ralph report --weekly</code></pre>
 
 <hr class="section-divider">
 
@@ -631,7 +635,7 @@ bash scripts/ralph/ralph_report.sh --weekly</code></pre>
 <h1 id="troubleshooting">Troubleshooting</h1>
 
 <h3>Quick Diagnostic</h3>
-<pre><code>bash scripts/ralph/ralph_health.sh --verbose</code></pre>
+<pre><code>ralph health --verbose</code></pre>
 
 <h3>Scenario 1: Ralph Will Not Start</h3>
 <div class="mermaid-wrapper"><div class="mermaid">
@@ -653,17 +657,17 @@ graph TD
 ps -p $(cat .ralph_loop.pid)
 kill $(cat .ralph_loop.pid)
 rm -f .ralph_loop.pid .ralph_checkpoint.json
-bash scripts/ralph/run_ralph_loop.sh</code></pre>
+ralph daemon</code></pre>
 
 <h3>Scenario 3: Agent Keeps Failing Validation</h3>
-<pre><code>bash scripts/ralph/ralph_validate.sh --tier=targeted
+<pre><code>ralph validate --tier=targeted
 # Fix manually if lint issue:
 black src/ tests/
 isort src/ tests/
 # Block the ticket and move on:
 bd update &lt;id&gt; --status blocked --notes="Needs manual intervention"
 rm -f .ralph_checkpoint.json
-bash scripts/ralph/run_ralph_loop.sh</code></pre>
+ralph daemon</code></pre>
 
 <hr class="section-divider">
 
@@ -697,7 +701,7 @@ try:
         if tid: subprocess.run(['bd','update',tid,'--status','open'])
 except: pass
 "
-bash scripts/ralph/run_ralph_loop.sh</code></pre>
+ralph daemon</code></pre>
 
 <hr class="section-divider">
 
@@ -710,7 +714,7 @@ git status
 git log --oneline -5
 git push
 bd dolt push
-bash scripts/ralph/run_ralph_loop.sh</code></pre>
+ralph daemon</code></pre>
 
 <h3>Pull Remote Changes While Ralph Is Running</h3>
 <pre><code>cat .ralph_loop.pid | xargs kill
@@ -719,7 +723,7 @@ git stash
 git pull --rebase
 bd dolt pull
 git stash pop
-bash scripts/ralph/run_ralph_loop.sh</code></pre>
+ralph daemon</code></pre>
 
 <h3>Debug Data Collection</h3>
 <pre><code>echo "=== RALPH DEBUG BUNDLE ===" > /tmp/ralph_debug.txt
@@ -729,7 +733,7 @@ git status >> /tmp/ralph_debug.txt 2>&1
 git log --oneline -10 >> /tmp/ralph_debug.txt 2>&1
 bd list >> /tmp/ralph_debug.txt 2>&1
 tail -50 logs/ralph_loop.log >> /tmp/ralph_debug.txt 2>&1
-bash scripts/ralph/ralph_health.sh --verbose >> /tmp/ralph_debug.txt 2>&1
+ralph health --verbose >> /tmp/ralph_debug.txt 2>&1
 echo "Bundle saved to /tmp/ralph_debug.txt"</code></pre>
 
 <hr class="section-divider">
@@ -854,7 +858,7 @@ ralph init               # scaffolds alongside your existing code
 bd init                  # initialize local beads database
 bd dolt pull             # sync ticket data from remote
 # Review AGENTS.md and PROMPT.md for project context
-bash scripts/ralph/run_ralph_loop.sh</code></pre>
+ralph daemon</code></pre>
 
 <!-- ═══════════════ BUILD PHASE DOCS ═══════════════ -->
 <h2>Build Phase Docs</h2>
@@ -886,7 +890,7 @@ Four layers, from quick glance to deep dive:</p>
   <thead><tr><th>Layer</th><th>Command</th><th>What It Shows</th></tr></thead>
   <tbody>
     <tr><td><strong>Dashboard</strong></td><td><code>ralph status</code></td><td>Loop status, iterations today, pass rate, queue depth, git status, health</td></tr>
-    <tr><td><strong>Health check</strong></td><td><code>bash scripts/ralph/ralph_health.sh --verbose</code></td><td>5-point diagnostic: metrics age, checkpoint, beads DB, git, sync</td></tr>
+    <tr><td><strong>Health check</strong></td><td><code>ralph health --verbose</code></td><td>5-point diagnostic: metrics age, checkpoint, beads DB, git, sync</td></tr>
     <tr><td><strong>Live log</strong></td><td><code>tail -f logs/ralph_loop.log</code></td><td>Real-time loop output, GATE results, errors</td></tr>
     <tr><td><strong>Metrics analytics</strong></td><td><code>python3 scripts/ralph/ralph_metrics_viewer.py</code></td><td>Iterations per day, pass rate, avg duration, tier breakdown</td></tr>
   </tbody>
@@ -894,16 +898,16 @@ Four layers, from quick glance to deep dive:</p>
 
 <p><strong>Q: How do I create daily and weekly reports?</strong></p>
 <pre><code># Today's activity (text)
-bash scripts/ralph/ralph_report.sh --daily
+ralph report --daily
 
 # Specific date
-bash scripts/ralph/ralph_report.sh --daily 2026-05-25
+ralph report --daily 2026-05-25
 
 # Current week (text)
-bash scripts/ralph/ralph_report.sh --weekly
+ralph report --weekly
 
 # HTML format (open in browser)
-bash scripts/ralph/ralph_report.sh --daily --output html --save /tmp/daily.html
+ralph report --daily --output html --save /tmp/daily.html
 open /tmp/daily.html</code></pre>
 
 <p><strong>Q: What metrics do reports show?</strong></p>
@@ -921,13 +925,13 @@ open /tmp/daily.html</code></pre>
 <pre><code># Add to crontab (crontab -e)
 
 # Hourly health check
-0 * * * * cd /path/to/project && bash scripts/ralph/ralph_health.sh >> logs/health.log 2>&1
+0 * * * * cd /path/to/project && ralph health >> logs/health.log 2>&1
 
 # Daily report at 6 PM
-0 18 * * * cd /path/to/project && bash scripts/ralph/ralph_report.sh --daily >> logs/daily_report.log 2>&1
+0 18 * * * cd /path/to/project && ralph report --daily >> logs/daily_report.log 2>&1
 
 # Alert if health fails (macOS notification)
-0 * * * * cd /path/to/project && bash scripts/ralph/ralph_health.sh || osascript -e 'display notification "Ralph loop is unhealthy" with title "Ralph Alert"'</code></pre>
+0 * * * * cd /path/to/project && ralph health || osascript -e 'display notification "Ralph loop is unhealthy" with title "Ralph Alert"'</code></pre>
 
 <p><strong>Q: What red flags should I watch for in the logs?</strong></p>
 <ul>
@@ -957,7 +961,7 @@ Yes, but stop the loop first. Use <code>bd update &lt;id&gt; --status blocked</c
 
 <p><strong>Q: Ralph keeps failing on the same ticket — what do I do?</strong></p>
 <pre><code># 1. See what's failing
-bash scripts/ralph/ralph_validate.sh --tier=targeted
+ralph validate --tier=targeted
 
 # 2. Fix manually if it's a simple lint/format issue
 black src/ tests/
@@ -966,7 +970,7 @@ isort src/ tests/
 # 3. If the task is too complex, block it and move on
 bd update &lt;id&gt; --status blocked --notes="Needs manual intervention or splitting"
 rm -f .ralph_checkpoint.json
-bash scripts/ralph/run_ralph_loop.sh</code></pre>
+ralph daemon</code></pre>
 
 <p><strong>Q: My computer went to sleep while Ralph was running — what happens?</strong><br>
 The agent process pauses. When the computer wakes, the agent continues. If the agent times out, the checkpoint is retained and the loop resumes from that checkpoint on the next iteration. No data loss — the checkpoint system handles this gracefully.</p>
@@ -996,7 +1000,7 @@ git log --oneline -10 >> /tmp/ralph_debug.txt 2>&1
 git reflog -10 >> /tmp/ralph_debug.txt 2>&1
 bd list >> /tmp/ralph_debug.txt 2>&1
 tail -50 logs/ralph_loop.log >> /tmp/ralph_debug.txt 2>&1
-bash scripts/ralph/ralph_health.sh --verbose >> /tmp/ralph_debug.txt 2>&1
+ralph health --verbose >> /tmp/ralph_debug.txt 2>&1
 cat .ralph_checkpoint.json 2>/dev/null >> /tmp/ralph_debug.txt || echo "(none)" >> /tmp/ralph_debug.txt
 echo "Bundle saved to /tmp/ralph_debug.txt"</code></pre>
 
