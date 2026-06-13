@@ -1,7 +1,6 @@
-# Ralph Wiggum Loop — Architecture v1.2
+# Architecture — Ralph Wiggum Loop Build System
 
 > System design, data flow, component relationships, and design decisions.
-> **Revision**: 2026-06-13 — Updated for 4-stage pipeline + global tool architecture
 
 ---
 
@@ -14,13 +13,13 @@ graph TB
         WIZARD[init.py Wizard]
     end
 
-    subgraph "Ralph Home (~/.ralph)"
-        CORE[core/ — 12 generic scripts]
+    subgraph "Ralph Home — ~/.ralph"
+        CORE[core/ — 12 build scripts]
         TEMPLATES[templates/ — 7 .j2 templates]
     end
 
     subgraph "User Project"
-        subgraph "Project Config (committed to repo)"
+        subgraph "Config — committed to repo"
             RALPH_CFG[.ralph/config.toml]
             AGENTS[AGENTS.md]
             PROMPT[docs/agent/PROMPT.md]
@@ -31,7 +30,7 @@ graph TB
         end
 
         subgraph "External Tools"
-            BEADS[beads (bd)]
+            BEADS[beads — bd]
             GIT[git]
         end
 
@@ -42,20 +41,19 @@ graph TB
     end
 
     CLI --> WIZARD
-    WIZARD --> |renders| TEMPLATES
-    WIZARD --> |writes| RALPH_CFG
-    CORE --> |ralph loop| BEADS
-    CORE --> |sources| PF_CONF
-    CORE --> |invokes| KIMI
-    CORE --> |invokes| PI
-    CORE --> |validates via| VALIDATE
-    CORE --> |commits to| GIT
-    CLI --> |sources| CORE
+    WIZARD -->|renders| TEMPLATES
+    WIZARD -->|writes| RALPH_CFG
     TEMPLATES --> AGENTS
     TEMPLATES --> PROMPT
     TEMPLATES --> SESSION_PROMPTS
     TEMPLATES --> PF_CONF
     TEMPLATES --> TEST_MAP
+    CORE -->|ralph loop| BEADS
+    CORE -->|sources| PF_CONF
+    CORE -->|invokes| KIMI
+    CORE -->|invokes| PI
+    CORE -->|commits to| GIT
+    CLI -->|dispatches to| CORE
 ```
 
 ---
@@ -64,14 +62,9 @@ graph TB
 
 ```mermaid
 graph LR
-    D[DESIGN] --> T[TEST]
-    T --> I[IMPLEMENT]
-    I --> V[VERIFY]
-
-    style D fill:#1e293b,stroke:#38bdf8,color:#e2e8f0
-    style T fill:#1e293b,stroke:#f59e0b,color:#e2e8f0
-    style I fill:#1e293b,stroke:#10b981,color:#e2e8f0
-    style V fill:#1e293b,stroke:#8b5cf6,color:#e2e8f0
+    D[DESIGN<br/>ralph design] --> T[TEST<br/>ralph test]
+    T --> I[IMPLEMENT<br/>ralph implement]
+    I --> V[VERIFY<br/>ralph verify]
 ```
 
 Each stage is an independent agent invocation with a stage-specific prompt:
@@ -79,20 +72,15 @@ Each stage is an independent agent invocation with a stage-specific prompt:
 | Stage | Command | Prompt | Output |
 |-------|---------|--------|--------|
 | **DESIGN** | `ralph design --ticket=<id>` | `sessions/design.md` | Architecture plan in PROGRESS.md |
-| **TEST** | `ralph test --ticket=<id>` | `sessions/test.md` | Functional/system tests (should FAIL) |
-| **IMPLEMENT** | `ralph implement --ticket=<id>` | `sessions/implement.md` | Code + unit tests (all tests pass) |
+| **TEST** | `ralph test --ticket=<id>` | `sessions/test.md` | Functional/system tests — should FAIL |
+| **IMPLEMENT** | `ralph implement --ticket=<id>` | `sessions/implement.md` | Code + unit tests — all pass |
 | **VERIFY** | `ralph verify --ticket=<id>` | `sessions/verify.md` | Pass/fail report, ticket closed or flagged |
 
 ### Why 4 Stages?
 
-```
-Before (anti-pattern):  IMPLEMENT writes tests + code -> marks own homework
-After (correct):        TEST writes tests from spec -> IMPLEMENT passes them -> VERIFY checks
-```
+The TEST stage writes functional and system tests from the design spec **before any code exists**. The IMPLEMENT stage then writes code to pass those tests, plus developer-written unit tests. This prevents the agent from "marking its own homework" — true independent verification.
 
-The TEST stage writes functional and system tests from the design spec **before any code exists**.
-The IMPLEMENT stage then writes code to pass those tests, plus developer-written unit tests.
-This is true independent verification.
+---
 
 ## Continuous Loop Lifecycle
 
@@ -101,7 +89,7 @@ sequenceDiagram
     participant Loop as ralph_loop.sh
     participant Beads as beads (bd)
     participant Preflight as ralph_preflight.sh
-    participant Agent as AI Agent (kimi/pi)
+    participant Agent as AI Agent
     participant Validate as ralph_validate.sh
     participant Git as git
 
@@ -111,7 +99,7 @@ sequenceDiagram
     Loop->>Loop: Deterministic sort
 
     loop For each candidate ticket
-        Loop->>Preflight: Check labels + type
+        Loop->>Preflight: Check labels and type
         Preflight-->>Loop: READY or BLOCKED
         alt READY
             Loop->>Loop: Select this ticket, break
@@ -142,44 +130,39 @@ sequenceDiagram
 
 ## Component Details
 
-### 1. `ralph_loop.sh` — Main Harness (~500 lines)
+### `ralph_loop.sh` — Main Harness (~500 lines)
 
 The brain of the system. Manages:
 
 | Feature | Mechanism |
 |---------|-----------|
 | **Task selection** | `bd ready --json` → filters epics/features → deterministic sort |
-| **Preflight gating** | Iterates candidates through `ralph_preflight.sh`, picks first READY |
-| **Session mode** | `--session=design|test|implement|verify` forces single-shot with stage-specific prompt |
-| **Prompt assembly** | Base prompt (`PROMPT.md`) + session-specific or type-specific + task context + build phase doc |
+| **Preflight gating** | Iterates candidates through guardrails, picks first READY |
+| **Session mode** | `--session=design|test|implement|verify` forces single-shot with matching prompt |
+| **Prompt assembly** | Base prompt + session-specific or type-specific + task context + build phase doc |
 | **Agent invocation** | `kimi --print -p "..."` or `pi --print "..."` |
 | **Checkpoint/resume** | Writes `.ralph_checkpoint.json` before iteration; recovers dirty worktrees on restart |
 | **Signal handling** | Traps SIGINT/SIGTERM, clears checkpoint, exits cleanly |
 | **Remote sync** | Fetches origin before iteration; auto-rebases hotfixes; blocks on divergence |
 
-### 2. `run_ralph_loop.sh` — Daemon Wrapper (40 lines)
+### `run_ralph_loop.sh` — Daemon Wrapper (~40 lines)
 
-- PID-file based singleton (`~/.ralph_loop.pid`)
-- Redirects stdout/stderr to `logs/ralph_loop.log`
-- Forwards all arguments to `ralph_loop.sh`
-- Starts with `nohup` for background execution
+PID-file based singleton. Redirects stdout/stderr to `logs/ralph_loop.log`. Starts with `nohup` for background execution.
 
-### 3. `ralph_preflight.sh` — Guardrail System (45 lines)
+### `ralph_preflight.sh` — Guardrail System (~45 lines)
 
 Two-layer architecture:
 
 ```
-ralph_preflight.sh (core)
-    │
-    ├── sources config/ralph_preflight.sh (project-specific)
+core/ralph_preflight.sh
+    ├── sources config/ralph_preflight.sh  (project-specific rules)
     │       Sets SKIP_REASON to block a ticket
-    │
-    └── sources RALPH_PREFLIGHT_EXTRA (optional additional checks)
+    └── sources RALPH_PREFLIGHT_EXTRA     (optional additional checks)
 ```
 
-**Contract**: Must output exactly `READY` to stdout to allow a ticket. Anything else blocks it.
+**Contract:** Must output exactly `READY` to allow a ticket. Anything else blocks it.
 
-### 4. `ralph_validate.sh` — Quality Gate (250 lines)
+### `ralph_validate.sh` — Quality Gate (~250 lines)
 
 ```mermaid
 graph LR
@@ -189,8 +172,6 @@ graph LR
     D --> E[flake8]
     E --> F[mypy]
     F --> G{PASS/FAIL}
-
-    style G fill:#2d2d2d,stroke:#38bdf8
 ```
 
 | Tier | Test Scope | Use Case |
@@ -199,10 +180,10 @@ graph LR
 | `targeted` | Only affected tests (via TEST_MAP.yaml) | Default in loop |
 | `integration` | Integration marker tests | Pre-merge check |
 | `full` | All tests except e2e/perf | Human operator only |
-| `e2e` | End-to-end tests | Blocked in loop (RALPH_ALLOW_E2E=1 to override) |
+| `e2e` | End-to-end tests | Blocked in loop (`RALPH_ALLOW_E2E=1` to override) |
 | `performance` | Performance benchmarks | Blocked in loop |
 
-### 5. `ralph_health.sh` — Health Monitor (180 lines)
+### `ralph_health.sh` — Health Monitor (~180 lines)
 
 5-point health check runnable by cron or manually:
 
@@ -214,7 +195,7 @@ graph LR
 | 4 | Git divergence | Ahead/behind/dirty | — |
 | 5 | Beads sync status | Uncommitted dolt changes | — |
 
-### 6. `ralph_metrics.sh` — JSONL Logger (40 lines)
+### `ralph_metrics.sh` — JSONL Logger (~40 lines)
 
 Appends one JSON line per event to `logs/ralph_metrics.jsonl`:
 
@@ -224,7 +205,7 @@ Appends one JSON line per event to `logs/ralph_metrics.jsonl`:
 
 Events: `iteration_start`, `iteration_end`, `checkpoint_cleared`, `checkpoint_retained`, `task_rolled_back`, `all_tasks_blocked`.
 
-### 7. `detect_affected_tests.py` — Test Mapper (160 lines)
+### `detect_affected_tests.py` — Test Mapper (~160 lines)
 
 Maps git-diff'd source files to test files using `config/TEST_MAP.yaml`:
 
@@ -241,7 +222,7 @@ Fallback: if no TEST_MAP.yaml exists or no mappings match, runs `tests/unit/`.
 
 ---
 
-## Data Flow: Template Rendering (`ralph init`)
+## Data Flow: Template Rendering
 
 ```mermaid
 graph TD
@@ -253,20 +234,19 @@ graph TD
     VARS --> T5[TEST_MAP.yaml.j2]
     VARS --> T6[gitignore.j2]
     VARS --> T7[config.toml.j2]
-    T1 --> |render| O1[AGENTS.md]
-    T2 --> |render| O2[docs/agent/PROMPT.md]
-    T3 --> |render| O3[docs/agent/PROGRESS.md]
-    T4 --> |render| O4[config/ralph_preflight.sh]
-    T5 --> |render| O5[config/TEST_MAP.yaml]
-    T6 --> |render| O6[.gitignore]
-    T7 --> |render| O7[.ralph/config.toml]
+    T1 -->|render| O1[AGENTS.md]
+    T2 -->|render| O2[docs/agent/PROMPT.md]
+    T3 -->|render| O3[docs/agent/PROGRESS.md]
+    T4 -->|render| O4[config/ralph_preflight.sh]
+    T5 -->|render| O5[config/TEST_MAP.yaml]
+    T6 -->|render| O6[.gitignore]
+    T7 -->|render| O7[.ralph/config.toml]
 
-    SESSIONS[templates/prompts/sessions/] --> |copy| PROJ_SESS[docs/agent/prompts/sessions/]
-    PROMPTS[templates/prompts/*.md] --> |copy| PROJ_PROMPTS[docs/agent/prompts/]
+    SESSIONS[templates/prompts/sessions/] -->|copy| PROJ_SESS[docs/agent/prompts/sessions/]
+    PROMPTS[templates/prompts/*.md] -->|copy| PROJ_PROMPTS[docs/agent/prompts/]
 ```
 
-> Note: Core build scripts live in `~/.ralph/core/` (global install).
-> They are NOT copied into the project. Only config files and templates go into the repo.
+Core build scripts live in `~/.ralph/core/` (global install). They are **not** copied into the project.
 
 ---
 
@@ -274,11 +254,11 @@ graph TD
 
 | File Type | Permissions | Reason |
 |-----------|------------|--------|
-| `core/*.sh` | `755` (rwxr-xr-x) | Must be executable |
-| `core/*.py` | `755` (rwxr-xr-x) | Runnable directly |
-| `templates/*.j2` | `644` (rw-r--r--) | Read-only, rendered during init |
-| User's `config/*.sh` | `755` (rwxr-xr-x) | Sourced by preflight, must be executable |
-| User's `.env` | `600` (rw-------) | Secrets |
+| `core/*.sh` | `755` | Must be executable |
+| `core/*.py` | `755` | Runnable directly |
+| `templates/*.j2` | `644` | Read-only, rendered during init |
+| `config/*.sh` | `755` | Sourced by preflight, must be executable |
+| `.env` | `600` | Secrets |
 
 ---
 
@@ -286,12 +266,10 @@ graph TD
 
 | Decision | Rationale |
 |----------|-----------|
-| **Bash, not Python, for core** | Agent loops run in shells. No venv bootstrapping issues. |
-| **Python for complex logic** | Init wizard, report gen, metrics analysis are easier in Python |
-| **No Jinja2 dependency** | Templates are simple `{{ VAR }}` replacement. No pip install needed. |
+| **Bash for core, Python for complex logic** | Agent loops run in shells; no venv bootstrapping issues. Init wizard, reports, metrics are easier in Python. |
+| **No Jinja2 dependency** | Templates use simple `{{ VAR }}` replacement. No pip install needed. |
 | **Env-var-driven configuration** | No config file parsing needed in bash. Backward-compatible with any shell. |
-| **`{{ }}` template syntax** | Familiar to Jinja2 users, trivial to parse, no dependency. |
 | **Deterministic task sort** | Feature number ascending, task number ascending. Predictable build order. |
-| **Checkpoint before agent call** | Crash safety. If agent crashes, we know what was attempted and can roll back. |
+| **Checkpoint before agent call** | Crash safety. If agent crashes, we know what was attempted. |
 | **Targeted tests only** | Running full test suite in the loop is wasteful. Only affected tests run. |
-| **e2e/perf blocked by default** | These are expensive and operator-triggered. Gate behind `RALPH_ALLOW_E2E=1`. |
+| **e2e/perf blocked by default** | Expensive and operator-triggered. Gate behind `RALPH_ALLOW_E2E=1`. |
