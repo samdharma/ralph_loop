@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ralph — Ralph Wiggum Loop Build System CLI v1.1.0
+# ralph — Ralph Wiggum Loop Build System CLI v1.2.0
 #
 # Global tool. All build scripts live in ~/.ralph/core/.
 # Projects carry only .ralph/config.toml and project-specific config files.
@@ -118,6 +118,16 @@ case "${1:-}" in
         run_core "ralph_loop.sh" --session=design "$@"
         ;;
 
+    test)
+        shift
+        require_project
+        if [[ ! -d "${PROJECT_DIR}/.beads" ]]; then
+            echo "ralph: beads not initialized. Run 'ralph setup' first."
+            exit 1
+        fi
+        run_core "ralph_loop.sh" --session=test "$@"
+        ;;
+
     implement)
         shift
         require_project
@@ -225,13 +235,13 @@ case "${1:-}" in
         ;;
 
     version|--version|-v)
-        echo "ralph v1.1.0"
+        echo "ralph v1.2.0"
         ;;
 
     help|--help|-h|"")
         cat <<'EOF'
 ╔══════════════════════════════════════════════════════════════╗
-║         Ralph Wiggum Loop Build System v1.1.0               ║
+║         Ralph Wiggum Loop Build System v1.2.0               ║
 ║         "I'm helping!"                                      ║
 ╚══════════════════════════════════════════════════════════════╝
 
@@ -243,8 +253,9 @@ Commands:
   ralph setup       Post-clone setup (beads init, dolt pull, checks)
   ralph status      Show project health dashboard
   ralph design      Session 1: Analyze ticket, plan architecture (no code)
-  ralph implement   Session 2: Write implementation code, run targeted tests
-  ralph verify      Session 3: Full validation, acceptance check, close ticket
+  ralph test        Session 2: Write functional/system tests from design spec
+  ralph implement   Session 3: Write code to pass existing tests + unit tests
+  ralph verify      Session 4: Full validation, acceptance check, close ticket
   ralph loop        Run build loop — foreground, continuous (all-in-one)
   ralph daemon      Run build loop — background daemon (PID-file gated)
   ralph validate    Run validation gate (tests + lint + type-check)
@@ -256,10 +267,11 @@ Commands:
   ralph version     Show version
   ralph help        Show this help
 
-3-Session Pipeline (ralph design / implement / verify):
-  ralph design --ticket=<id> [--agent=pi|kimi]     # Plan only — no code
-  ralph implement --ticket=<id> [--agent=pi|kimi]  # Write code + targeted tests
-  ralph verify --ticket=<id> [--agent=pi|kimi]     # Validate + close or flag
+4-Session Pipeline (ralph design / test / implement / verify):
+  ralph design --ticket=<id> [--agent=pi|kimi]     # Plan architecture — no code, no tests
+  ralph test --ticket=<id> [--agent=pi|kimi]        # Write functional/system tests from spec
+  ralph implement --ticket=<id> [--agent=pi|kimi]  # Code to pass tests + unit tests only
+  ralph verify --ticket=<id> [--agent=pi|kimi]     # Full validation + close or flag
 
 Loop options (ralph loop / ralph daemon):
   --ticket=<id>     Run a single ticket and exit

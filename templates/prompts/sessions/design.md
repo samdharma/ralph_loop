@@ -1,6 +1,6 @@
 ## DESIGN Session — Analyze, Plan, Document
 
-**You are in the DESIGN phase. Do NOT write implementation code.**
+**You are in the DESIGN phase — the first of four stages (design → test → implement → verify). Do NOT write implementation code and do NOT write tests.**
 
 ### Your Job
 
@@ -20,6 +20,7 @@
 ### What You MUST NOT Do
 
 - ❌ Do NOT write implementation code.
+- ❌ Do NOT write tests (functional tests are written in the TEST stage).
 - ❌ Do NOT modify source files (except PROGRESS.md and ticket notes).
 - ❌ Do NOT run the validation gate.
 - ❌ Do NOT close the ticket.

@@ -27,7 +27,7 @@ MISSING=()
 WARNINGS=()
 
 RALPH_HOME="${RALPH_HOME:-$HOME/.ralph}"
-RALPH_VERSION="1.1.0"
+RALPH_VERSION="1.2.0"
 
 # Determine the source directory (where this script lives)
 if [[ -f "${BASH_SOURCE[0]}" ]]; then
@@ -258,10 +258,11 @@ echo "    ralph version            # Verify: ralph v${RALPH_VERSION}"
 echo "    ralph init               # Create a new project"
 echo "    ralph help               # Show all commands"
 echo ""
-echo "  3-Session Pipeline:"
-echo "    ralph design --ticket=<id>    # Plan architecture"
-echo "    ralph implement --ticket=<id> # Write code"
-echo "    ralph verify --ticket=<id>    # Validate & close"
+echo "  4-Session Pipeline:"
+echo "    ralph design --ticket=<id>     # Plan architecture"
+echo "    ralph test --ticket=<id>        # Write functional tests from spec"
+echo "    ralph implement --ticket=<id>   # Code to pass tests + unit tests"
+echo "    ralph verify --ticket=<id>      # Validate & close"
 echo ""
 echo "  Dependencies installed:"
 echo "    git           $(git --version 2>/dev/null | head -1 || echo 'missing')"

@@ -159,10 +159,11 @@ ralph setup
 # Run the build loop (foreground, single ticket mode)
 ralph loop --ticket=<id> --agent=pi
 
-# 3-Session Pipeline (recommended for quality)
+# 4-Session Pipeline (recommended for quality — independent test phase)
 ralph design --ticket=<id> --agent=pi     # Session 1: Plan (no code)
-ralph implement --ticket=<id> --agent=pi  # Session 2: Write code
-ralph verify --ticket=<id> --agent=pi     # Session 3: Validate & close
+ralph test --ticket=<id> --agent=pi        # Session 2: Write functional tests from spec
+ralph implement --ticket=<id> --agent=pi  # Session 3: Code to pass tests + unit tests
+ralph verify --ticket=<id> --agent=pi     # Session 4: Validate & close
 
 # Run the build loop (foreground, continuous)
 ralph loop

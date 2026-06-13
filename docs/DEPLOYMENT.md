@@ -164,7 +164,7 @@ For Ralph to work in a project, the project must have:
 | `.ralph/config.toml` | ✅ Yes | Single source of truth (committed) |
 | `docs/agent/PROMPT.md` | ✅ Yes | Rendered from template |
 | `config/ralph_preflight.sh` | ✅ Yes | Default: skips epics/features |
-| `docs/agent/prompts/sessions/` | ✅ Yes | 3-session pipeline prompts |
+| `docs/agent/prompts/sessions/` | ✅ Yes | 4-session pipeline prompts (design/test/implement/verify) |
 | `.gitignore` | ✅ Yes | With Ralph entries |
 | AI agent (kimi/pi) in PATH | ❌ Must install separately | `which kimi` or `which pi` |
 | GitHub remote (optional) | ❌ Set up manually | `git remote add origin <url>` |
