@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ralph — Ralph Wiggum Loop Build System CLI v1.0.1
+# ralph — Ralph Wiggum Loop Build System CLI v1.1.0
 #
 # Global tool. All build scripts live in ~/.ralph/core/.
 # Projects carry only .ralph/config.toml and project-specific config files.
@@ -14,6 +14,7 @@
 #   ralph health [opts]      Check loop and project health
 #   ralph report [opts]      Generate daily/weekly report
 #   ralph metrics [opts]     View loop metrics analytics
+#   ralph sync               Fetch origin, check for hotfix/remote updates
 #   ralph migrate            Convert legacy project to new config format
 #   ralph version            Show version
 #   ralph help               Show this help
@@ -107,6 +108,36 @@ case "${1:-}" in
         exec bash "${CORE_DIR}/run_ralph_loop.sh" "$@"
         ;;
 
+    design)
+        shift
+        require_project
+        if [[ ! -d "${PROJECT_DIR}/.beads" ]]; then
+            echo "ralph: beads not initialized. Run 'ralph setup' first."
+            exit 1
+        fi
+        run_core "ralph_loop.sh" --session=design "$@"
+        ;;
+
+    implement)
+        shift
+        require_project
+        if [[ ! -d "${PROJECT_DIR}/.beads" ]]; then
+            echo "ralph: beads not initialized. Run 'ralph setup' first."
+            exit 1
+        fi
+        run_core "ralph_loop.sh" --session=implement "$@"
+        ;;
+
+    verify)
+        shift
+        require_project
+        if [[ ! -d "${PROJECT_DIR}/.beads" ]]; then
+            echo "ralph: beads not initialized. Run 'ralph setup' first."
+            exit 1
+        fi
+        run_core "ralph_loop.sh" --session=verify "$@"
+        ;;
+
     validate)
         shift
         require_project
@@ -117,6 +148,45 @@ case "${1:-}" in
         shift
         require_project
         run_core "ralph_health.sh" "$@"
+        ;;
+
+    sync)
+        shift
+        require_project
+        export RALPH_PROJECT_DIR="${PROJECT_DIR}"
+        cd "${PROJECT_DIR}"
+        # Run the sync gate manually and report status
+        echo "[ralph] Manual remote sync check..."
+        if ! git remote &>/dev/null || [[ -z "$(git remote)" ]]; then
+            echo "[ralph] No git remote configured."
+            exit 0
+        fi
+        UPSTREAM=$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null || true)
+        if [[ -z "${UPSTREAM}" ]]; then
+            echo "[ralph] No upstream tracking branch."
+            exit 0
+        fi
+        git fetch origin --quiet 2>/dev/null || {
+            echo "[ralph] ERROR: git fetch failed. Check network."
+            exit 1
+        }
+        LOCAL=$(git rev-parse HEAD)
+        REMOTE=$(git rev-parse '@{u}')
+        BASE=$(git merge-base HEAD '@{u}' 2>/dev/null || true)
+        echo "[ralph] Local : ${LOCAL:0:7}"
+        echo "[ralph] Remote: ${REMOTE:0:7}"
+        if [[ "${LOCAL}" == "${REMOTE}" ]]; then
+            echo "[ralph] Status: up-to-date."
+        elif [[ "${LOCAL}" == "${BASE}" ]]; then
+            echo "[ralph] Status: behind remote (hotfixes available)."
+            echo "[ralph] Run 'git rebase @{u}' to integrate, or let the daemon auto-sync."
+        elif [[ "${REMOTE}" == "${BASE}" ]]; then
+            echo "[ralph] Status: ahead of remote (unpushed commits)."
+        else
+            echo "[ralph] Status: DIVERGED — manual intervention required."
+            echo "[ralph] Run 'git pull --rebase' and resolve conflicts."
+            exit 1
+        fi
         ;;
 
     report)
@@ -155,13 +225,13 @@ case "${1:-}" in
         ;;
 
     version|--version|-v)
-        echo "ralph v1.0.1"
+        echo "ralph v1.1.0"
         ;;
 
     help|--help|-h|"")
         cat <<'EOF'
 ╔══════════════════════════════════════════════════════════════╗
-║         Ralph Wiggum Loop Build System v1.0.1               ║
+║         Ralph Wiggum Loop Build System v1.1.0               ║
 ║         "I'm helping!"                                      ║
 ╚══════════════════════════════════════════════════════════════╝
 
@@ -172,15 +242,24 @@ Commands:
   ralph init        Scaffold a new project (git + beads + config + templates)
   ralph setup       Post-clone setup (beads init, dolt pull, checks)
   ralph status      Show project health dashboard
-  ralph loop        Run build loop — foreground, continuous
+  ralph design      Session 1: Analyze ticket, plan architecture (no code)
+  ralph implement   Session 2: Write implementation code, run targeted tests
+  ralph verify      Session 3: Full validation, acceptance check, close ticket
+  ralph loop        Run build loop — foreground, continuous (all-in-one)
   ralph daemon      Run build loop — background daemon (PID-file gated)
   ralph validate    Run validation gate (tests + lint + type-check)
   ralph health      Check loop health (5-point diagnostic)
   ralph report      Generate daily/weekly operational report
   ralph metrics     View loop metrics and analytics
+  ralph sync        Fetch origin and report remote sync status
   ralph migrate     Convert legacy project (scripts/ralph/) to new config
   ralph version     Show version
   ralph help        Show this help
+
+3-Session Pipeline (ralph design / implement / verify):
+  ralph design --ticket=<id> [--agent=pi|kimi]     # Plan only — no code
+  ralph implement --ticket=<id> [--agent=pi|kimi]  # Write code + targeted tests
+  ralph verify --ticket=<id> [--agent=pi|kimi]     # Validate + close or flag
 
 Loop options (ralph loop / ralph daemon):
   --ticket=<id>     Run a single ticket and exit

@@ -28,7 +28,7 @@ from typing import Optional
 # Constants
 # ──────────────────────────────────────────────────────────────────────
 RALPH_HOME = Path(os.environ.get("RALPH_HOME", Path(__file__).parent.resolve()))
-RALPH_VERSION = "1.0.0"
+RALPH_VERSION = "1.1.0"
 CORE_DIR = RALPH_HOME / "core"
 TEMPLATES_DIR = RALPH_HOME / "templates"
 
@@ -380,6 +380,7 @@ def scaffold(vars: dict[str, str]) -> None:
         project_dir / ".ralph",
         project_dir / "config",
         project_dir / "docs" / "agent" / "prompts",
+        project_dir / "docs" / "agent" / "prompts" / "sessions",
         project_dir / "logs",
         project_dir / vars["TEST_DIR"] / "unit",
         project_dir / vars["TEST_DIR"] / "integration",
@@ -456,11 +457,18 @@ def scaffold(vars: dict[str, str]) -> None:
         for prompt_file in prompts_src.iterdir():
             if prompt_file.suffix == ".md":
                 shutil.copy2(prompt_file, prompts_dst / prompt_file.name)
+            elif prompt_file.is_dir() and prompt_file.name == "sessions":
+                sessions_dst = prompts_dst / "sessions"
+                sessions_dst.mkdir(parents=True, exist_ok=True)
+                for session_file in prompt_file.iterdir():
+                    if session_file.suffix == ".md":
+                        shutil.copy2(session_file, sessions_dst / session_file.name)
 
     print(f"  {checkmark()} Generated AGENTS.md")
     print(f"  {checkmark()} Generated docs/agent/PROMPT.md")
     print(f"  {checkmark()} Generated docs/agent/PROGRESS.md")
     print(f"  {checkmark()} Generated docs/agent/prompts/")
+    print(f"  {checkmark()} Generated docs/agent/prompts/sessions/")
     print(f"  {checkmark()} Generated config/ralph_preflight.sh")
     print(f"  {checkmark()} Generated config/TEST_MAP.yaml")
     print(f"  {checkmark()} Generated .gitignore")
@@ -499,9 +507,13 @@ def scaffold(vars: dict[str, str]) -> None:
     print(f"    1. Review and customize AGENTS.md")
     print(f"    2. Review docs/agent/PROMPT.md for project-specific context")
     print(f"    3. Create your first ticket: bd new \"My first task\"")
-    print(f"    4. Start the loop: ralph daemon")
+    print(f"    4. Build with 3-session pipeline: ralph design → ralph implement → ralph verify")
+    print(f"    5. Or use the all-in-one loop: ralph daemon")
     print()
     print(f"  {bold('All Ralph commands (global):')}")
+    print(f"    ralph design     — Session 1: Analyze ticket, design plan (no code)")
+    print(f"    ralph implement  — Session 2: Write implementation code")
+    print(f"    ralph verify     — Session 3: Validate, check acceptance, close")
     print(f"    ralph loop       — Run build loop (foreground)")
     print(f"    ralph daemon     — Run build loop (background)")
     print(f"    ralph validate   — Run validation gate")

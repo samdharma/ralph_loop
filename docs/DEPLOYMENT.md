@@ -12,8 +12,9 @@ Before installing Ralph, ensure these are available on your system:
 |------|-------------|----------------|
 | **git** | `git --version` | `brew install git` (macOS) or `apt install git` (Linux) |
 | **Python 3.10+** | `python3 --version` | `brew install python@3.12` or from python.org |
-| **beads (bd)** | `bd --version` | See [beads docs](https://github.com/beadsboard/beads) |
-| **kimi** or **pi** | `which kimi` or `which pi` | Follow your AI agent's install guide |
+| **beads (bd)** | `bd --version` | [beads docs](https://github.com/beadsboard/beads) — ticket management |
+| **kimi** or **pi** | `which kimi` or `which pi` | At least one AI agent CLI (Pi supports DeepSeek, Kimi supports k2.6) |
+| **GitHub access** | `git ls-remote https://github.com/samdharma/Ralph_loop.git HEAD` | Required for clone + push |
 
 ---
 
@@ -145,6 +146,9 @@ ls -la ~/.ralph/bin/ralph        # Is the repo cloned?
 ls -la /usr/local/bin/ralph      # Is the symlink there?
 ls -la ~/.local/bin/ralph        # Alternative symlink location
 echo $PATH | tr ':' '\n' | grep ralph  # Is it on PATH?
+
+# Dependencies health check (built into install.sh)
+bash ~/.ralph/scripts/install.sh  # Re-run to validate prerequisites
 ```
 
 ---
@@ -157,11 +161,13 @@ For Ralph to work in a project, the project must have:
 |-------------|--------------------------|-------|
 | Git repo | ✅ Yes | `git init` |
 | Beads initialized | ✅ Yes | `bd init` |
-| `scripts/ralph/` scripts | ✅ Yes | 12 core scripts copied |
+| `.ralph/config.toml` | ✅ Yes | Single source of truth (committed) |
 | `docs/agent/PROMPT.md` | ✅ Yes | Rendered from template |
 | `config/ralph_preflight.sh` | ✅ Yes | Default: skips epics/features |
+| `docs/agent/prompts/sessions/` | ✅ Yes | 3-session pipeline prompts |
 | `.gitignore` | ✅ Yes | With Ralph entries |
 | AI agent (kimi/pi) in PATH | ❌ Must install separately | `which kimi` or `which pi` |
+| GitHub remote (optional) | ❌ Set up manually | `git remote add origin <url>` |
 
 ---
 
@@ -195,10 +201,11 @@ rm -rf ~/.ralph
 
 - [ ] git installed (`git --version`)
 - [ ] Python 3.10+ installed (`python3 --version`)
-- [ ] beads installed (`bd --version`)
+- [ ] beads installed (`bd --version`) — required for ticket management
 - [ ] At least one AI agent installed (`which kimi` or `which pi`)
+- [ ] GitHub access verified (`git ls-remote https://github.com/samdharma/Ralph_loop.git HEAD`)
 - [ ] Ralph cloned to `~/.ralph`
-- [ ] `install.sh` run
+- [ ] `install.sh` run (validates all prerequisites automatically)
 - [ ] `ralph version` works from any directory
 - [ ] `RALPH_HOME` is set in shell profile
 - [ ] First project initialized with `ralph init`

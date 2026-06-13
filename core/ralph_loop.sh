@@ -18,6 +18,8 @@
 #   RALPH_PREFLIGHT_SCRIPT - Override preflight script path
 #   RALPH_VALIDATE_SCRIPT  - Override validate script path
 #   RALPH_METRICS_SCRIPT   - Override metrics script path
+#   RALPH_REMOTE_SYNC      - Set to 1 to enable pre-iteration remote sync (default: 1)
+#   RALPH_REMOTE_SYNC_INTERVAL_SEC - Minimum seconds between remote fetches (default: 300)
 
 set -euo pipefail
 
@@ -41,6 +43,7 @@ TEST_TIER="targeted"
 BEADS_TAG=""
 AGENT=""
 TICKET_ID=""
+SESSION=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -80,12 +83,30 @@ while [[ $# -gt 0 ]]; do
             TICKET_ID="${1#*=}"
             shift
             ;;
+        --session)
+            SESSION="$2"
+            shift 2
+            ;;
+        --session=*)
+            SESSION="${1#*=}"
+            shift
+            ;;
         *)
             echo "[RALPH] Unknown argument: $1"
             exit 1
             ;;
     esac
 done
+
+# Session mode: force single-shot, require a ticket
+if [[ -n "${SESSION}" ]]; then
+    if [[ -z "${TICKET_ID}" ]]; then
+        echo "[RALPH] ERROR: --session requires --ticket=<id>"
+        exit 1
+    fi
+    SINGLE_SHOT=1
+    echo "[RALPH] Session mode: ${SESSION}"
+fi
 
 PROMPT_BASE="${RALPH_PROMPT_BASE:-${PROJECT_DIR}/docs/agent/PROMPT.md}"
 PROMPT_DIR="${RALPH_PROMPT_DIR:-${PROJECT_DIR}/docs/agent/prompts}"
@@ -96,6 +117,103 @@ VALIDATE_SCRIPT="${RALPH_VALIDATE_SCRIPT:-${CORE_DIR}/ralph_validate.sh}"
 METRICS_SCRIPT="${RALPH_METRICS_SCRIPT:-${CORE_DIR}/ralph_metrics.sh}"
 LOG_DIR="${RALPH_LOG_DIR:-${PROJECT_DIR}/logs}"
 mkdir -p "${LOG_DIR}"
+
+# --- Remote Sync Configuration ---
+ENABLE_REMOTE_SYNC="${RALPH_REMOTE_SYNC:-1}"
+SYNC_INTERVAL_SEC="${RALPH_REMOTE_SYNC_INTERVAL_SEC:-300}"
+SYNC_LAST_FETCH_EPOCH=0
+
+# --- Remote Sync Gate ---
+# Best practice: fetch from origin before building, so hotfixes pushed by
+# test sandbox / production systems are integrated before each iteration.
+# Strategy: fetch-only, then decide — fast-forward => auto-rebase;
+# divergence => block and require human triage.
+sync_with_remote() {
+    # Honour opt-out
+    if [[ "${ENABLE_REMOTE_SYNC}" != "1" ]]; then
+        return 0
+    fi
+
+    # Honour rate-limit interval
+    local now_epoch
+    now_epoch=$(date +%s)
+    local elapsed=$(( now_epoch - SYNC_LAST_FETCH_EPOCH ))
+    if [[ ${elapsed} -lt ${SYNC_INTERVAL_SEC} ]]; then
+        return 0
+    fi
+    SYNC_LAST_FETCH_EPOCH=${now_epoch}
+
+    # Only sync if we have a remote + tracking branch
+    if ! git remote &>/dev/null || [[ -z "$(git remote)" ]]; then
+        echo "[RALPH] No git remote configured. Skipping remote sync."
+        return 0
+    fi
+
+    local upstream
+    upstream=$(git rev-parse --abbrev-ref '@{u}' 2>/dev/null || true)
+    if [[ -z "${upstream}" ]]; then
+        echo "[RALPH] No upstream tracking branch. Skipping remote sync."
+        return 0
+    fi
+
+    echo "[RALPH] Fetching remote (interval: ${SYNC_INTERVAL_SEC}s)..."
+    git fetch origin --quiet 2>/dev/null || {
+        echo "[RALPH] WARNING: git fetch failed (network issue?). Skipping sync."
+        bash "${METRICS_SCRIPT}" remote_sync_failed reason="fetch_failed"
+        return 0
+    }
+
+    local local_hash remote_hash base_hash
+    local_hash=$(git rev-parse HEAD)
+    remote_hash=$(git rev-parse '@{u}')
+    base_hash=$(git merge-base HEAD '@{u}' 2>/dev/null || true)
+
+    if [[ "${local_hash}" == "${remote_hash}" ]]; then
+        echo "[RALPH] Remote sync: up to date (${remote_hash:0:7})"
+        bash "${METRICS_SCRIPT}" remote_sync status=up_to_date
+        return 0
+    fi
+
+    if [[ "${local_hash}" == "${base_hash}" ]]; then
+        # Local is ancestor of remote => fast-forward possible
+        echo "[RALPH] Remote sync: local is behind remote (hotfix detected). Auto-rebasing..."
+        echo "[RALPH]   Local : ${local_hash:0:7}"
+        echo "[RALPH]   Remote: ${remote_hash:0:7}"
+        if git rebase '@{u}' 2>/dev/null; then
+            echo "[RALPH] Remote sync: rebase succeeded."
+            bash "${METRICS_SCRIPT}" remote_sync status=rebased behind_hash="${remote_hash:0:7}"
+            return 0
+        else
+            echo "[RALPH] ERROR: Rebase conflict during remote sync!"
+            echo "[RALPH] A hotfix from origin conflicts with local changes."
+            echo "[RALPH] Resolve conflicts, then restart the loop:"
+            echo "[RALPH]   1. Fix conflicts (git status shows conflicted files)"
+            echo "[RALPH]   2. git rebase --continue"
+            echo "[RALPH]   3. Re-run: ralph daemon"
+            bash "${METRICS_SCRIPT}" remote_sync_failed reason="rebase_conflict"
+            exit 1
+        fi
+    fi
+
+    if [[ "${remote_hash}" == "${base_hash}" ]]; then
+        # Remote is ancestor of local => we have unpushed commits
+        echo "[RALPH] Remote sync: local is ahead of remote (unpushed commits). Continuing."
+        bash "${METRICS_SCRIPT}" remote_sync status=ahead
+        return 0
+    fi
+
+    # Diverged: both sides have unique commits
+    echo "[RALPH] ERROR: Branch has DIVERGED from remote!"
+    echo "[RALPH]   Local : ${local_hash:0:7}"
+    echo "[RALPH]   Remote: ${remote_hash:0:7}"
+    echo "[RALPH]   Base  : ${base_hash:0:7}"
+    echo "[RALPH] A hotfix was pushed to origin AND there are unpushed local commits."
+    echo "[RALPH] Manual intervention required:"
+    echo "[RALPH]   1. git pull --rebase (resolve any conflicts)"
+    echo "[RALPH]   2. Re-run: ralph daemon"
+    bash "${METRICS_SCRIPT}" remote_sync_failed reason="diverged" local="${local_hash:0:7}" remote="${remote_hash:0:7}"
+    exit 1
+}
 
 # --- Safety Checks ---
 
@@ -231,6 +349,9 @@ ITERATION=0
 while true; do
     ITERATION=$((ITERATION + 1))
 
+    # --- Remote sync gate: fetch & integrate hotfixes before building ---
+    sync_with_remote
+
     # --- Get ready tasks from beads ---
     if [[ ${SINGLE_SHOT} -eq 0 ]]; then
         if [[ -n "${BEADS_TAG}" ]]; then
@@ -328,7 +449,7 @@ print(json.dumps(tasks))
     PRE_COMMIT_HASH=$(git rev-parse HEAD)
     python3 -c "
 import json
-json.dump({'iteration':${ITERATION},'task_id':'${TASK_ID}','pre_commit':'${PRE_COMMIT_HASH}','tier':'${TEST_TIER}'}, open('${CHECKPOINT_FILE}','w'))
+json.dump({'iteration':${ITERATION},'task_id':'${TASK_ID}','pre_commit':'${PRE_COMMIT_HASH}','tier':'${TEST_TIER}','session':'${SESSION}'}, open('${CHECKPOINT_FILE}','w'))
 "
 
     # --- Adaptive Prompt Assembly ---
@@ -337,12 +458,25 @@ json.dump({'iteration':${ITERATION},'task_id':'${TASK_ID}','pre_commit':'${PRE_C
     # Start with base prompt
     FULL_PROMPT="$(cat "${PROMPT_BASE}")"
 
-    # Append type-specific guidance if available
-    TYPE_PROMPT_FILE="${PROMPT_DIR}/${TASK_TYPE}.md"
-    if [[ -f "${TYPE_PROMPT_FILE}" ]]; then
-        FULL_PROMPT="${FULL_PROMPT}
+    # Append type-specific or session-specific guidance
+    if [[ -n "${SESSION}" ]]; then
+        SESSION_PROMPT_FILE="${PROMPT_DIR}/sessions/${SESSION}.md"
+        if [[ -f "${SESSION_PROMPT_FILE}" ]]; then
+            FULL_PROMPT="${FULL_PROMPT}
+
+$(cat "${SESSION_PROMPT_FILE}")"
+            TASK_TYPE="session:${SESSION}"
+        else
+            echo "[RALPH] WARNING: Session prompt not found: ${SESSION_PROMPT_FILE}"
+            echo "[RALPH] Falling back to type-specific prompt."
+        fi
+    else
+        TYPE_PROMPT_FILE="${PROMPT_DIR}/${TASK_TYPE}.md"
+        if [[ -f "${TYPE_PROMPT_FILE}" ]]; then
+            FULL_PROMPT="${FULL_PROMPT}
 
 $(cat "${TYPE_PROMPT_FILE}")"
+        fi
     fi
 
     # --- Detect phase-specific build reference doc ---
@@ -371,6 +505,15 @@ $(cat "${TYPE_PROMPT_FILE}")"
 - **Test Tier**: ${TEST_TIER}
 "
 
+    if [[ -n "${SESSION}" ]]; then
+        FULL_PROMPT="${FULL_PROMPT}
+- **Session**: ${SESSION} (3-session pipeline: design → implement → verify)
+
+> You are in the **${SESSION^^}** session. Follow the session-specific guidance above.
+> When finished, print \`RALPH_SESSION_COMPLETE\`.
+"
+    fi
+
     if [[ -n "${BUILD_PHASE_DOC}" ]]; then
         FULL_PROMPT="${FULL_PROMPT}
 - **Build Reference**: ${BUILD_PHASE_DOC}
@@ -383,7 +526,7 @@ $(cat "${TYPE_PROMPT_FILE}")"
 
     FULL_PROMPT="${FULL_PROMPT}
 
-Run \`bash scripts/ralph/ralph_validate.sh --tier=${TEST_TIER}\` for validation.
+Run \`ralph validate --tier=${TEST_TIER}\` for validation.
 "
 
     # Log metrics

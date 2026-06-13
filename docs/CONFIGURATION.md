@@ -21,10 +21,12 @@ These env vars control the behavior of the Ralph loop harness itself.
 | `RALPH_LOG_DIR` | `logs` | Directory for loop logs |
 | `RALPH_ALLOW_E2E` | `0` | Set to `1` to allow e2e/performance test tiers |
 | `RALPH_METRICS_FILE` | `logs/ralph_metrics.jsonl` | Path to metrics JSONL file |
-| `RALPH_PREFLIGHT_SCRIPT` | `scripts/ralph/ralph_preflight.sh` | Override preflight script path |
-| `RALPH_VALIDATE_SCRIPT` | `scripts/ralph/ralph_validate.sh` | Override validate script path |
-| `RALPH_METRICS_SCRIPT` | `scripts/ralph/ralph_metrics.sh` | Override metrics script path |
-| `RALPH_LOOP_SCRIPT` | `scripts/ralph/ralph_loop.sh` | Override loop script path (for daemon) |
+| `RALPH_PREFLIGHT_SCRIPT` | `~/.ralph/core/ralph_preflight.sh` | Override preflight script path |
+| `RALPH_VALIDATE_SCRIPT` | `~/.ralph/core/ralph_validate.sh` | Override validate script path |
+| `RALPH_METRICS_SCRIPT` | `~/.ralph/core/ralph_metrics.sh` | Override metrics script path |
+| `RALPH_LOOP_SCRIPT` | `~/.ralph/core/ralph_loop.sh` | Override loop script path (for daemon) |
+| `RALPH_REMOTE_SYNC` | `1` | Set to `0` to disable pre-iteration remote sync |
+| `RALPH_REMOTE_SYNC_INTERVAL_SEC` | `300` (5 min) | Minimum seconds between `git fetch` checks |
 
 ### Daemon (`run_ralph_loop.sh`)
 
@@ -59,6 +61,11 @@ These env vars control the behavior of the Ralph loop harness itself.
 | `RALPH_CHECKPOINT` | `.ralph_checkpoint.json` | Checkpoint file to check |
 | `RALPH_MAX_METRICS_AGE_SEC` | `7200` (2 hours) | Max age before metrics considered stale |
 | `RALPH_MAX_CHECKPOINT_AGE_SEC` | `1800` (30 minutes) | Max age before checkpoint considered crashed |
+
+> **Remote sync note:** The health check (#4) also detects remote divergence.
+> The loop's new `sync_with_remote()` gate (RALPH_REMOTE_SYNC=1) automatically
+> fetches, detects hotfixes, and auto-rebases before each iteration.
+> Use `ralph sync` to manually check remote status.
 
 ### Metrics Logger (`ralph_metrics.sh`)
 

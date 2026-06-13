@@ -159,10 +159,15 @@ ralph setup
 # Run the build loop (foreground, single ticket mode)
 ralph loop --ticket=<id> --agent=pi
 
+# 3-Session Pipeline (recommended for quality)
+ralph design --ticket=<id> --agent=pi     # Session 1: Plan (no code)
+ralph implement --ticket=<id> --agent=pi  # Session 2: Write code
+ralph verify --ticket=<id> --agent=pi     # Session 3: Validate & close
+
 # Run the build loop (foreground, continuous)
 ralph loop
 
-# Run as background daemon (recommended)
+# Run as background daemon (recommended for batch)
 ralph daemon
 
 # Run validation gate on current work
@@ -186,10 +191,16 @@ ralph migrate
 | Flag | Description |
 |------|-------------|
 | `--ticket=<id>` | Run a single ticket and exit |
-| `--agent=kimi\|pi` | Specify AI agent |
+| `--agent=kimi\|pi` | Specify AI agent (Pi supports DeepSeek, Kimi supports k2.6) |
 | `--tier=smoke\|targeted\|integration\|full` | Test tier (default: targeted) |
 | `--tag=<tag>` | Filter tickets by label (e.g., `--tag=phase-1`) |
 | `--force` | Skip dirty-worktree check |
+
+**Remote Sync (Hotfix Integration):** Ralph automatically fetches from
+origin before each iteration (configurable via `RALPH_REMOTE_SYNC_INTERVAL_SEC`,
+default: 300s). If a hotfix is detected (local behind remote), it auto-rebases.
+If the branch has diverged, it halts and alerts for manual triage.
+Set `RALPH_REMOTE_SYNC=0` to disable. Use `ralph sync` to check manually.
 
 ### Validate Options
 
