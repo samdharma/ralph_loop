@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ralph Wiggum Loop Build System — Documentation v1.0.1</title>
+<title>Ralph Wiggum Loop Build System — Documentation v1.2</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 <style>
 :root {
@@ -134,6 +134,7 @@ tr:last-child td { border-bottom: none; }
   </div>
   <div class="sidebar-section">
     <div class="sidebar-section-title">Daily Use</div>
+    <a href="#4stage-pipeline">4-Stage Pipeline</a>
     <a href="#daily-workflow">Daily Workflow</a>
     <a href="#commands">All Commands</a>
     <a href="#migration">Migrate Legacy Projects</a>
@@ -481,6 +482,36 @@ ralph daemon</code></pre>
 <p>Ralph requires <strong>beads (bd)</strong> for ticket management. No tickets = nothing to build.
 You create tickets in beads, Ralph picks them up and builds them.</p>
 
+<h3 id="4stage-pipeline">4-Stage Pipeline (v1.2)</h3>
+
+<p>For maximum quality, each ticket goes through 4 independent AI agent sessions:</p>
+
+<div class="mermaid-wrapper"><div class="mermaid">
+graph LR
+    D[DESIGN<br/>Plan] --> T[TEST<br/>Write Tests]
+    T --> I[IMPLEMENT<br/>Write Code]
+    I --> V[VERIFY<br/>Sign Off]
+
+    style D fill:#1e293b,stroke:#38bdf8,color:#e2e8f0,stroke-width:2px
+    style T fill:#1e293b,stroke:#f59e0b,color:#e2e8f0,stroke-width:2px
+    style I fill:#1e293b,stroke:#10b981,color:#e2e8f0,stroke-width:2px
+    style V fill:#1e293b,stroke:#8b5cf6,color:#e2e8f0,stroke-width:2px
+</div></div>
+
+<div class="data-table-wrapper"><table>
+  <thead><tr><th>Stage</th><th>Command</th><th>Role</th><th>Output</th></tr></thead>
+  <tbody>
+    <tr><td><strong>DESIGN</strong></td><td><code>ralph design --ticket=&lt;id&gt;</code></td><td>Architect</td><td>Blueprint in PROGRESS.md</td></tr>
+    <tr><td><strong>TEST</strong></td><td><code>ralph test --ticket=&lt;id&gt;</code></td><td>QA Engineer</td><td>Functional tests from spec (should FAIL)</td></tr>
+    <tr><td><strong>IMPLEMENT</strong></td><td><code>ralph implement --ticket=&lt;id&gt;</code></td><td>Developer</td><td>Code passes tests + unit tests</td></tr>
+    <tr><td><strong>VERIFY</strong></td><td><code>ralph verify --ticket=&lt;id&gt;</code></td><td>Gatekeeper</td><td>Validation report, ticket closed or flagged</td></tr>
+  </tbody>
+</table></div>
+
+<div class="alert alert-info"><strong>Why 4 stages?</strong> The old 3-stage pipeline had the IMPLEMENT session writing its own functional tests — the AI was "marking its own homework." Now, the independent TEST stage writes tests from the design spec <strong>before code exists</strong>. IMPLEMENT walks into failing tests and makes them green. True independent verification.</div>
+
+<div class="alert alert-warning"><strong>Still available:</strong> <code>ralph loop</code> and <code>ralph daemon</code> work as before for batch processing. The 4-stage pipeline is for quality-critical tickets.</div>
+
 <h3 id="commands">All Commands</h3>
 
 <p>Ralph provides a <strong>global CLI</strong> for project management and <strong>project scripts</strong> for the build loop:</p>
@@ -500,6 +531,10 @@ You create tickets in beads, Ralph picks them up and builds them.</p>
 <div class="data-table-wrapper"><table>
   <thead><tr><th>Command</th><th>Description</th></tr></thead>
   <tbody>
+    <tr><td><code>ralph design --ticket=&lt;id&gt;</code></td><td>Session 1: Analyze ticket, design architecture (no code)</td></tr>
+    <tr><td><code>ralph test --ticket=&lt;id&gt;</code></td><td>Session 2: Write functional/system tests from design spec</td></tr>
+    <tr><td><code>ralph implement --ticket=&lt;id&gt;</code></td><td>Session 3: Write code to pass tests + developer unit tests</td></tr>
+    <tr><td><code>ralph verify --ticket=&lt;id&gt;</code></td><td>Session 4: Full validation, acceptance check, close or flag</td></tr>
     <tr><td><code>ralph loop</code></td><td>Run build loop — foreground, picks next ready ticket each iteration</td></tr>
     <tr><td><code>ralph loop --ticket=&lt;id&gt; --agent=pi</code></td><td>Single ticket, foreground, one iteration</td></tr>
     <tr><td><code>ralph loop --tag=phase-1</code></td><td>Filter by label, continuous</td></tr>
@@ -516,21 +551,28 @@ You create tickets in beads, Ralph picks them up and builds them.</p>
 
 <h4>Morning — Start</h4>
 <pre><code>cd ~/Dev/my-project
-git pull --rebase
-bd dolt pull
+git pull --rebase && bd dolt pull
 bd ready
-ralph daemon</code></pre>
+ralph daemon          # Continuous batch mode
+
+# Or use the 4-stage pipeline per ticket:
+ralph design --ticket=myproj.1.1 --agent=pi
+ralph test --ticket=myproj.1.1 --agent=pi
+ralph implement --ticket=myproj.1.1 --agent=pi
+ralph verify --ticket=myproj.1.1 --agent=pi</code></pre>
 
 <h4>During the Day — Monitor</h4>
 <pre><code>ralph status
 tail -f logs/ralph_loop.log
 bd list
-git log --oneline -10</code></pre>
+git log --oneline -10
+ralph metrics         # View analytics</code></pre>
 
 <h4>Evening — Review and Stop</h4>
 <pre><code>cat .ralph_loop.pid | xargs kill
 git log --oneline --since="1 day ago"
 bd list --status closed
+ralph report --daily
 ralph report --daily
 git push && bd dolt push</code></pre>
 

@@ -1,6 +1,8 @@
-# Troubleshooting — When Ralph Doesn't Work
+# Troubleshooting — When Ralph Doesn't Work v1.2
 
 > Failure scenarios, monitoring, diagnostics, and recovery procedures.
+
+**Revision**: 2026-06-13 — Updated for 4-stage pipeline + global tool architecture
 
 ---
 
@@ -8,10 +10,46 @@
 
 ```bash
 # The one-command health check
-bash scripts/ralph/ralph_health.sh --verbose
+ralph health --verbose
 ```
 
 This runs all 5 health checks and tells you exactly what's wrong.
+
+---
+
+## 4-Stage Pipeline Troubleshooting
+
+### DESIGN session fails or produces poor design
+
+1. Check `docs/agent/PROGRESS.md` — is there a DESIGN entry?
+2. Verify `AGENTS.md` and `PROMPT.md` have enough context for the agent
+3. The ticket description may be too vague — add acceptance criteria
+4. Try a different agent: `ralph design --ticket=<id> --agent=kimi`
+
+### TEST session writes implementation code
+
+1. Check `docs/agent/prompts/sessions/test.md` — is it the latest version?
+2. The agents may ignore prohibitions — try a different model/agent
+3. Review the output in `logs/ralph_loop.log` for the test session
+4. If persistent, run: `cp ~/.ralph/templates/prompts/sessions/test.md docs/agent/prompts/sessions/`
+
+### IMPLEMENT session modifies functional tests
+
+1. The implement prompt forbids this — check `sessions/implement.md`
+2. If the agent modified functional tests, revert them: `git checkout -- tests/`
+3. Rerun implement: `ralph implement --ticket=<id> --agent=pi`
+4. The functional tests from the TEST stage should remain untouched
+
+### VERIFY session closes a failing ticket
+
+1. If the agent closed a ticket that should have failed, reopen it:
+   `bd update <id> --status open --notes="Reopened: verification was incomplete"`
+2. Review the VERIFY session log for what went wrong
+3. Re-run verify with stricter instructions or a different agent
+
+---
+
+## Common Failure Scenarios
 
 ---
 

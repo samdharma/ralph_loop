@@ -1,4 +1,43 @@
-# FAQ — Frequently Asked Questions
+# FAQ — Frequently Asked Questions v1.2
+
+**Revision**: 2026-06-13 — Updated for 4-stage pipeline
+
+---
+
+## 4-Stage Pipeline
+
+### What is the 4-stage pipeline?
+
+A structured workflow that splits each ticket into 4 independent sessions:
+
+```
+DESIGN → TEST → IMPLEMENT → VERIFY
+```
+
+| Stage | Command | What happens |
+|-------|---------|-------------|
+| DESIGN | `ralph design` | Architect plans the solution |
+| TEST | `ralph test` | QA writes functional tests from the spec (before code exists) |
+| IMPLEMENT | `ralph implement` | Developer writes code to pass tests + unit tests |
+| VERIFY | `ralph verify` | Gatekeeper validates everything and closes the ticket |
+
+### Why 4 stages instead of 3?
+
+The old 3-stage pipeline had the implement session writing its own functional
+tests. The AI was "marking its own homework" — tests verified the implementation,
+not the spec. The new TEST stage writes tests from the design spec **before any
+code exists**, creating true independent verification.
+
+### Can I still use the old 3-stage or all-in-one loop?
+
+Yes. `ralph loop` and `ralph daemon` still work as before. The 4-stage pipeline
+is an additional workflow, not a replacement.
+
+### Do I have to run all 4 stages for every ticket?
+
+For critical features — yes, strongly recommended. For trivial changes (typo
+fixes, doc updates), you can skip directly to `ralph loop --ticket=<id>` or
+use the continuous daemon.
 
 ---
 
@@ -85,8 +124,8 @@ Yes. Each project has its own PID file and checkpoint. Just run the daemon
 in each project directory:
 
 ```bash
-cd ~/Dev/project-a && bash scripts/ralph/run_ralph_loop.sh
-cd ~/Dev/project-b && bash scripts/ralph/run_ralph_loop.sh
+cd ~/Dev/project-a && ralph daemon
+cd ~/Dev/project-b && ralph daemon
 ```
 
 ### What happens if my computer sleeps?
@@ -165,7 +204,7 @@ If you find a ticket cycling, break it into two smaller tickets.
 
 ### Ralph keeps failing on the same ticket
 
-1. Check what's failing: `bash scripts/ralph/ralph_validate.sh --tier=targeted`
+1. Check what's failing: `ralph validate --tier=targeted`
 2. Fix manually if it's a lint/format issue
 3. If the task is too complex, break it up
 4. Block the ticket and move on: `bd update <id> --status blocked`
@@ -180,7 +219,7 @@ rm -f .ralph_loop.pid .ralph_checkpoint.json
 git status
 
 # Restart
-bash scripts/ralph/run_ralph_loop.sh
+ralph daemon
 ```
 
 ### How do I see what Ralph has been doing?
@@ -193,7 +232,7 @@ git log --oneline -20
 tail -100 logs/ralph_loop.log
 
 # Metrics dashboard
-python3 scripts/ralph/ralph_metrics_viewer.py
+ralph metrics
 
 # Project status
 ralph status

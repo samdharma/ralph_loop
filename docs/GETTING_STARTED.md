@@ -1,6 +1,8 @@
-# Getting Started — Your First Ralph Project
+# Getting Started — Your First Ralph Project v1.2
 
 > Step-by-step walkthrough from `ralph init` to your first completed ticket.
+
+**Revision**: 2026-06-13 — Updated for 4-stage pipeline + global tool architecture
 
 ---
 
@@ -8,20 +10,20 @@
 
 ```mermaid
 graph TD
-    A[ralph init] --> B[Customize<br/>AGENTS.md]
-    B --> C[Customize<br/>PROMPT.md]
-    C --> D[Create Tickets<br/>in beads]
-    D --> E[Start Ralph<br/>Loop]
-    E --> F[Monitor<br/>Progress]
-    F --> G[Review<br/>Commits]
+    A[ralph init] --> B[Customize AGENTS.md]
+    B --> C[Customize PROMPT.md]
+    C --> D[Create Tickets in beads]
+    D --> E1[DESIGN: ralph design]
+    E1 --> E2[TEST: ralph test]
+    E2 --> E3[IMPLEMENT: ralph implement]
+    E3 --> E4[VERIFY: ralph verify]
+    E4 --> F[Review Commits]
 
     style A fill:#1e293b,stroke:#38bdf8,color:#e2e8f0
-    style B fill:#1e293b,stroke:#f59e0b,color:#e2e8f0
-    style C fill:#1e293b,stroke:#f59e0b,color:#e2e8f0
-    style D fill:#1e293b,stroke:#f59e0b,color:#e2e8f0
-    style E fill:#1e293b,stroke:#38bdf8,color:#e2e8f0
-    style F fill:#1e293b,stroke:#38bdf8,color:#e2e8f0
-    style G fill:#1e293b,stroke:#38bdf8,color:#e2e8f0
+    style E1 fill:#1e293b,stroke:#38bdf8,color:#e2e8f0
+    style E2 fill:#1e293b,stroke:#f59e0b,color:#e2e8f0
+    style E3 fill:#1e293b,stroke:#10b981,color:#e2e8f0
+    style E4 fill:#1e293b,stroke:#8b5cf6,color:#e2e8f0
 ```
 
 ---
@@ -54,25 +56,30 @@ Brief project description:
 
 ```
 my-trading-bot/
-├── AGENTS.md                          ← ✏️ Customize this!
+├── .ralph/
+│   └── config.toml                  ← Single source of truth (committed)
+├── AGENTS.md                        ← Customize this!
 ├── .gitignore
-├── .git/                              (initialized)
-├── .beads/                            (initialized)
+├── .git/                            (initialized)
+├── .beads/                          (initialized)
 ├── config/
-│   ├── ralph_preflight.sh             ← ✏️ Add your guardrails
-│   └── TEST_MAP.yaml                  ← ✏️ Map sources to tests
+│   ├── ralph_preflight.sh           ← Add your guardrails
+│   └── TEST_MAP.yaml                ← Map sources to tests
 ├── docs/
 │   └── agent/
-│       ├── PROMPT.md                  ← ✏️ Customize this!
-│       ├── PROGRESS.md                (auto-updated)
+│       ├── PROMPT.md                ← Customize this!
+│       ├── PROGRESS.md              (auto-updated)
 │       └── prompts/
 │           ├── bugfix.md
 │           ├── docs.md
 │           ├── feature.md
 │           ├── ops.md
-│           └── regression_test.md
-├── scripts/
-│   └── ralph/                         (12 core scripts)
+│           ├── regression_test.md
+│           └── sessions/
+│               ├── design.md
+│               ├── test.md
+│               ├── implement.md
+│               └── verify.md
 ├── src/
 │   └── my_trading_bot/
 │       └── __init__.py
@@ -81,25 +88,25 @@ my-trading-bot/
 │   │   └── __init__.py
 │   └── integration/
 │       └── __init__.py
-└── logs/                              (created at runtime)
+└── logs/                            (created at runtime)
 ```
+
+> Note: Build scripts live in `~/.ralph/core/` (global install). They are NOT in the project repo.
 
 ---
 
-## Step 2: Files You MUST Customize
-
-These are **mandatory** before starting the loop:
+## Step 2: Customize Project Files
 
 ### 2a. `AGENTS.md` — Project Rules
 
-This is the first file the AI agent reads every iteration. It must contain:
+This is the first file the AI agent reads. Must contain:
 
 ```markdown
 # AGENTS.md — My Trading Bot
 
 ## Build & Test
 ```bash
-bash scripts/ralph/ralph_validate.sh --tier=targeted
+ralph validate --tier=targeted
 pytest tests/unit/ -q --tb=short
 ```
 
@@ -109,175 +116,115 @@ pytest tests/unit/ -q --tb=short
 - Package name: my_trading_bot.
 ```
 
-**Minimum required sections:**
-- Build & test commands
-- Project conventions (language version, style, patterns)
-- Any non-negotiable design rules
-
 ### 2b. `docs/agent/PROMPT.md` — Agent Prompt
 
-This is fed to the agent fresh every iteration. Must describe:
-
-- **Project root path** (already filled by init)
-- **Architecture reference docs** the agent should read
-- **Session resumption protocol** — which files to read at iteration start
-- **Design rules** — your non-negotiable constraints
-- **Test tiering protocol** — what tiers to use when
+Fed to the agent fresh every iteration. Must describe:
+- Project root path (already filled by init)
+- Architecture reference docs
+- Design rules (non-negotiable constraints)
+- Test tiering protocol
 
 ### 2c. `config/ralph_preflight.sh` — Guardrails
 
-Default already skips epics and features. Add your own rules:
+Add your own rules:
 
 ```bash
-# Example: skip e2e tickets during trading hours
+# Skip e2e tickets during market hours
 if [[ "${LABELS}" == *"e2e"* ]]; then
     HOUR=$(date +%H)
     if [[ "$HOUR" -ge 9 && "$HOUR" -lt 17 ]]; then
         SKIP_REASON="e2e_blocked_during_market_hours"
     fi
 fi
-
-# Example: block if .env is missing
-if [[ ! -f "${PROJECT_DIR}/.env" ]]; then
-    SKIP_REASON="env_file_missing"
-fi
 ```
 
 ---
 
-## Step 3: Application-Specific Files You Need
-
-Beyond Ralph's infrastructure, every project needs:
-
-| File | Purpose | Ralph Uses It? |
-|------|---------|---------------|
-| `.env` | Secrets & config | No (but preflight can check for it) |
-| `pyproject.toml` / `package.json` | Dependencies | Validation gate uses it for tool config |
-| `src/<pkg>/` | Your source code | Agent implements here |
-| `tests/` | Your test suite | Validation gate runs these |
-| `config/bundles.yaml` or similar | App-specific config | Agent reads as needed |
-| `docs/reference/` | Architecture docs | Agent reads for context |
-| `docs/reference/BUILD_PHASE_N.md` | Phase reference docs | Loop auto-injects if ticket has `phase-N` label |
-
-### BUILD_PHASE Docs (Optional but Recommended)
-
-If your tickets use `phase-<N>` labels, create reference docs:
-
-```
-docs/reference/BUILD_PHASE_1.md   ← Pre-discovered API types for Phase 1
-docs/reference/BUILD_PHASE_2.md   ← Pre-discovered API types for Phase 2
-...
-```
-
-The Ralph loop auto-detects the phase label and injects the corresponding doc
-into the agent prompt. This saves the agent from redundant research.
-
----
-
-## Step 4: Create Your First Tickets
+## Step 3: Create Your First Tickets
 
 ```bash
-# Create an epic (container, stays open)
+# Create an epic (container)
 bd new "My Trading Bot v1" --type epic --labels "epic,meta-grouping"
 
-# Create a feature (container, stays open)
+# Create a feature (container)
 bd new "Phase 1: Core Engine" --type feature --labels "phase-1,meta-grouping"
 
 # Create work tickets
 bd new "P1: Set up project structure" --type task --labels "phase-1"
 bd new "P1: Implement data model" --type task --labels "phase-1"
-bd new "P1: Add CLI entry point" --type task --labels "phase-1"
 
-# Create an exit ticket (last ticket for the phase)
+# Create an exit ticket
 bd new "[EXIT] P1: Integration test + docs" --type task --labels "exit,phase-1"
 
 # Set dependencies
-bd dep add <exit-ticket-id> <work-ticket-1>
-bd dep add <exit-ticket-id> <work-ticket-2>
-bd dep add <exit-ticket-id> <work-ticket-3>
+bd dep add <exit-id> <work-ticket-1>
+bd dep add <exit-id> <work-ticket-2>
 ```
-
-### Ticket Naming Convention
-
-```
-<PROJECT-SLUG>.<FEATURE-NUM>.<TASK-NUM>
-
-Examples:
-  my-trading-bot.1.1    → Phase 1, Task 1
-  my-trading-bot.1.2    → Phase 1, Task 2
-  my-trading-bot.2.1    → Phase 2, Task 1
-```
-
-This dotted-number format is what Ralph's deterministic sorter reads.
 
 ---
 
-## Step 5: Start the Loop
-
-### Option A: Background Daemon (Recommended)
+## Step 4: Build with the 4-Stage Pipeline
 
 ```bash
-bash scripts/ralph/run_ralph_loop.sh
+# Per-ticket, independent verification pipeline:
+ralph design --ticket=my-trading-bot.1.1 --agent=pi    # Plan
+ralph test --ticket=my-trading-bot.1.1 --agent=pi       # Write tests from spec
+ralph implement --ticket=my-trading-bot.1.1 --agent=pi  # Code + unit tests
+ralph verify --ticket=my-trading-bot.1.1 --agent=pi     # Validate & close
 ```
 
-This runs in the background. Only one instance at a time (PID-file gated).
-Logs go to `logs/ralph_loop.log`.
-
-### Option B: Foreground Single Ticket
+Or use the continuous batch loop:
 
 ```bash
-bash scripts/ralph/ralph_loop.sh --ticket=my-trading-bot.1.1 --agent=kimi
+ralph daemon    # Background, processes all ready tickets
+ralph loop      # Foreground, continuous
 ```
-
-Useful for testing or manual intervention.
-
-### Option C: Tag-Filtered Loop
-
-```bash
-bash scripts/ralph/run_ralph_loop.sh --tag=phase-1
-```
-
-Only processes tickets with label `phase-1`.
 
 ---
 
-## Step 6: Monitor Progress
-
-### Live Monitoring
+## Step 5: Monitor Progress
 
 ```bash
+# Project dashboard
+ralph status
+
 # Tail the loop log
 tail -f logs/ralph_loop.log
 
-# Check project health
-ralph status
+# Health check
+ralph health --verbose
 
-# Run health check
-bash scripts/ralph/ralph_health.sh --verbose
-```
-
-### Review Completed Work
-
-```bash
-# See commits
-git log --oneline -20
-
-# See ticket status
+# Ticket status
 bd list
 
-# Generate daily report
-bash scripts/ralph/ralph_report.sh --daily
+# Recent commits
+git log --oneline -20
 ```
 
 ---
 
-## Step 7: Stopping the Loop
+## Step 6: Review and Push
 
 ```bash
-# Graceful stop (find PID and kill)
+# Generate daily report
+ralph report --daily
+
+# Review ticket closure
+bd list --status closed
+
+# Push to remote
+git push && bd dolt push
+```
+
+---
+
+## Stopping the Loop
+
+```bash
+# Graceful stop
 cat .ralph_loop.pid | xargs kill
 
-# Force stop (clears checkpoint too)
+# Force stop
 rm -f .ralph_loop.pid .ralph_checkpoint.json
 ```
 
@@ -287,4 +234,5 @@ rm -f .ralph_loop.pid .ralph_checkpoint.json
 
 - [DAILY_USAGE.md](DAILY_USAGE.md) — Day-to-day building workflow
 - [TICKET_MANAGEMENT.md](TICKET_MANAGEMENT.md) — Beads ticket workflow
-- [TROUBLESHOOTING.md](TROUBLESHOOTING.md) — When things go wrong
+- [CONFIGURATION.md](CONFIGURATION.md) — All environment variables
+- [VERSION_HISTORY.md](VERSION_HISTORY.md) — Release notes and changes

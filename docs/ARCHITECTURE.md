@@ -1,6 +1,7 @@
-# Ralph Wiggum Loop — Architecture
+# Ralph Wiggum Loop — Architecture v1.2
 
 > System design, data flow, component relationships, and design decisions.
+> **Revision**: 2026-06-13 — Updated for 4-stage pipeline + global tool architecture
 
 ---
 
@@ -19,20 +20,14 @@ graph TB
     end
 
     subgraph "User Project"
-        subgraph "Ralph Scripts (scripts/ralph/)"
-            LOOP[ralph_loop.sh<br/>Main Harness]
-            DAEMON[run_ralph_loop.sh<br/>PID Daemon]
-            PREFLIGHT[ralph_preflight.sh<br/>Guardrails]
-            VALIDATE[ralph_validate.sh<br/>Quality Gate]
-            HEALTH[ralph_health.sh<br/>Monitor]
-            METRICS[ralph_metrics.sh<br/>Logger]
-            REPORT[ralph_report.sh<br/>Reports]
-        end
-
-        subgraph "Project Config"
+        subgraph "Project Config (committed to repo)"
+            RALPH_CFG[.ralph/config.toml]
             AGENTS[AGENTS.md]
-            PROMPT[PROMPT.md]
+            PROMPT[docs/agent/PROMPT.md]
+            PROGRESS[docs/agent/PROGRESS.md]
             PF_CONF[config/ralph_preflight.sh]
+            TEST_MAP[config/TEST_MAP.yaml]
+            SESSION_PROMPTS[docs/agent/prompts/sessions/]
         end
 
         subgraph "External Tools"
@@ -47,30 +42,59 @@ graph TB
     end
 
     CLI --> WIZARD
-    WIZARD --> |copies| CORE
     WIZARD --> |renders| TEMPLATES
-    CORE --> LOOP
+    WIZARD --> |writes| RALPH_CFG
+    CORE --> |ralph loop| BEADS
+    CORE --> |sources| PF_CONF
+    CORE --> |invokes| KIMI
+    CORE --> |invokes| PI
+    CORE --> |validates via| VALIDATE
+    CORE --> |commits to| GIT
+    CLI --> |sources| CORE
     TEMPLATES --> AGENTS
     TEMPLATES --> PROMPT
+    TEMPLATES --> SESSION_PROMPTS
     TEMPLATES --> PF_CONF
-
-    LOOP --> |bd ready| BEADS
-    LOOP --> |preflight| PREFLIGHT
-    PREFLIGHT --> |sources| PF_CONF
-    LOOP --> |invokes| KIMI
-    LOOP --> |invokes| PI
-    LOOP --> |validates| VALIDATE
-    LOOP --> |logs| METRICS
-    LOOP --> |commits| GIT
-    DAEMON --> |wraps| LOOP
-    HEALTH --> |checks| METRICS
-    HEALTH --> |checks| BEADS
-    HEALTH --> |checks| GIT
+    TEMPLATES --> TEST_MAP
 ```
 
 ---
 
-## Single Iteration Lifecycle
+## 4-Stage Pipeline Lifecycle
+
+```mermaid
+graph LR
+    D[DESIGN] --> T[TEST]
+    T --> I[IMPLEMENT]
+    I --> V[VERIFY]
+
+    style D fill:#1e293b,stroke:#38bdf8,color:#e2e8f0
+    style T fill:#1e293b,stroke:#f59e0b,color:#e2e8f0
+    style I fill:#1e293b,stroke:#10b981,color:#e2e8f0
+    style V fill:#1e293b,stroke:#8b5cf6,color:#e2e8f0
+```
+
+Each stage is an independent agent invocation with a stage-specific prompt:
+
+| Stage | Command | Prompt | Output |
+|-------|---------|--------|--------|
+| **DESIGN** | `ralph design --ticket=<id>` | `sessions/design.md` | Architecture plan in PROGRESS.md |
+| **TEST** | `ralph test --ticket=<id>` | `sessions/test.md` | Functional/system tests (should FAIL) |
+| **IMPLEMENT** | `ralph implement --ticket=<id>` | `sessions/implement.md` | Code + unit tests (all tests pass) |
+| **VERIFY** | `ralph verify --ticket=<id>` | `sessions/verify.md` | Pass/fail report, ticket closed or flagged |
+
+### Why 4 Stages?
+
+```
+Before (anti-pattern):  IMPLEMENT writes tests + code -> marks own homework
+After (correct):        TEST writes tests from spec -> IMPLEMENT passes them -> VERIFY checks
+```
+
+The TEST stage writes functional and system tests from the design spec **before any code exists**.
+The IMPLEMENT stage then writes code to pass those tests, plus developer-written unit tests.
+This is true independent verification.
+
+## Continuous Loop Lifecycle
 
 ```mermaid
 sequenceDiagram
@@ -84,7 +108,7 @@ sequenceDiagram
     Loop->>Beads: bd ready --json
     Beads-->>Loop: [ticket1, ticket2, ...]
 
-    Loop->>Loop: Deterministic sort<br/>(feature ascending, task ascending)
+    Loop->>Loop: Deterministic sort
 
     loop For each candidate ticket
         Loop->>Preflight: Check labels + type
@@ -97,33 +121,28 @@ sequenceDiagram
     Loop->>Beads: bd update <id> --claim
     Loop->>Beads: bd update <id> --status in_progress
 
-    Loop->>Loop: Write checkpoint (.ralph_checkpoint.json)
+    Loop->>Loop: Write checkpoint
     Loop->>Loop: Assemble adaptive prompt
 
-    Loop->>Agent: Invoke with assembled prompt
+    Loop->>Agent: Invoke with prompt
     Agent-->>Loop: Iteration complete
 
-    Loop->>Validate: bash ralph_validate.sh --tier=targeted
+    Loop->>Validate: ralph validate --tier=targeted
 
-    alt Validation passed + worktree clean
-        Loop->>Loop: Clear checkpoint
-        Loop->>Git: (already committed by agent)
-    else Validation passed + dirty worktree
+    alt Clean + tests pass
+        Loop->>Loop: Clear checkpoint, commit
+    else Dirty or tests fail
         Loop->>Loop: Retain checkpoint
-    else Validation failed
-        Loop->>Loop: Retain checkpoint
-        Note over Loop: Agent fixes on next iteration
     end
 
-    Loop->>Loop: Log metrics
-    Loop->>Loop: Sleep 5s, next iteration
+    Loop->>Loop: Log metrics, sleep 5s
 ```
 
 ---
 
 ## Component Details
 
-### 1. `ralph_loop.sh` — Main Harness (350 lines)
+### 1. `ralph_loop.sh` — Main Harness (~500 lines)
 
 The brain of the system. Manages:
 
@@ -131,11 +150,12 @@ The brain of the system. Manages:
 |---------|-----------|
 | **Task selection** | `bd ready --json` → filters epics/features → deterministic sort |
 | **Preflight gating** | Iterates candidates through `ralph_preflight.sh`, picks first READY |
-| **Prompt assembly** | Base prompt (`PROMPT.md`) + type-specific (`prompts/<type>.md`) + task context + build phase doc |
+| **Session mode** | `--session=design|test|implement|verify` forces single-shot with stage-specific prompt |
+| **Prompt assembly** | Base prompt (`PROMPT.md`) + session-specific or type-specific + task context + build phase doc |
 | **Agent invocation** | `kimi --print -p "..."` or `pi --print "..."` |
 | **Checkpoint/resume** | Writes `.ralph_checkpoint.json` before iteration; recovers dirty worktrees on restart |
 | **Signal handling** | Traps SIGINT/SIGTERM, clears checkpoint, exits cleanly |
-| **Single-shot mode** | `--ticket=<id>` runs one ticket and exits |
+| **Remote sync** | Fetches origin before iteration; auto-rebases hotfixes; blocks on divergence |
 
 ### 2. `run_ralph_loop.sh` — Daemon Wrapper (40 lines)
 
@@ -232,15 +252,21 @@ graph TD
     VARS --> T4[ralph_preflight.sh.j2]
     VARS --> T5[TEST_MAP.yaml.j2]
     VARS --> T6[gitignore.j2]
+    VARS --> T7[config.toml.j2]
     T1 --> |render| O1[AGENTS.md]
     T2 --> |render| O2[docs/agent/PROMPT.md]
     T3 --> |render| O3[docs/agent/PROGRESS.md]
     T4 --> |render| O4[config/ralph_preflight.sh]
     T5 --> |render| O5[config/TEST_MAP.yaml]
     T6 --> |render| O6[.gitignore]
+    T7 --> |render| O7[.ralph/config.toml]
 
-    CORE[core/ scripts] --> |copy| SCRIPTS[scripts/ralph/]
+    SESSIONS[templates/prompts/sessions/] --> |copy| PROJ_SESS[docs/agent/prompts/sessions/]
+    PROMPTS[templates/prompts/*.md] --> |copy| PROJ_PROMPTS[docs/agent/prompts/]
 ```
+
+> Note: Core build scripts live in `~/.ralph/core/` (global install).
+> They are NOT copied into the project. Only config files and templates go into the repo.
 
 ---
 

@@ -1,6 +1,8 @@
-# Ticket Management — Working with Beads
+# Ticket Management — Working with Beads v1.2
 
 > How to name, structure, and manage tickets in beads for Ralph to consume.
+
+**Revision**: 2026-06-13 — Updated for 4-stage pipeline
 
 ---
 
@@ -241,3 +243,39 @@ bugfix-sprint, meta-grouping (FEATURE)
 ├── bugfix-sprint (BUG) mybot.bug.3
 └── exit, bugfix-sprint (TASK) mybot.bug.4   ← EXIT: all bugs fixed + regression tests
 ```
+
+---
+
+## 4-Stage Pipeline Workflow
+
+Each ticket goes through 4 independent sessions for maximum quality:
+
+| Stage | Command | Beads Status | Git |
+|-------|---------|-------------|-----|
+| **DESIGN** | `ralph design --ticket=<id>` | `in_progress` (claimed) | Uncommitted design notes in PROGRESS.md |
+| **TEST** | `ralph test --ticket=<id>` | `in_progress` | Test files added (should FAIL) |
+| **IMPLEMENT** | `ralph implement --ticket=<id>` | `in_progress` | Code committed, all tests pass |
+| **VERIFY** | `ralph verify --ticket=<id>` | `closed` (if pass) or `open` (if fail) | Final commit + push |
+
+### Monitoring Pipeline Progress
+
+```bash
+# Check which stage a ticket is in
+bd show <id> --json
+
+# See pipeline progress in PROGRESS.md
+grep "## Iteration" docs/agent/PROGRESS.md | tail -4
+
+# Check session metrics
+ralph metrics
+```
+
+### When to use the pipeline vs the loop
+
+| Use Case | Recommended Command |
+|----------|--------------------|
+| Critical features with acceptance criteria | 4-stage pipeline |
+| Bug fixes (high risk) | 4-stage pipeline (skip DESIGN if trivial) |
+| Docs/typo fixes | `ralph loop --ticket=<id>` |
+| Batch processing many tickets | `ralph daemon` |
+| Exploratory/prototype work | `ralph daemon` |

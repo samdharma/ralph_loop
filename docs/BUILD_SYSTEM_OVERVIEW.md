@@ -1,6 +1,8 @@
-# Ralph Wiggum Build System — Layman's Overview
+# Ralph Wiggum Build System — Layman's Overview v1.2
 
 > *What is this thing, and why would I use it?*
+
+**Revision**: 2026-06-13 — Updated for 4-stage pipeline
 
 ---
 
@@ -64,7 +66,7 @@ Ralph is an **automatic ticket-to-code pipeline**. Think of it like a conveyor b
 
 ### With Ralph
 
-1. Morning: `bash scripts/ralph/run_ralph_loop.sh`
+1. Morning: `ralph daemon`
 2. Go make coffee, attend meetings, work on design
 3. Check `git log` — 6-8 tickets committed
 4. End of day: `ralph status` to see what happened

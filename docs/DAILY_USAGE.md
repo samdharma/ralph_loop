@@ -1,6 +1,8 @@
-# Daily Usage — Building with Ralph
+# Daily Usage — Building with Ralph v1.2
 
-> Day-to-day workflow, must-have files, and application specs.
+> Day-to-day workflow, 4-stage pipeline, and monitoring.
+
+**Revision**: 2026-06-13 — Updated for 4-stage pipeline + global tool architecture
 
 ---
 
@@ -8,15 +10,17 @@
 
 ```mermaid
 graph TD
-    MORNING[🌅 Morning] --> START[Start Ralph daemon]
-    START --> CHECK[Check ralph status]
-    CHECK --> DAY[Let Ralph run<br/>throughout the day]
-    DAY --> EVENING[🌆 Evening]
-    EVENING --> REVIEW[Review git log<br/>and closed tickets]
-    REVIEW --> REPORT[Generate daily report]
-    REPORT --> STOP{More tickets?}
-    STOP -->|Yes| START
-    STOP -->|No| KILL[Stop Ralph]
+    MORNING[Morning] --> REVIEW[Review queue: bd ready]
+    REVIEW --> PIPELINE[4-Stage Pipeline]
+    PIPELINE --> DESIGN[ralph design --ticket=ID]
+    DESIGN --> TEST[ralph test --ticket=ID]
+    TEST --> IMPLEMENT[ralph implement --ticket=ID]
+    IMPLEMENT --> VERIFY[ralph verify --ticket=ID]
+    VERIFY --> NEXT{More tickets?}
+    NEXT -->|Yes| REVIEW
+    NEXT -->|No| EVENING[Evening]
+    EVENING --> REPORT[ralph report --daily]
+    REPORT --> PUSH[git push / bd dolt push]
 
     style MORNING fill:#1e293b,stroke:#38bdf8,color:#e2e8f0
     style EVENING fill:#1e293b,stroke:#38bdf8,color:#e2e8f0
@@ -25,222 +29,140 @@ graph TD
 ### Morning
 
 ```bash
-# 1. Navigate to your project
-cd ~/Dev/my-trading-bot
+cd ~/Dev/my-project
 
-# 2. Pull latest code if collaborating
-git pull --rebase
-bd dolt pull
+# Pull latest
+git pull --rebase && bd dolt pull
 
-# 3. Review what's ready
+# Review queue
 bd ready
-
-# 4. Start the loop
-bash scripts/ralph/run_ralph_loop.sh
-
-# 5. Verify it started
-cat .ralph_loop.pid
-tail logs/ralph_loop.log
-```
-
-### During the Day
-
-```bash
-# Check progress periodically
 ralph status
 
-# Tail the loop log
+# Optional: start continuous daemon for batch mode
+ralph daemon
+```
+
+### During the Day — 4-Stage Pipeline
+
+```bash
+# Per-ticket pipeline (recommended — independent verification)
+
+# Stage 1: Design the solution
+ralph design --ticket=myproject.1.1 --agent=pi
+
+# Stage 2: Write functional tests from the spec
+ralph test --ticket=myproject.1.1 --agent=pi
+
+# Stage 3: Implement code to pass tests
+ralph implement --ticket=myproject.1.1 --agent=pi
+
+# Stage 4: Validate and close (or flag)
+ralph verify --ticket=myproject.1.1 --agent=pi
+```
+
+Or use the all-in-one continuous loop for batch processing:
+
+```bash
+ralph daemon
+```
+
+### During the Day — Monitoring
+
+```bash
+# Check project health
+ralph status
+
+# Tail loop logs
 tail -f logs/ralph_loop.log
 
-# Check ticket status
+# View ticket status
 bd list
 
-# Check git commits
+# Check recent commits
 git log --oneline -10
+
+# View metrics
+ralph metrics
 ```
 
 ### Evening
 
 ```bash
-# 1. Stop the loop if tickets are done
-cat .ralph_loop.pid | xargs kill
+# Stop daemon if running
+cat .ralph_loop.pid | xargs kill 2>/dev/null
 
-# 2. Review what was built
+# Review what was built
 git log --oneline --since="1 day ago"
-bd list --status closed
 
-# 3. Generate report
-bash scripts/ralph/ralph_report.sh --daily
+# Generate daily report
+ralph report --daily
 
-# 4. Push to remote (if collaborating)
-git push
-bd dolt push
-
-# 5. Create tomorrow's tickets
-bd new "Next feature" --type task --labels "phase-2"
+# Push to remote
+git push && bd dolt push
 ```
 
 ---
 
 ## Must-Have Files Checklist
 
-These files must exist and be kept up to date for Ralph to function properly:
-
-```mermaid
-graph TD
-    subgraph "Required — Ralph won't work without these"
-        R1[docs/agent/PROMPT.md<br/>Agent prompt]
-        R2[AGENTS.md<br/>Project rules]
-        R3[config/ralph_preflight.sh<br/>Guardrails]
-        R4[.gitignore<br/>With Ralph entries]
-    end
-
-    subgraph "Strongly Recommended"
-        R5[config/TEST_MAP.yaml<br/>Source → test mappings]
-        R6[docs/reference/<br/>Architecture docs]
-        R7[.env<br/>Secrets & config]
-    end
-
-    subgraph "Optional but Helpful"
-        R8[docs/reference/BUILD_PHASE_N.md<br/>Phase reference docs]
-        R9[docs/agent/prompts/<br/>Type-specific guidance]
-    end
-
-    style R1 fill:#1e293b,stroke:#ef4444,color:#e2e8f0
-    style R2 fill:#1e293b,stroke:#ef4444,color:#e2e8f0
-    style R3 fill:#1e293b,stroke:#ef4444,color:#e2e8f0
-    style R4 fill:#1e293b,stroke:#ef4444,color:#e2e8f0
-```
-
-### Required Files (Ralph Won't Start Without)
+### Required (Ralph won't work without these)
 
 | File | Check | Failure Mode |
 |------|-------|-------------|
-| `docs/agent/PROMPT.md` | Loop checks `if [[ ! -f "${PROMPT_BASE}" ]]` | Loop exits with error |
+| `docs/agent/PROMPT.md` | Loop checks on start | Loop exits with error |
 | `AGENTS.md` | Agent reads on iteration start | Agent lacks project context |
 | `config/ralph_preflight.sh` | Sourced by preflight | Uses default (skips epics/features) |
 | `.gitignore` | Must exclude `.ralph_*` files | Checkpoint/PID files could be committed |
 
-### Recommended Files
+### Strongly Recommended
 
 | File | Why |
 |------|-----|
 | `config/TEST_MAP.yaml` | Without it, targeted tier falls back to `tests/unit/` |
-| `docs/reference/*.md` | Agent reads these for context — faster iterations, less research |
-| `.env` | Preflight can check for it; agent needs secrets for integration tests |
+| `docs/reference/*.md` | Agent reads these for context — faster iterations |
+| `docs/agent/prompts/sessions/` | 4-stage pipeline prompts (auto-generated by `ralph init`) |
+| `.env` | Secrets and environment config |
+
+### Optional but Helpful
+
+| File | Why |
+|------|-----|
+| `docs/reference/BUILD_PHASE_N.md` | Phase-specific reference docs (auto-injected by loop) |
+| `docs/agent/prompts/bugfix.md` | Type-specific guidance for bug tickets |
+| `docs/agent/prompts/feature.md` | Type-specific guidance for feature tickets |
 
 ---
 
 ## Application Spec Files
 
-These are the application-specific files *you* create for *your* project.
-They define what the AI agent should build.
-
 ### Architecture Spec
 
 ```
-docs/reference/ARCHITECTURE.md     ← Single source of truth for design decisions
+docs/reference/ARCHITECTURE.md     ← Design decisions, component diagram, data model
 ```
-
-Should contain:
-- System overview (what this project is)
-- Technology stack (Python/Node/Go, frameworks, databases)
-- Component diagram
-- Data model
-- API design
-- Key design decisions and rationale
 
 ### Build Phase Docs
 
 ```
 docs/reference/BUILD_PHASE_1.md    ← Pre-researched API types for Phase 1
 docs/reference/BUILD_PHASE_2.md    ← Pre-researched API types for Phase 2
-...
 ```
-
-Each build phase doc should contain:
-- **Goal**: what this phase delivers
-- **Dependencies**: what must exist before this phase
-- **API Reference**: pre-discovered library types/methods/signatures
-- **Implementation patterns**: code snippets showing the pattern to follow
-- **Tests to write**: specific tests needed
 
 The loop auto-injects the matching BUILD_PHASE doc when a ticket has a `phase-N` label.
 
-### Ticket Plan
-
-```
-docs/agent/TICKET_PLAN.md          ← Ticket dependency tree
-```
-
-Shows the hierarchy of tickets and their dependencies. The agent reads this
-at session start to understand the broader plan.
-
 ---
 
-## Starting a New Project from Scratch
-
-### 1. Create a Fresh Ralph Project
+## Starting a New Project
 
 ```bash
-ralph init
-```
-
-### 2. Set Up Your Application
-
-```bash
+ralph init                          # Scaffold new project
 cd my-project
-
-# Python example
-python3 -m venv .venv
-source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate
 pip install pytest black isort flake8 mypy
 
-# Create pyproject.toml with tool configs
-# Create src/<package>/__init__.py
-# Create your first test
-```
-
-### 3. Customize Files
-
-```bash
-# Edit AGENTS.md with your project rules
-# Edit docs/agent/PROMPT.md with your context
-# Create docs/reference/ARCHITECTURE.md
-# Create docs/reference/BUILD_PHASE_1.md (if using phases)
-```
-
-### 4. Create Tickets
-
-```bash
-bd new "Set up project skeleton" --type task --labels "phase-1"
-bd new "Implement core module" --type task --labels "phase-1"
-```
-
-### 5. Start Building
-
-```bash
-bash scripts/ralph/run_ralph_loop.sh
-```
-
----
-
-## Running Tests Manually
-
-Sometimes you want to run tests without the full validation gate:
-
-```bash
-# Unit tests only (fast)
-pytest tests/unit/ -q --tb=short
-
-# Specific test file
-pytest tests/unit/test_auth.py -q --tb=short
-
-# Targeted: only tests affected by your changes
-python3 scripts/ralph/detect_affected_tests.py | xargs pytest -q --tb=short
-
-# Full validation gate
-bash scripts/ralph/ralph_validate.sh --tier=targeted
+# Customize AGENTS.md and docs/agent/PROMPT.md
+# Create tickets in beads
+# Start building
 ```
 
 ---
@@ -248,12 +170,36 @@ bash scripts/ralph/ralph_validate.sh --tier=targeted
 ## Running a Single Ticket Manually
 
 ```bash
-# One ticket, one iteration
-bash scripts/ralph/ralph_loop.sh --ticket=my-project.1.3 --agent=kimi
+# Full pipeline (4 stages)
+ralph design --ticket=myproject.1.3 --agent=kimi
+ralph test --ticket=myproject.1.3 --agent=kimi
+ralph implement --ticket=myproject.1.3 --agent=kimi
+ralph verify --ticket=myproject.1.3 --agent=kimi
+
+# All-in-one single iteration
+ralph loop --ticket=myproject.1.3 --agent=kimi
 
 # With specific test tier
-bash scripts/ralph/ralph_loop.sh --ticket=my-project.1.3 --agent=kimi --tier=integration
+ralph loop --ticket=myproject.1.3 --agent=kimi --tier=integration
+```
 
-# Force mode (skip dirty-worktree check)
-bash scripts/ralph/ralph_loop.sh --ticket=my-project.1.3 --agent=kimi --force
+---
+
+## Running Tests Manually
+
+```bash
+# Unit tests only
+pytest tests/unit/ -q --tb=short
+
+# Targeted: only affected tests
+ralph validate --tier=targeted
+
+# Full validation gate
+ralph validate --tier=full
+
+# Metrics viewer
+ralph metrics
+
+# Health check
+ralph health --verbose
 ```
