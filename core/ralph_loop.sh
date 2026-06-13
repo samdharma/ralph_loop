@@ -307,7 +307,7 @@ if [[ -n "${TICKET_ID}" ]]; then
     echo "[RALPH] Single-shot mode for ticket: ${TICKET_ID}"
 
     TICKET_RAW=$(bd show "${TICKET_ID}" --json 2>/dev/null || true)
-    TICKET_JSON=$(echo "${TICKET_RAW}" | python3 -c "import sys,json; lines=[l for l in sys.stdin.read().splitlines() if l.strip()]; print(json.dumps([json.loads(l) for l in lines if l.strip()]))" 2>/dev/null || echo "[]")
+    TICKET_JSON=$(echo "${TICKET_RAW}" | python3 -c "import sys,json; data=json.load(sys.stdin); print(json.dumps(data if isinstance(data,list) else [data]))" 2>/dev/null || echo "[]")
     TICKET_COUNT=$(echo "${TICKET_JSON}" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
     if [[ "${TICKET_COUNT}" -eq 0 ]]; then
         echo "[RALPH] ERROR: Ticket ${TICKET_ID} not found."
