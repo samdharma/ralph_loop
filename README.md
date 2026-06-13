@@ -42,6 +42,7 @@ ralph daemon                  # start background build loop
 | [Architecture](docs/architecture.md) | System design, components, data flow |
 | [Ticket Management](docs/ticket-management.md) | Beads workflow, ticket hierarchy, naming conventions |
 | [Configuration](docs/configuration.md) | All environment variables and defaults |
+| [Orchestrator Roadmap](docs/orchestrator-roadmap.md) | Planned automated pipeline orchestration |
 | [FAQ](docs/faq.md) | Common questions |
 | [Version History](docs/version-history.md) | Release notes, migration guides |
 

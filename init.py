@@ -28,7 +28,7 @@ from typing import Optional
 # Constants
 # ──────────────────────────────────────────────────────────────────────
 RALPH_HOME = Path(os.environ.get("RALPH_HOME", Path(__file__).parent.resolve()))
-RALPH_VERSION = "1.2.0"
+RALPH_VERSION = "1.3.0"
 CORE_DIR = RALPH_HOME / "core"
 TEMPLATES_DIR = RALPH_HOME / "templates"
 

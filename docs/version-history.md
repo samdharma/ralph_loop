@@ -4,6 +4,40 @@
 
 ---
 
+## v1.3.0 — Single-Ticket Build Orchestrator (Unreleased)
+
+### Automated 4-Stage Pipeline for One Ticket
+
+Added an orchestrator that runs the full `design → test → implement → verify` pipeline for a single ticket without manual stage dispatch:
+
+```bash
+ralph build --ticket=ib_trading_v3_1-id7.1.1 --agent=kimi
+```
+
+- Automatically progresses through all four sessions.
+- Auto-commits each stage so the next stage starts from a clean worktree.
+- Runs the validation gate objectively after the verify session.
+- Marks the ticket for human review on success, or re-opens it on failure.
+- Supports resume: re-run the same command to continue from the last incomplete stage.
+
+### New Commands
+
+```bash
+ralph build --ticket=<id> [--agent=pi|kimi] [--tier=<tier>] [--auto-close] [--max-retries=<n>]
+```
+
+### New Files
+
+- `core/ralph_build.sh` — single-ticket build orchestrator
+- `docs/orchestrator-roadmap.md` — roadmap for tag/feature and overnight modes
+
+### Updated Files
+
+- `bin/ralph` — added `ralph build` command and help text
+- `core/ralph_loop.sh` — added `--skip-status-check` for orchestrated multi-stage runs
+
+---
+
 ## v1.2.0 — 4-Stage Pipeline (2026-06-13)
 
 ### Independent TEST Phase

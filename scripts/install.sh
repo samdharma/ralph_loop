@@ -27,7 +27,7 @@ MISSING=()
 WARNINGS=()
 
 RALPH_HOME="${RALPH_HOME:-$HOME/.ralph}"
-RALPH_VERSION="1.2.0"
+RALPH_VERSION="1.3.0"
 
 # Determine the source directory (where this script lives)
 if [[ -f "${BASH_SOURCE[0]}" ]]; then

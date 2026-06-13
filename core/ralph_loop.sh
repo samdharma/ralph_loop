@@ -44,6 +44,7 @@ BEADS_TAG=""
 AGENT=""
 TICKET_ID=""
 SESSION=""
+SKIP_STATUS_CHECK=0
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -89,6 +90,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --session=*)
             SESSION="${1#*=}"
+            shift
+            ;;
+        --skip-status-check)
+            SKIP_STATUS_CHECK=1
             shift
             ;;
         *)
@@ -315,7 +320,7 @@ if [[ -n "${TICKET_ID}" ]]; then
     fi
 
     TICKET_STATUS=$(echo "${TICKET_JSON}" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d[0].get('status',''))" 2>/dev/null || true)
-    if [[ "${TICKET_STATUS}" != "open" ]]; then
+    if [[ ${SKIP_STATUS_CHECK} -eq 0 && "${TICKET_STATUS}" != "open" ]]; then
         echo "[RALPH] ERROR: Ticket ${TICKET_ID} is not ready (status: ${TICKET_STATUS})."
         echo "[RALPH] Only 'open' tickets with no blockers can be built."
         exit 1
