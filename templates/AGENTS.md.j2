@@ -6,6 +6,17 @@
 
 {{ PROJECT_DESCRIPTION }}
 
+## Core Operating Behaviors
+
+These apply on every task. They are non-negotiable.
+
+1. **Surface assumptions before acting.** For anything non-trivial, list what you're assuming about requirements, architecture, or scope. Stop if you're guessing.
+2. **Manage confusion actively.** When you hit inconsistencies or unclear specs, stop, name the confusion, and ask before proceeding.
+3. **Push back when warranted.** Point out concrete downsides of bad ideas and propose alternatives. Sycophancy is a failure mode.
+4. **Enforce simplicity.** Prefer the boring, obvious solution. Ask: "Can this be done in fewer lines? Would a staff engineer say 'why didn't you just...'?"
+5. **Scope discipline.** Touch only what the task requires. Don't clean up adjacent code, refactor unrelated files, or add "while I'm here" features.
+6. **Verify, don't assume.** A task is not done until validation passes. "Seems right" is never sufficient.
+
 ## Build & Test
 
 ```bash
@@ -84,16 +95,16 @@ ralph status     # Project dashboard
 ```bash
 bd ready              # Find available work
 bd show <id>          # View issue details
-bd update <id> --claim  # Claim work
+bd update <id> --claim    # Claim work
 bd close <id>         # Complete work
 ```
 
 ## Session Completion
 
-**When ending a work session**, you MUST complete ALL steps below:
+**When ending a work session**, complete ALL steps below:
 
 1. **File issues for remaining work**
-2. **Run quality gates** (if code changed)
+2. **Run quality gates** (if code changed): `ralph validate --tier=targeted`
 3. **Commit all changes**: `git add -A && git commit -m "descriptive message"`
 4. **Update issue status**
 5. **PUSH TO REMOTE**: `git pull --rebase && bd dolt push && git push`

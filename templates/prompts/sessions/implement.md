@@ -2,47 +2,59 @@
 
 **You are in the IMPLEMENT phase. Functional and system tests already exist (written in the TEST phase). Your job is to write the minimal code that makes them pass, plus unit tests for internal logic.**
 
+---
+
+### Workflow
+
+Build in thin vertical slices:
+
+1. **Implement** the smallest complete piece of functionality.
+2. **Test** — run the targeted tests.
+3. **Verify** — confirm the slice works (tests pass, build succeeds).
+4. **Commit** — save your progress with a descriptive message.
+5. **Move to the next slice.** Repeat until the feature is complete.
+
+Each slice should:
+- Change one logical thing at a time.
+- Leave the project in a buildable, testable state.
+- Be independently revertable.
+
 ### Pre-Flight
 
 1. **Read the DESIGN plan** from `docs/agent/PROGRESS.md` — look for the latest DESIGN iteration.
 2. **Read the TEST plan** from `docs/agent/PROGRESS.md` — look for the latest TEST iteration.
 3. **Confirm understanding** — you know what to build AND what tests must pass.
 
-### Your Job
+### Implementation Rules
 
-1. **Run the existing functional tests FIRST** — confirm they FAIL:
-   ```bash
-   ralph validate --tier=targeted
-   ```
-   If any pass, flag it — the test may be wrong or code leaked from another session.
+- **Run the existing functional tests FIRST** — confirm they FAIL. If any pass, flag it.
+- **Write the minimal code** to make tests pass. Don't over-engineer.
+- **Write unit tests** for internal logic, edge cases, and error handling. Place them in `tests/unit/`.
+- **Keep it compilable** — existing tests must pass after each slice.
+- **Feature flags for incomplete features** — if the feature isn't ready for users, hide it behind a flag so increments can merge safely.
 
-2. **Implement the code** exactly as described in the design plan:
-   - Write the minimal implementation to satisfy the tests.
-   - Follow the design plan's architecture.
-   - Do not refactor beyond what the design specifies.
+### Simplicity Check
 
-3. **Write unit tests** for internal logic only:
-   - Test private methods, edge cases, error handling within the module.
-   - These are developer-written tests for code correctness (not spec compliance).
-   - Place them in `tests/unit/`.
+Before finishing each slice, ask:
+- Can this be done in fewer lines?
+- Are these abstractions earning their complexity?
+- Would a staff engineer look at this and say "why didn't you just..."?
+- Am I building for hypothetical future requirements?
 
-4. **Iterate until all tests pass**:
-   ```bash
-   ralph validate --tier=targeted
-   ```
-   Fix implementation bugs. Do NOT change the functional tests — those are spec.
+### Scope Discipline — Do NOT
 
-5. **Update PROGRESS.md** with implementation notes:
-   - Files changed
-   - Tests that now pass (list them)
-   - Any deviations from the design plan (with reasons)
-   - Unit tests added
+- Remove comments you don't understand.
+- "Clean up" code orthogonal to the task.
+- Refactor adjacent systems as a side effect.
+- Add features not in the spec because they "seem useful".
 
-6. **Commit** working code:
-   ```bash
-   git add <changed files>
-   git commit -m "feat: <description>"
-   ```
+### Anti-Rationalization
+
+| Excuse | Reality |
+|--------|---------|
+| "I'll test it all at the end." | Bugs compound. Test each slice. |
+| "It's faster to do it all at once." | It feels faster until something breaks in 500 changed lines. |
+| "These changes are too small to commit separately." | Small commits are free. Large commits hide bugs. |
 
 ### What You MUST NOT Do
 
