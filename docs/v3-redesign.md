@@ -864,6 +864,10 @@ Found during real-agent and crash-recovery testing on `samdharma/ralph-e2e-test`
 | Orphan agent subprocess on SIGKILL | Medium | On macOS, `kill -9` on the daemon does not kill the agent subprocess (pi/kimi). The orphan continues running, may write files after the daemon is dead. Mitigation: use SIGTERM (handled gracefully by the `finally` block) rather than SIGKILL for intentional shutdowns. |
 | Crash-resume from DESIGN restarts full pipeline | Low | When resuming from a DESIGN crash, `run_loop()` calls `run_pipeline()` which restarts the full 3-stage pipeline from scratch. This is correct but re-runs DESIGN (which may produce different output). DESIGN is idempotent by design, so this is acceptable. |
 
+### Remaining Tasks
+
+- [ ] **Cold-start test** — Install Ralph from scratch on a clean machine (no prior ~/.ralph, no cached tools). Verify: one-line install, `ralph init --create-labels`, `ralph setup`, `ralph daemon` against a real GitHub repo with a `status:ready` issue. Catches PATH edge cases, missing dependencies, python version issues, and gh auth gaps.
+
 **Test repo preserved** at `samdharma/ralph-e2e-test` for future validation runs. Has proper labels, Kanban board, and a working `get_version()` example from the real-agent E2E.
 
 ---
