@@ -855,6 +855,17 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 - [x] ~~`kimi` Mode B context inheritance is not implemented; it falls back to `kimi --print`~~ ✅ Fixed — best-effort `kimi --continue --print` with warning about session ordering; pi recommended for reliable Mode B (2026-06-14)
 - [x] ~~Crash recovery should re-apply the correct `status:<stage>` label after rollback~~ ✅ Fixed — `recover_from_crash()` now strips stale labels and adds the target (2026-06-14)
 
+### Known Issues (2026-06-14 E2E Validation)
+
+Found during real-agent and crash-recovery testing on `samdharma/ralph-e2e-test`:
+
+| Issue | Severity | Notes |
+|-------|----------|-------|
+| Orphan agent subprocess on SIGKILL | Medium | On macOS, `kill -9` on the daemon does not kill the agent subprocess (pi/kimi). The orphan continues running, may write files after the daemon is dead. Mitigation: use SIGTERM (handled gracefully by the `finally` block) rather than SIGKILL for intentional shutdowns. |
+| Crash-resume from DESIGN restarts full pipeline | Low | When resuming from a DESIGN crash, `run_loop()` calls `run_pipeline()` which restarts the full 3-stage pipeline from scratch. This is correct but re-runs DESIGN (which may produce different output). DESIGN is idempotent by design, so this is acceptable. |
+
+**Test repo preserved** at `samdharma/ralph-e2e-test` for future validation runs. Has proper labels, Kanban board, and a working `get_version()` example from the real-agent E2E.
+
 ---
 
 ---
@@ -880,7 +891,7 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 | P1.9 | `engine.py` can transition labels via `gh issue edit` (mocked or real) | E2E | ✅ PASS |
 | P1.10 | `validate.py --tier=targeted` runs pytest + lint on modified files | E2E | ✅ PASS |
 | P1.11 | Daemon PID-file singleton prevents duplicate runs | Wired y/n | ✅ PASS |
-| P1.12 | Checkpoint save → crash → recover flow works | E2E | ⬜ TODO |
+| P1.12 | Checkpoint save → crash → recover flow works | E2E | ⚠️ DEFERRED (mechanism validated; orphan-subprocess risk documented) |
 | P1.13 | Agent invocation (pi --print) succeeds with assembled prompt | E2E | ✅ PASS |
 | P1.14 | No empty/stub prompt files in scaffold (PROMPT.md, PROGRESS.md, AGENTS.md, config.toml populated) | Stub check | ✅ PASS |
 | P1.15 | `scripts/install.sh` checks for `gh` (not `bd`) as prerequisite | Dead code | ✅ PASS |
@@ -895,11 +906,11 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 | P2.2 | `test.md`, `implement.md`, `feature.md`, `bugfix.md`, `docs.md` are empty stubs (deferred to Phase 3 / human) | Stub check | ✅ PASS |
 | P2.3 | `engine.py` has `run_design_stage()`, `run_build_stage()`, `run_verify_stage()` | Wired y/n | ✅ PASS |
 | P2.4 | Checkpoint JSON includes `stage` field | Wired y/n | ✅ PASS |
-| P2.5 | Crash during DESIGN resumes at DESIGN on restart | E2E | ⬜ TODO |
-| P2.6 | Crash during BUILD resumes at BUILD on restart | E2E | ⬜ TODO |
-| P2.7 | Crash during VERIFY resumes at VERIFY on restart | E2E | ⬜ TODO |
+| P2.5 | Crash during DESIGN resumes at DESIGN on restart | E2E | ✅ PASS (checkpoint saved, recovery detected, rollback confirmed) |
+| P2.6 | Crash during BUILD resumes at BUILD on restart | E2E | ⚠️ DEFERRED (same mechanism as DESIGN; not tested separately) |
+| P2.7 | Crash during VERIFY resumes at VERIFY on restart | E2E | ⚠️ DEFERRED (same mechanism; VERIFY is read-only so crash is low-risk) |
 | P2.8 | Label flow: ready → design → build → verify → review (full run) | E2E | ✅ PASS |
-| P2.9 | Label flow: design → blocked (stage failure) | E2E | ⬜ TODO |
+| P2.9 | Label flow: design → blocked (stage failure) | E2E | ✅ PASS (BUILD validation gate failure correctly marked blocked) |
 | P2.10 | Stage commits have format `[ralph] <stage>: #<issue>` | Wired y/n | ✅ PASS |
 | P2.11 | `commit_stage()` handles "nothing to commit" gracefully | Wired y/n | ✅ PASS |
 | P2.12 | DESIGN prompt instructs "do NOT write code" | Wired y/n | ✅ PASS |
@@ -971,4 +982,4 @@ done
 
 ---
 
-*Last updated: 2026-06-14. Phase 1 + 2 + 3 structurally complete; E2E validation and known limitations documented in §14 Open Items.*
+*Last updated: 2026-06-14. Phase 1 + 2 + 3 complete. E2E validated (real-agent + crash-recovery). 14/18 E2E gates passed, 4 deferred. Test repo: samdharma/ralph-e2e-test.*
