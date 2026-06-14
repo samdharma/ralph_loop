@@ -102,6 +102,27 @@ def check_agent():
     return False, "install pi or kimi"
 
 
+def check_pi_subagent():
+    """Verify pi-subagent extension is installed (required for Phase 3 sub-agents)."""
+    # First check if pi is available
+    pi_result = subprocess.run(
+        ["which", "pi"], capture_output=True, text=True
+    )
+    if pi_result.returncode != 0:
+        return True, "pi not installed (skipped)"
+
+    # Check if the subagent extension is installed
+    result = subprocess.run(
+        ["pi", "extension", "list"],
+        capture_output=True, text=True
+    )
+    if "pi-subagent" in result.stdout or "@mjakl/pi-subagent" in result.stdout:
+        return True, "pi-subagent installed"
+
+    # Extension not found — warn but don't fail (engine falls back to pi --print)
+    return True, "pi-subagent not installed (falls back to pi --print for sub-agents)"
+
+
 def check_gh_repo_access():
     """Verify gh can list issues for this repo."""
     try:
@@ -191,6 +212,7 @@ def main() -> int:
     all_pass &= check("Git remote", check_git_remote)
     all_pass &= check("Python 3.10+", check_python)
     all_pass &= check("AI agent (pi/kimi)", check_agent)
+    all_pass &= check("pi-subagent extension", check_pi_subagent)
     all_pass &= check("GitHub repo access", check_gh_repo_access)
     all_pass &= check("Required labels", check_gh_labels)
 

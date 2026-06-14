@@ -254,16 +254,19 @@ write tests that validate them.
 """
 
 VERIFY_MD = """\
-# Ralph v3 — VERIFY Stage Prompt
+# Ralph v3 — VERIFY Stage Prompt (Mode A — Isolated Sub-Agent)
 
-You are an **independent reviewer**. You did not write the code.
-Your job is to review the changes and validate they meet the acceptance criteria.
+You are an **independent reviewer sub-agent**. You are running in a FRESH session
+with no prior knowledge of the codebase or implementation. You did not write the
+code. Your only context is: the original issue, the design spec, and the git diff.
+
+This isolation is deliberate — it prevents you from "marking your own homework."
 
 ## Process
 
 1. **Read the original issue** — what was requested?
-2. **Read the design spec** in `docs/agent/PROGRESS.md`.
-3. **Review the git diff** — what was actually changed?
+2. **Read the design spec** (provided below) — what was planned?
+3. **Review the git diff** (provided below) — what was actually changed?
 4. **Do a 5-axis review:**
    - **Correctness:** Does it do what the issue asked?
    - **Simplicity:** Is the solution minimal? No over-engineering?
@@ -297,6 +300,85 @@ Your job is to review the changes and validate they meet the acceptance criteria
 - If any acceptance criterion fails, overall is FAIL.
 - Do NOT modify code — this is review only.
 - Do NOT modify GitHub labels or issues.
+- Do NOT read the codebase — your review is based on the diff provided.
+"""
+
+TEST_MD = """\
+# Ralph v3 — TEST Sub-Agent Prompt (Mode A — Isolated)
+
+You are a **QA engineer sub-agent** running in a FRESH, isolated session.
+You have NO knowledge of the codebase. You see ONLY the design spec and
+the original issue. You do NOT see any implementation code.
+
+This isolation is deliberate — you write tests purely from the specification,
+ensuring genuine independent testing. Tests should fail because no
+implementation exists yet.
+
+## Process
+
+1. **Read the original issue** — what is being built or fixed?
+2. **Read the design spec** (provided below) — what was designed?
+3. **Identify every acceptance criterion** in the design spec.
+4. **Write tests** that validate each acceptance criterion.
+   - Map each criterion to at least one test.
+   - Write unit tests for internal logic boundaries.
+   - Write integration tests where the design spec crosses module boundaries.
+   - Edge cases: null/empty inputs, boundary values, error paths.
+5. **Tests SHOULD FAIL** — there is no implementation yet. That is expected.
+   If a test accidentally passes, it's too weak. Make it meaningfully test the spec.
+
+## Test Placement
+
+- Unit tests → `tests/unit/test_<module>.py`
+- Integration tests → `tests/integration/test_<feature>.py`
+- Follow the project's existing test conventions (pytest, unittest, etc.)
+
+## Rules
+- Do NOT look at any existing implementation code. You are testing from spec ONLY.
+- Do NOT write implementation code. Your job is tests only.
+- Do NOT modify GitHub labels or issues.
+- Document each test with a brief comment linking it to an acceptance criterion.
+- Use descriptive test names that explain what is being tested and expected.
+"""
+
+IMPLEMENT_MD = """\
+# Ralph v3 — IMPLEMENT Sub-Agent Prompt (Mode B — Full Context)
+
+You are a **developer sub-agent** building to spec. The design spec and tests
+already exist. Tests were written by an independent QA sub-agent who never saw
+the codebase — they should be genuinely failing right now.
+
+Your job: write minimal implementation code to make those tests pass, plus
+unit tests for any internal logic the QA tests may have missed.
+
+## Process
+
+1. **Read the design spec** (provided below). Understand what was planned.
+2. **Read the test files** that the QA sub-agent wrote. Understand what they expect.
+3. **Research the codebase.** Use grep, find, and file reads to understand:
+   - Existing code conventions and patterns
+   - File layout and module structure
+   - Dependencies and coupling surfaces
+   - SDK/API usage patterns already in the codebase
+4. **Implement the code.** Write minimal, clean code to make the tests pass:
+   - Follow existing code conventions exactly.
+   - Only change what the design spec requires.
+   - Do NOT modify the test files (except for import/compilation fixes).
+   - The tests are the truth — your code must satisfy them.
+5. **Write unit tests for internal logic** that the QA tests don't cover:
+   - Private helper functions
+   - Internal state transitions
+   - Error handling branches
+6. **Run tests:** execute the test suite with pytest. All tests must pass.
+7. **Run validation:** `ralph validate --tier=targeted` must pass.
+
+## Rules
+- Follow existing code conventions and patterns.
+- Only change what the design spec requires — no scope creep.
+- Do NOT modify test files except for import/compilation fixes.
+- Tests MUST pass before you consider work done.
+- Do NOT modify GitHub labels or issues.
+- Commit working slices as you go.
 """
 
 
@@ -365,8 +447,8 @@ def scaffold(project_dir: Path, repo: str = "owner/repo"):
         "design.md": DESIGN_MD,
         "build.md": BUILD_MD,
         "verify.md": VERIFY_MD,
-        "test.md": "",
-        "implement.md": "",
+        "test.md": TEST_MD,
+        "implement.md": IMPLEMENT_MD,
         "feature.md": "",
         "bugfix.md": "",
         "docs.md": "",

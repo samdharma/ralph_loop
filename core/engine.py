@@ -231,7 +231,12 @@ def run_design_stage(issue: dict) -> bool:
 
 
 def run_build_stage(issue: dict) -> bool:
-    """STAGE 2: Developer persona — reads design spec, writes code + tests."""
+    """
+    STAGE 2: BUILD — spawns two sub-agents:
+      1. TEST sub-agent (Mode A — isolated, fresh session)
+      2. IMPLEMENT sub-agent (Mode B — full context)
+    Sequential: TEST runs first (writes tests), then IMPLEMENT (writes code).
+    """
     issue_num = issue["number"]
     print(f"\n[ralph] STAGE 2/3: BUILD for #{issue_num}")
     log_metrics("stage_start", issue=str(issue_num), stage="build")
@@ -243,54 +248,55 @@ def run_build_stage(issue: dict) -> bool:
             print(f"[ralph] Pre-flight FAILED for #{issue_num}")
             return False
 
-    prompt = assemble_stage_prompt(issue, "build.md")
+    # ── Step 2a: TEST sub-agent (Mode A — isolated) ──
+    if not _run_test_subagent(issue):
+        return False
 
-    # Include design spec content in the prompt
-    if PROGRESS_FILE.exists():
-        design_spec = PROGRESS_FILE.read_text(encoding="utf-8")
-        prompt += f"\n\n## Design Spec (from DESIGN stage)\n\n{design_spec}"
+    # ── Step 2b: IMPLEMENT sub-agent (Mode B — full context) ──
+    if not _run_implement_subagent(issue):
+        return False
 
-    success = invoke_agent(prompt, issue_num)
-
-    # Run validation after build
-    if success:
-        print(f"\n[ralph] Running validation gate...")
-        core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
-        val_result = run(
-            [sys.executable, os.path.join(core_dir, "validate.py"),
-             "--tier", "targeted"],
-            check=False, capture=False
-        )
-        success = (val_result.returncode == 0)
+    # ── Validation gate ──
+    print(f"\n[ralph] Running validation gate...")
+    core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
+    val_result = run(
+        [sys.executable, os.path.join(core_dir, "validate.py"),
+         "--tier", "targeted"],
+        check=False, capture=False
+    )
+    success = (val_result.returncode == 0)
 
     log_metrics("stage_complete", issue=str(issue_num), stage="build")
     return success
 
 
 def run_verify_stage(issue: dict) -> bool:
-    """STAGE 3: Independent reviewer persona — reviews diff, validates."""
+    """
+    STAGE 3: VERIFY — Mode A isolated sub-agent.
+    Fresh session. Sees only: issue + design spec + git diff.
+    Does 5-axis review + validation gate.
+    """
     issue_num = issue["number"]
     print(f"\n[ralph] STAGE 3/3: VERIFY for #{issue_num}")
-    log_metrics("stage_start", issue=str(issue_num), stage="verify")
+    log_metrics("stage_start", issue=str(issue_num), stage="verify",
+                subagent="verify", mode="A")
 
     # Get the git diff for the reviewer to inspect
-    pre_sha = git("rev-parse", "HEAD~1").stdout.strip()
-    diff = git("diff", pre_sha, "HEAD").stdout
+    pre_sha = git("rev-parse", "HEAD~1").stdout.strip() if _has_commits() else git("rev-parse", "HEAD").stdout.strip()
+    diff = git("diff", pre_sha, "HEAD").stdout if _has_commits() else ""
 
-    prompt = assemble_stage_prompt(issue, "verify.md")
-
-    # Include design spec
-    if PROGRESS_FILE.exists():
-        design_spec = PROGRESS_FILE.read_text(encoding="utf-8")
-        prompt += f"\n\n## Design Spec\n\n{design_spec}"
+    # Mode A: assemble prompt with minimal context (no codebase reference)
+    prompt = _assemble_subagent_prompt(issue, "verify.md", mode="A")
 
     # Include git diff
-    prompt += f"\n\n## Git Diff (changes to review)\n\n```diff\n{diff[:8000]}\n```"
-
-    if len(diff) > 8000:
-        prompt += "\n\n(…diff truncated — review key files from the repo)"
+    if diff:
+        prompt += f"\n\n## Git Diff (changes to review)\n\n```diff\n{diff[:8000]}\n```"
+        if len(diff) > 8000:
+            prompt += "\n\n(…diff truncated — review key files from the repo)"
 
     success = invoke_agent(prompt, issue_num)
+    log_metrics("subagent_complete", issue=str(issue_num), subagent="verify",
+                mode="A", result="success" if success else "failure")
 
     # Run validation gate after review
     if success:
@@ -305,6 +311,168 @@ def run_verify_stage(issue: dict) -> bool:
 
     log_metrics("stage_complete", issue=str(issue_num), stage="verify")
     return success
+
+
+# ─────────────────────────────────────────────────────────
+# Sub-Agent Methods (Phase 3)
+# ─────────────────────────────────────────────────────────
+
+def _run_test_subagent(issue: dict) -> bool:
+    """
+    TEST sub-agent — Mode A (isolated, fresh session).
+    Sees design spec ONLY. Writes tests that SHOULD FAIL.
+    No implementation code visibility.
+    """
+    issue_num = issue["number"]
+    print(f"\n  [ralph] BUILD / TEST sub-agent for #{issue_num} (Mode A — isolated)")
+    log_metrics("subagent_start", issue=str(issue_num), subagent="test", mode="A")
+
+    prompt = _assemble_subagent_prompt(issue, "test.md", mode="A")
+    success = invoke_agent(prompt, issue_num)
+
+    log_metrics("subagent_complete", issue=str(issue_num), subagent="test",
+                mode="A", result="success" if success else "failure")
+    return success
+
+
+def _run_implement_subagent(issue: dict) -> bool:
+    """
+    IMPLEMENT sub-agent — Mode B (full context).
+    Sees design spec + test files + codebase. Writes implementation code.
+    """
+    issue_num = issue["number"]
+    print(f"\n  [ralph] BUILD / IMPLEMENT sub-agent for #{issue_num} (Mode B — full context)")
+    log_metrics("subagent_start", issue=str(issue_num), subagent="implement", mode="B")
+
+    prompt = _assemble_subagent_prompt(issue, "implement.md", mode="B")
+
+    # Include test files that were just written by TEST sub-agent
+    test_files = _discover_test_files()
+    if test_files:
+        prompt += "\n\n## Test Files (from QA sub-agent)\n\n"
+        prompt += "These tests were written by an independent QA sub-agent who never "
+        prompt += "saw the codebase. They should be failing. Your job is to make them pass.\n\n"
+        for tf in sorted(test_files):
+            try:
+                content = tf.read_text(encoding="utf-8")
+                prompt += f"### {tf.relative_to(PROJECT_ROOT)}\n\n```python\n{content[:5000]}\n```\n\n"
+                if len(content) > 5000:
+                    prompt += "(…file truncated — read full file in repo)\n\n"
+            except Exception:
+                prompt += f"### {tf.relative_to(PROJECT_ROOT)}\n(Unable to read)\n\n"
+    else:
+        prompt += "\n\n(No new test files detected — check tests/ directory)\n"
+
+    success = invoke_agent(prompt, issue_num)
+
+    log_metrics("subagent_complete", issue=str(issue_num), subagent="implement",
+                mode="B", result="success" if success else "failure")
+    return success
+
+
+def _discover_test_files() -> list[Path]:
+    """
+    Find test files that were created or modified since the last commit.
+    Used to inject test content into the IMPLEMENT sub-agent prompt.
+    """
+    test_files = []
+    tests_dir = PROJECT_ROOT / "tests"
+    if not tests_dir.exists():
+        return test_files
+
+    try:
+        # Get files changed since last commit
+        result = git("diff", "--name-only", "HEAD")
+        changed = set(result.stdout.strip().split("\n")) if result.stdout.strip() else set()
+
+        # Also get untracked files in tests/
+        result2 = git("ls-files", "--others", "--exclude-standard", "tests/")
+        untracked = set(result2.stdout.strip().split("\n")) if result2.stdout.strip() else set()
+
+        all_changed = changed | untracked
+        for fpath in all_changed:
+            p = PROJECT_ROOT / fpath
+            if p.exists() and p.suffix == ".py":
+                test_files.append(p)
+    except Exception:
+        # Fallback: scan tests/ directory for .py files
+        for p in tests_dir.rglob("*.py"):
+            test_files.append(p)
+
+    return test_files
+
+
+def _has_commits() -> bool:
+    """Check if the repo has any commits (vs. fresh repo)."""
+    try:
+        result = git("rev-list", "--count", "HEAD")
+        return int(result.stdout.strip()) >= 2
+    except Exception:
+        return False
+
+
+def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) -> str:
+    """
+    Build a prompt for a sub-agent invocation.
+
+    Mode A (Isolated): issue body + design spec + stage persona ONLY.
+      No codebase context, no reference docs. Fresh perspective.
+      Used for TEST and VERIFY sub-agents.
+
+    Mode B (Full context): issue body + design spec + reference docs + stage persona.
+      Full context for implementation work.
+      Used for IMPLEMENT sub-agent.
+    """
+    base = ""
+    if PROMPT_FILE.exists():
+        base = PROMPT_FILE.read_text(encoding="utf-8")
+
+    # Stage-specific persona instructions
+    stage_prompt = ""
+    stage_path = PROMPTS_DIR / stage_prompt_file
+    if stage_path.exists():
+        stage_prompt = stage_path.read_text(encoding="utf-8")
+
+    body = issue.get("body") or "(No description)"
+
+    # Build prompt sections
+    prompt = (
+        f"{base}\n\n"
+        f"---\n\n"
+        f"## Sub-Agent Instructions\n\n"
+        f"{stage_prompt}\n\n"
+        f"---\n\n"
+        f"## Issue #{issue['number']}: {issue['title']}\n\n"
+        f"{body}"
+    )
+
+    # Design spec (all modes need it)
+    if PROGRESS_FILE.exists():
+        design_spec = PROGRESS_FILE.read_text(encoding="utf-8")
+        prompt += f"\n\n## Design Spec (from DESIGN stage)\n\n{design_spec}"
+
+    # Reference docs — Mode B only (IMPLEMENT sub-agent)
+    if mode == "B":
+        ref_docs = _parse_reference_docs(body)
+        if ref_docs:
+            prompt += "\n\n## Reference Documentation\n\n"
+            for ref in ref_docs:
+                ref_path = PROJECT_ROOT / ref
+                if ref_path.exists():
+                    prompt += f"### {ref}\n\n{ref_path.read_text(encoding='utf-8')}\n\n"
+                else:
+                    prompt += f"### {ref}\n\n(File not found: {ref})\n\n"
+
+    # Mode A isolation notice
+    if mode == "A":
+        prompt += (
+            "\n\n---\n\n"
+            "**ISOLATION NOTICE:** You are a Mode A sub-agent in a fresh session. "
+            "You have NO prior context about the codebase. "
+            "Do NOT attempt to read implementation code — work from the specification above ONLY."
+        )
+
+    return prompt
 
 
 def assemble_stage_prompt(issue: dict, stage_prompt_file: str) -> str:

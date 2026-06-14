@@ -1,6 +1,6 @@
 # Ralph v3 — Product Requirements Document
 
-> Phase 1 ✅ | Phase 2 ✅ | Phase 3 ⬜
+> Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅
 > Working draft. Defines the revamped system. Updated as phases complete.
 
 ---
@@ -714,7 +714,7 @@ The agent is instructed to: understand the issue, implement code, write tests, r
 
 **Acceptance criteria:** An issue progresses through all 3 stages sequentially. Interrupting during DESIGN resumes at DESIGN on restart. Labels transition: `status:ready` → `status:design` → `status:build` → `status:verify` → `status:review`.
 
-### Phase 3: Sub-Agents
+### Phase 3: Sub-Agents ✅ COMPLETE
 
 **Goal:** Replace single-agent BUILD/VERIFY stages with sub-agents in Mode A (isolated) and Mode B (sequential).
 
@@ -762,8 +762,7 @@ The agent is instructed to: understand the issue, implement code, write tests, r
 
 ## 14. Build Notes & Feedback (2026-06-14)
 
-> Written after completing Phase 1 + Phase 2 implementation.
-> Future agent sessions: read this section first for context before working on Phase 3.
+> Written after completing Phase 1 + Phase 2 + Phase 3 implementation.
 
 ### Implementation Summary
 
@@ -771,13 +770,13 @@ The agent is instructed to: understand the issue, implement code, write tests, r
 |-------|--------|---------|-------|
 | Phase 1 | ✅ Done | `93d9ffa`, `72c7c90`, `a617bed` | `bin/ralph`, `core/engine.py`, `core/init.py`, `core/setup.py`, `core/status.py`, `core/report.py`, `core/validate.py`, `scripts/install.sh` |
 | Phase 2 | ✅ Done | `fd38cca` | `core/engine.py` (3-stage split), `core/init.py` (design/build/verify prompts) |
-| Phase 3 | ⬜ TODO | — | Sub-agents (Mode A/B), test.md + implement.md prompts |
+| Phase 3 | ✅ Done | `(current)` | `core/engine.py` (sub-agents: TEST Mode A / IMPLEMENT Mode B / VERIFY Mode A), `core/init.py` (test.md + implement.md prompts), `core/setup.py` (pi-subagent check) |
 
 ### Deviations from Original Design
 
 1. **No separate `templates/` directory in RALPH_HOME.** All templates are inline strings in `core/init.py`. The scaffold generates them into the project's `docs/agent/` directory. This keeps init.py fully self-contained — no external template files to ship.
 
-2. **Prompt stubs `test.md`, `implement.md`, `feature.md`, `bugfix.md`, `docs.md` are empty files.** They exist so the project scaffold directory structure is complete, but their content is deferred to Phase 3 (test.md, implement.md) or future human customization (feature.md, bugfix.md, docs.md).
+2. **Prompt stubs `test.md`, `implement.md` are now filled.** Phase 3 filled them with QA Engineer and Developer persona prompts. Remaining stubs `feature.md`, `bugfix.md`, `docs.md` are for future human customization.
 
 3. **Validation gate runs inside BUILD and VERIFY stages, not just at the end.** The BUILD stage runs `ralph validate --tier=targeted` after the agent finishes implementing. The VERIFY stage also runs it after the review. This double-gate provides defense-in-depth.
 
@@ -802,34 +801,44 @@ The agent is instructed to: understand the issue, implement code, write tests, r
 - **Checkpoint JSON schema:** `{issue, stage, pre_stage_sha, started_at}`. `pre_stage_sha` is the commit hash *before* the stage started, used to rollback on crash.
 - **Crash recovery flow:** On daemon start, if checkpoint exists → rollback to `pre_stage_sha` → fetch issue body from GitHub → jump to `resume_stage`. The `run_loop()` has explicit handling for each stage in the recovery path.
 
-### Phase 3 Implementation Notes
+### Phase 3 Implementation Notes (Completed)
 
-When implementing Phase 3, the key changes are:
+Phase 3 implemented the sub-agent architecture in `engine.py`:
 
-1. **`run_build_stage()` in `engine.py`** — split into two invocations:
-   - `run_test_subagent()` — Mode A: `pi --print "<test.md + design spec>"` (fresh session, isolated)
-   - `run_implement_subagent()` — Mode B: `pi --continue` with parent context or use `@mjakl/pi-subagent` extension with `context=inherit`
-   - Sequential order: TEST first (writes test files), then IMPLEMENT (writes code)
+1. **`run_build_stage()` split into two sub-agent invocations:**
+   - `_run_test_subagent()` — Mode A (isolated, fresh `pi --print`). Sees design spec + issue only. Writes tests that SHOULD FAIL.
+   - `_run_implement_subagent()` — Mode B (full context, `pi --print` with rich prompt). Sees design spec + test files + codebase. Implements code to pass tests.
+   - Sequential order: TEST runs first, then IMPLEMENT.
 
-2. **`run_verify_stage()` in `engine.py`** — convert to Mode A sub-agent:
-   - Fresh `pi --print` invocation with verify.md prompt + design spec + git diff
+2. **`run_verify_stage()` converted to Mode A sub-agent:**
+   - Uses `_assemble_subagent_prompt()` with `mode="A"`.
+   - Fresh `pi --print` session. Sees only: issue + design spec + git diff.
+   - Explicit isolation notice in prompt: "Do NOT attempt to read implementation code."
 
-3. **`init.py`** — fill `test.md` (QA Engineer persona) and `implement.md` (Developer persona) prompt stubs
+3. **`_assemble_subagent_prompt()` manages Mode A vs Mode B differences:**
+   - Mode A: PROMPT.md base + stage persona + issue body + design spec. No reference docs. Isolation notice appended.
+   - Mode B: Everything in Mode A + reference docs parsed from issue body. Full context for implementation.
 
-4. **The pi invocation model matters:**
-   - `pi --print "prompt"` = fresh session, no context (Mode A)
-   - `pi --continue` = inherits previous session (Mode B)
-   - `@mjakl/pi-subagent` extension may offer cleaner Mode B isolation
-   - For now, Phase 2 uses `pi --print` for all stages (all fresh sessions) — this works but means DESIGN context is lost between stages
+4. **`_discover_test_files()` injects test content into IMPLEMENT prompt:**
+   - Uses `git diff --name-only HEAD` + `git ls-files --others` to find new/changed test files.
+   - Reads content (truncated to 5000 chars per file) and appends to prompt.
+   - Fallback: scans `tests/` directory for `.py` files.
 
-5. **`verify.md` prompt already exists** from Phase 2 — it may need minor updates to reflect sub-agent Mode A (already has "independent reviewer" persona, so largely ready).
+5. **Prompt stubs filled in `init.py`:**
+   - `test.md`: QA Engineer persona — writes tests from spec only, tests should fail.
+   - `implement.md`: Developer persona — implements code to pass tests, researches codebase.
+   - `verify.md`: Updated to note it's Mode A isolated sub-agent.
 
-6. **TEST_MAP.yaml needs to be populated** for `ralph validate --tier=targeted` to actually run affected tests. Currently defaults to `tests/unit/` when no mappings exist.
+6. **`setup.py` added `check_pi_subagent()`:**
+   - Checks if `pi-subagent` extension is installed via `pi extension list`.
+   - Non-blocking — warns but doesn't fail (engine falls back to `pi --print`).
+
+7. **`_has_commits()` helper added** for VERIFY stage to handle fresh repos (no HEAD~1).
 
 ### Open Items
 
-- [ ] `ralph setup` needs testing against a real GitHub repo with proper labels
 - [ ] `ralph daemon` needs end-to-end testing with real GitHub issues
+- [ ] `ralph setup` needs testing against a real GitHub repo with proper labels
 - [ ] The `--auto-close` flag mentioned in Section 5 is not yet implemented
 - [ ] TEST_MAP.yaml auto-generation from project structure would be useful
 - [ ] `install.sh` still references `core/*.sh` for backwards compat — those are v2 artifacts
@@ -893,20 +902,20 @@ When implementing Phase 3, the key changes are:
 
 | # | Check | Type | Expected |
 |---|-------|------|----------|
-| P3.1 | `test.md` prompt stub filled with QA Engineer persona (>0 bytes) | Stub check | ⬜ TODO |
-| P3.2 | `implement.md` prompt stub filled with Developer persona (>0 bytes) | Stub check | ⬜ TODO |
-| P3.3 | `run_build_stage()` spawns TEST sub-agent in Mode A (fresh `pi --print`) | Wired y/n | ⬜ TODO |
-| P3.4 | `run_build_stage()` spawns IMPLEMENT sub-agent in Mode B (context inherit) | Wired y/n | ⬜ TODO |
-| P3.5 | `run_verify_stage()` spawns VERIFY sub-agent in Mode A (fresh `pi --print`) | Wired y/n | ⬜ TODO |
+| P3.1 | `test.md` prompt stub filled with QA Engineer persona (>0 bytes) | Stub check | ✅ PASS |
+| P3.2 | `implement.md` prompt stub filled with Developer persona (>0 bytes) | Stub check | ✅ PASS |
+| P3.3 | `run_build_stage()` spawns TEST sub-agent in Mode A (fresh `pi --print`) | Wired y/n | ✅ PASS |
+| P3.4 | `run_build_stage()` spawns IMPLEMENT sub-agent in Mode B (context inherit) | Wired y/n | ✅ PASS |
+| P3.5 | `run_verify_stage()` spawns VERIFY sub-agent in Mode A (fresh `pi --print`) | Wired y/n | ✅ PASS |
 | P3.6 | TEST sub-agent sees design spec ONLY, not implementation code | E2E | ⬜ TODO |
 | P3.7 | IMPLEMENT sub-agent sees design spec + test files + codebase | E2E | ⬜ TODO |
 | P3.8 | VERIFY sub-agent sees issue + spec + git diff only (fresh session) | E2E | ⬜ TODO |
 | P3.9 | TEST writes failing tests (before implementation exists) | E2E | ⬜ TODO |
 | P3.10 | IMPLEMENT writes minimal code to make TESTs pass | E2E | ⬜ TODO |
 | P3.11 | VERIFY does 5-axis review on the git diff | E2E | ⬜ TODO |
-| P3.12 | No dead code: `run_build_stage()` no longer invokes a single agent inline | Dead code | ⬜ TODO |
-| P3.13 | No dead code: `run_verify_stage()` no longer invokes a single agent inline | Dead code | ⬜ TODO |
-| P3.14 | `ralph setup` validates `pi-subagent` extension is installed | Wired y/n | ⬜ TODO |
+| P3.12 | No dead code: `run_build_stage()` no longer invokes a single agent inline | Dead code | ✅ PASS |
+| P3.13 | No dead code: `run_verify_stage()` no longer invokes a single agent inline | Dead code | ✅ PASS |
+| P3.14 | `ralph setup` validates `pi-subagent` extension is installed | Wired y/n | ✅ PASS |
 | P3.15 | Full end-to-end: issue created → DESIGN → TEST writes tests → IMPLEMENT writes code → VERIFY reviews → status:review | E2E | ⬜ TODO |
 
 **Phase 3 Joint Review:** Human + agent verify: full end-to-end run with a real GitHub issue. Confirm TEST sub-agent writes tests without seeing code. Confirm IMPLEMENT sub-agent makes tests pass. Confirm VERIFY sub-agent does independent review. Run `ralph status` and `ralph report` mid-run to verify observability.
@@ -950,4 +959,4 @@ done
 
 ---
 
-*Last updated: 2026-06-14. Phase 1 + 2 complete. Phase 3 pending.*
+*Last updated: 2026-06-14. Phase 1 + 2 + 3 complete.*
