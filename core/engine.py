@@ -618,15 +618,26 @@ def recover_from_crash() -> Optional[dict]:
                     "--json", "number,title,body")
         issue = json.loads(result.stdout)
 
-        # Restore the correct label for this stage
+        # Item 3: Re-apply the correct status:<stage> label after rollback.
         stage_label_map = {
             "design": "status:design",
             "build": "status:build",
             "verify": "status:verify",
         }
-        current_label = stage_label_map.get(stage, "status:design")
+        target_label = stage_label_map.get(stage, "status:design")
+        # Remove any stale status labels, then add the correct one
+        for lbl in ["status:design", "status:build", "status:verify", "status:ready", "status:review", "status:blocked"]:
+            if lbl != target_label:
+                try:
+                    gh("issue", "edit", str(issue_num), "--remove-label", lbl)
+                except subprocess.CalledProcessError:
+                    pass  # Label wasn't present — fine
+        try:
+            gh("issue", "edit", str(issue_num), "--add-label", target_label)
+        except subprocess.CalledProcessError as e:
+            print(f"[ralph] Warning: could not apply label {target_label}: {e}")
 
-        print(f"[ralph] Resuming #{issue_num} at stage: {stage}")
+        print(f"[ralph] Resuming #{issue_num} at stage: {stage} (label: {target_label})")
         log_metrics("crash_recovery", issue=str(issue_num), stage=stage)
 
         return {"issue": issue, "resume_stage": stage}
@@ -766,6 +777,21 @@ def run_loop():
         log_metrics("daemon_error", error=str(e))
         raise
     finally:
+        # Item 2: On interrupt (SIGINT/SIGTERM), mark in-flight issue as blocked.
+        if CHECKPOINT_FILE.exists():
+            try:
+                data = json.loads(CHECKPOINT_FILE.read_text())
+                issue_num = data["issue"]
+                # Add note that the issue was interrupted
+                gh("issue", "comment", str(issue_num),
+                   "--body", "⏸️ Ralph daemon interrupted (SIGINT/SIGTERM). Issue was in "
+                   f"{data.get('stage', 'design')} stage. Restart daemon to resume.")
+                transition_label(issue_num, "status:blocked", None)
+                clear_checkpoint()
+                print(f"[ralph] Marked #{issue_num} as status:blocked (interrupted)")
+            except Exception as e:
+                print(f"[ralph] Error marking interrupted issue: {e}")
+                clear_checkpoint()
         release_pid_file()
         log_metrics("daemon_stop")
         print("[ralph] Daemon stopped")

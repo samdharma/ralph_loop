@@ -181,7 +181,6 @@ fi
 # Make everything executable
 chmod +x "${RALPH_HOME}/bin/ralph" 2>/dev/null || true
 chmod +x "${RALPH_HOME}/core/"*.py 2>/dev/null || true
-chmod +x "${RALPH_HOME}/core/"*.sh 2>/dev/null || true
 
 # Install to PATH
 INSTALL_PATH=""
@@ -236,7 +235,7 @@ else
 fi
 
 if [[ -d "${RALPH_HOME}/core" ]]; then
-    CORE_COUNT=$(ls -1 "${RALPH_HOME}/core/"*.py "${RALPH_HOME}/core/"*.sh 2>/dev/null | wc -l | tr -d ' ')
+    CORE_COUNT=$(ls -1 "${RALPH_HOME}/core/"*.py 2>/dev/null | wc -l | tr -d ' ')
     pass "Core modules: ${CORE_COUNT} files in ${RALPH_HOME}/core/"
 else
     fail "Core directory missing: ${RALPH_HOME}/core/"

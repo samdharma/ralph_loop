@@ -39,7 +39,7 @@ cmd_help() {
     echo "Commands:"
     echo "  init [name]     Scaffold a new Ralph project"
     echo "  setup           Check prerequisites and prepare local dirs"
-    echo "  daemon          Start the build loop (background)"
+    echo "  daemon          Start the build loop (foreground — use & for background)"
     echo "  status          Show project health dashboard"
     echo "  validate [opts] Run the validation gate"
     echo "  report          Generate daily/weekly summary"

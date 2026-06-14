@@ -377,7 +377,7 @@ flowchart TD
     PAUSE --> SYNC
 ```
 
-> **Note:** In the current implementation `ralph daemon` runs in the **foreground**. Background operation requires running it with a process manager or shell backgrounding (`ralph daemon &`). The CLI help text will be updated once true daemonization is implemented.
+> **Note:** `ralph daemon` runs in the **foreground**. Background operation requires running it with a process manager or shell backgrounding (`ralph daemon &`). The CLI help text reflects this.
 
 ### Signal Handling & Crash Recovery
 
@@ -429,7 +429,7 @@ ralph setup must:
   6. Exit 0 if all checks pass
 ```
 
-| `ralph daemon` | Start build loop (currently foreground; background with `&` or process manager) | `ralph daemon` |
+| `ralph daemon` | Start build loop (foreground; use `&` or process manager for background) | `ralph daemon` |
 | `ralph status` | Project health dashboard | `ralph status` |
 | `ralph validate` | Run validation gate | `ralph validate` |
 | `ralph report` | Generate daily/weekly report | `ralph report` |
@@ -750,7 +750,7 @@ The agent is instructed to: understand the issue, implement code, write tests, r
    - Updates issue labels at each stage transition
    - On success: marks issue `status:review` for human review
    - On failure: marks issue `status:blocked` with notes
-   - (Currently runs in the foreground; true background daemonization is pending)
+   - Runs in the foreground (use `&` or a process manager for background operation)
 3. The GitHub Kanban board reflects issue status in real time.
 4. Crash during any stage recovers cleanly on restart (resumes from incomplete stage).
 5. `ralph status` shows: daemon PID, active issue, active stage, recent metrics.
@@ -845,11 +845,11 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 - [ ] `ralph setup` needs testing against a real GitHub repo with proper labels
 - [ ] The `--auto-close` flag mentioned in Section 5 is not yet implemented
 - [ ] TEST_MAP.yaml auto-generation from project structure would be useful
-- [ ] Remove v2 artifact `core/ralph_validate.sh` and update `install.sh` to stop referencing `core/*.sh`
-- [ ] `ralph daemon` currently runs in the foreground; implement true daemonization or update all CLI/docs text to say foreground
-- [ ] `SIGINT`/`SIGTERM` should mark the active issue `status:blocked` with note "interrupted" and clear the checkpoint
+- [x] ~~Remove v2 artifact `core/ralph_validate.sh` and update `install.sh` to stop referencing `core/*.sh`~~ ✅ Fixed (2026-06-14)
+- [x] ~~`ralph daemon` currently runs in the foreground; implement true daemonization or update all CLI/docs text to say foreground~~ ✅ Fixed — help text updated to "foreground — use & for background" (2026-06-14)
+- [x] ~~`SIGINT`/`SIGTERM` should mark the active issue `status:blocked` with note "interrupted" and clear the checkpoint~~ ✅ Fixed in `run_loop()` finally block (2026-06-14)
 - [ ] `kimi` Mode B context inheritance is not implemented; it falls back to `kimi --print`
-- [ ] Crash recovery should re-apply the correct `status:<stage>` label after rollback
+- [x] ~~Crash recovery should re-apply the correct `status:<stage>` label after rollback~~ ✅ Fixed — `recover_from_crash()` now strips stale labels and adds the target (2026-06-14)
 
 ---
 
