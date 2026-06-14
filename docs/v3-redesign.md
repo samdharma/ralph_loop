@@ -801,39 +801,40 @@ The agent is instructed to: understand the issue, implement code, write tests, r
 - **Checkpoint JSON schema:** `{issue, stage, pre_stage_sha, started_at}`. `pre_stage_sha` is the commit hash *before* the stage started, used to rollback on crash.
 - **Crash recovery flow:** On daemon start, if checkpoint exists → rollback to `pre_stage_sha` → fetch issue body from GitHub → jump to `resume_stage`. The `run_loop()` has explicit handling for each stage in the recovery path.
 
-### Phase 3 Implementation Notes (Completed)
+### Phase 3 Implementation Notes (Completed, Corrected)
 
-Phase 3 implemented the sub-agent architecture in `engine.py`:
+Phase 3 implemented the sub-agent architecture with true context inheritance:
 
 1. **`run_build_stage()` split into two sub-agent invocations:**
    - `_run_test_subagent()` — Mode A (isolated, fresh `pi --print`). Sees design spec + issue only. Writes tests that SHOULD FAIL.
-   - `_run_implement_subagent()` — Mode B (full context, `pi --print` with rich prompt). Sees design spec + test files + codebase. Implements code to pass tests.
+   - `_run_implement_subagent()` — Mode B (`pi --continue --session <file> --print`). Truly inherits DESIGN session context including full codebase knowledge. Finds test files on disk, implements code to pass them.
    - Sequential order: TEST runs first, then IMPLEMENT.
 
-2. **`run_verify_stage()` converted to Mode A sub-agent:**
-   - Uses `_assemble_subagent_prompt()` with `mode="A"`.
+2. **True Mode B via `pi --continue --session`:**
+   - DESIGN saves session to `.ralph/session-<issue>.jsonl` via `pi --print --session`.
+   - IMPLEMENT loads that session via `pi --continue --session --print`, inheriting full conversation history, codebase knowledge, and design decisions.
+   - No need to re-inject design spec or test file content — the session has design knowledge, and tests are discoverable on disk.
+
+3. **`run_verify_stage()` — Mode A isolated sub-agent:**
    - Fresh `pi --print` session. Sees only: issue + design spec + git diff.
-   - Explicit isolation notice in prompt: "Do NOT attempt to read implementation code."
+   - Explicit isolation notice: "Do NOT attempt to read implementation code."
 
-3. **`_assemble_subagent_prompt()` manages Mode A vs Mode B differences:**
-   - Mode A: PROMPT.md base + stage persona + issue body + design spec. No reference docs. Isolation notice appended.
-   - Mode B: Everything in Mode A + reference docs parsed from issue body. Full context for implementation.
+4. **`_assemble_subagent_prompt()` manages Mode A vs Mode B:**
+   - Mode A: PROMPT.md base + stage persona + issue body + design spec + isolation notice.
+   - Mode B: PROMPT.md base + stage persona + issue body + reference docs + continuation notice. Design spec NOT re-injected (already in session).
 
-4. **`_discover_test_files()` injects test content into IMPLEMENT prompt:**
-   - Uses `git diff --name-only HEAD` + `git ls-files --others` to find new/changed test files.
-   - Reads content (truncated to 5000 chars per file) and appends to prompt.
-   - Fallback: scans `tests/` directory for `.py` files.
+5. **`_cleanup_session()` removes session files** after pipeline completes (success or failure).
 
-5. **Prompt stubs filled in `init.py`:**
-   - `test.md`: QA Engineer persona — writes tests from spec only, tests should fail.
-   - `implement.md`: Developer persona — implements code to pass tests, researches codebase.
-   - `verify.md`: Updated to note it's Mode A isolated sub-agent.
+6. **Prompt stubs filled in `init.py`:**
+   - `test.md`: QA Engineer persona — writes tests from spec only.
+   - `implement.md`: Developer persona — continues from DESIGN, finds tests, implements code.
+   - `verify.md`: Independent reviewer — Mode A isolated sub-agent.
 
-6. **`setup.py` added `check_pi_subagent()`:**
-   - Checks if `pi-subagent` extension is installed via `pi extension list`.
-   - Non-blocking — warns but doesn't fail (engine falls back to `pi --print`).
+7. **`setup.py` added `check_pi_subagent()`** — warns if `pi-subagent` extension not installed (engine uses native `pi --continue`).
 
-7. **`_has_commits()` helper added** for VERIFY stage to handle fresh repos (no HEAD~1).
+8. **`_has_commits()` helper** for VERIFY stage diff generation in fresh repos.
+
+**Correction from initial Phase 3 commit (83fe95d):** The initial implementation used `pi --print` with a richer prompt for Mode B — this was a workaround, not true context inheritance. The corrected implementation uses `pi --continue --session` to inherit the DESIGN session, matching the PRD's Mode B specification.
 
 ### Open Items
 

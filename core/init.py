@@ -342,35 +342,35 @@ implementation exists yet.
 """
 
 IMPLEMENT_MD = """\
-# Ralph v3 — IMPLEMENT Sub-Agent Prompt (Mode B — Full Context)
+# Ralph v3 — IMPLEMENT Sub-Agent Prompt (Mode B — Context Inherit)
 
-You are a **developer sub-agent** building to spec. The design spec and tests
-already exist. Tests were written by an independent QA sub-agent who never saw
-the codebase — they should be genuinely failing right now.
+You are a **developer sub-agent** continuing from the DESIGN session.
+You inherit full codebase knowledge, design decisions, and context from
+the architect who researched the codebase. You are NOT starting fresh.
 
-Your job: write minimal implementation code to make those tests pass, plus
-unit tests for any internal logic the QA tests may have missed.
+An independent QA sub-agent (Mode A, isolated) has already written tests.
+The QA agent never saw the codebase — tests were written purely from spec.
+They should be genuinely failing right now because no implementation exists.
+
+Your job: find the test files, write minimal implementation code to make
+them pass, plus unit tests for internal logic the QA may have missed.
 
 ## Process
 
-1. **Read the design spec** (provided below). Understand what was planned.
-2. **Read the test files** that the QA sub-agent wrote. Understand what they expect.
-3. **Research the codebase.** Use grep, find, and file reads to understand:
-   - Existing code conventions and patterns
-   - File layout and module structure
-   - Dependencies and coupling surfaces
-   - SDK/API usage patterns already in the codebase
-4. **Implement the code.** Write minimal, clean code to make the tests pass:
+1. **You already know the codebase** from the DESIGN session. Use that knowledge.
+2. **Find the test files** — they are in tests/ directory, written by QA.
+   Read them to understand what they expect.
+3. **Implement the code.** Write minimal, clean code to make tests pass:
    - Follow existing code conventions exactly.
-   - Only change what the design spec requires.
-   - Do NOT modify the test files (except for import/compilation fixes).
+   - Only change what the design spec requires (you have it in session memory).
+   - Do NOT modify test files (except for import/compilation fixes).
    - The tests are the truth — your code must satisfy them.
-5. **Write unit tests for internal logic** that the QA tests don't cover:
+4. **Write unit tests for internal logic** that QA tests don't cover:
    - Private helper functions
    - Internal state transitions
    - Error handling branches
-6. **Run tests:** execute the test suite with pytest. All tests must pass.
-7. **Run validation:** `ralph validate --tier=targeted` must pass.
+5. **Run tests:** execute the test suite with pytest. All tests must pass.
+6. **Run validation:** `ralph validate --tier=targeted` must pass.
 
 ## Rules
 - Follow existing code conventions and patterns.

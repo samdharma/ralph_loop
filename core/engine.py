@@ -157,11 +157,14 @@ def transition_label(issue_num: int, add: str, remove: Optional[str] = None):
 
 def run_pipeline(issue: dict) -> bool:
     """
-    Phase 2: 3-stage pipeline (DESIGN → BUILD → VERIFY).
-    Each stage gets its own persona prompt and commits independently.
-    Returns True on success (issue goes to review).
+    Phase 3: 3-stage pipeline with sub-agents.
+    DESIGN saves session for Mode B context inheritance.
+    BUILD spawns TEST (Mode A) + IMPLEMENT (Mode B --continue) sub-agents.
+    VERIFY runs as Mode A isolated sub-agent.
     """
     issue_num = issue["number"]
+    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
+
     print(f"\n{'='*50}")
     print(f"[ralph] Pipeline starting for #{issue_num}: {issue['title']}")
     print(f"{'='*50}\n")
@@ -180,6 +183,7 @@ def run_pipeline(issue: dict) -> bool:
     save_checkpoint(issue_num, "design")
     if not run_design_stage(issue):
         clear_checkpoint()
+        _cleanup_session(session_file)
         transition_label(issue_num, "status:blocked", "status:design")
         log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="design")
         return False
@@ -190,6 +194,7 @@ def run_pipeline(issue: dict) -> bool:
     save_checkpoint(issue_num, "build")
     if not run_build_stage(issue):
         clear_checkpoint()
+        _cleanup_session(session_file)
         transition_label(issue_num, "status:blocked", "status:build")
         log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="build")
         return False
@@ -200,6 +205,7 @@ def run_pipeline(issue: dict) -> bool:
     save_checkpoint(issue_num, "verify")
     verify_pass = run_verify_stage(issue)
     clear_checkpoint()
+    _cleanup_session(session_file)
 
     if verify_pass:
         print(f"\n[ralph] #{issue_num} PASSED — handing off for review")
@@ -218,13 +224,15 @@ def run_pipeline(issue: dict) -> bool:
 # ─────────────────────────────────────────────────────────
 
 def run_design_stage(issue: dict) -> bool:
-    """STAGE 1: Architect persona — reads issue + codebase, writes design spec."""
+    """STAGE 1: Architect persona — reads issue + codebase, writes design spec.
+    Saves session file for Mode B sub-agent context inheritance."""
     issue_num = issue["number"]
     print(f"\n[ralph] STAGE 1/3: DESIGN for #{issue_num}")
     log_metrics("stage_start", issue=str(issue_num), stage="design")
 
+    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
     prompt = assemble_stage_prompt(issue, "design.md")
-    success = invoke_agent(prompt, issue_num)
+    success = invoke_agent(prompt, issue_num, session_file=session_file)
 
     log_metrics("stage_complete", issue=str(issue_num), stage="design")
     return success
@@ -337,69 +345,28 @@ def _run_test_subagent(issue: dict) -> bool:
 
 def _run_implement_subagent(issue: dict) -> bool:
     """
-    IMPLEMENT sub-agent — Mode B (full context).
-    Sees design spec + test files + codebase. Writes implementation code.
+    IMPLEMENT sub-agent — Mode B (true context inheritance via --continue).
+    Continues the DESIGN session, inheriting full codebase knowledge.
+    Finds test files on disk and implements code to make them pass.
     """
     issue_num = issue["number"]
-    print(f"\n  [ralph] BUILD / IMPLEMENT sub-agent for #{issue_num} (Mode B — full context)")
+    print(f"\n  [ralph] BUILD / IMPLEMENT sub-agent for #{issue_num} (Mode B — inherits DESIGN context)")
     log_metrics("subagent_start", issue=str(issue_num), subagent="implement", mode="B")
 
+    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
     prompt = _assemble_subagent_prompt(issue, "implement.md", mode="B")
-
-    # Include test files that were just written by TEST sub-agent
-    test_files = _discover_test_files()
-    if test_files:
-        prompt += "\n\n## Test Files (from QA sub-agent)\n\n"
-        prompt += "These tests were written by an independent QA sub-agent who never "
-        prompt += "saw the codebase. They should be failing. Your job is to make them pass.\n\n"
-        for tf in sorted(test_files):
-            try:
-                content = tf.read_text(encoding="utf-8")
-                prompt += f"### {tf.relative_to(PROJECT_ROOT)}\n\n```python\n{content[:5000]}\n```\n\n"
-                if len(content) > 5000:
-                    prompt += "(…file truncated — read full file in repo)\n\n"
-            except Exception:
-                prompt += f"### {tf.relative_to(PROJECT_ROOT)}\n(Unable to read)\n\n"
-    else:
-        prompt += "\n\n(No new test files detected — check tests/ directory)\n"
-
-    success = invoke_agent(prompt, issue_num)
+    success = invoke_agent(prompt, issue_num, session_file=session_file, continue_session=True)
 
     log_metrics("subagent_complete", issue=str(issue_num), subagent="implement",
                 mode="B", result="success" if success else "failure")
     return success
 
 
-def _discover_test_files() -> list[Path]:
-    """
-    Find test files that were created or modified since the last commit.
-    Used to inject test content into the IMPLEMENT sub-agent prompt.
-    """
-    test_files = []
-    tests_dir = PROJECT_ROOT / "tests"
-    if not tests_dir.exists():
-        return test_files
-
-    try:
-        # Get files changed since last commit
-        result = git("diff", "--name-only", "HEAD")
-        changed = set(result.stdout.strip().split("\n")) if result.stdout.strip() else set()
-
-        # Also get untracked files in tests/
-        result2 = git("ls-files", "--others", "--exclude-standard", "tests/")
-        untracked = set(result2.stdout.strip().split("\n")) if result2.stdout.strip() else set()
-
-        all_changed = changed | untracked
-        for fpath in all_changed:
-            p = PROJECT_ROOT / fpath
-            if p.exists() and p.suffix == ".py":
-                test_files.append(p)
-    except Exception:
-        # Fallback: scan tests/ directory for .py files
-        for p in tests_dir.rglob("*.py"):
-            test_files.append(p)
-
-    return test_files
+def _cleanup_session(session_file: Path):
+    """Remove the session file after pipeline completes (success or failure)."""
+    if session_file.exists():
+        session_file.unlink()
+        print(f"[ralph] Cleaned up session: {session_file.name}")
 
 
 def _has_commits() -> bool:
@@ -416,12 +383,13 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
     Build a prompt for a sub-agent invocation.
 
     Mode A (Isolated): issue body + design spec + stage persona ONLY.
-      No codebase context, no reference docs. Fresh perspective.
-      Used for TEST and VERIFY sub-agents.
+      No codebase context, no reference docs. Fresh pi --print session.
+      Used for TEST and VERIFY sub-agents — genuine independent perspective.
 
-    Mode B (Full context): issue body + design spec + reference docs + stage persona.
-      Full context for implementation work.
-      Used for IMPLEMENT sub-agent.
+    Mode B (Context inherit): issue body + reference docs + stage persona.
+      Session context is inherited via pi --continue.
+      Design spec is already in the session — no need to re-inject.
+      Used for IMPLEMENT sub-agent — builds on DESIGN's codebase knowledge.
     """
     base = ""
     if PROMPT_FILE.exists():
@@ -436,32 +404,32 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
     body = issue.get("body") or "(No description)"
 
     # Build prompt sections
+    section_label = "Sub-Agent Instructions" if mode == "A" else "Sub-Agent Instructions (Mode B — continuing DESIGN session)"
     prompt = (
         f"{base}\n\n"
         f"---\n\n"
-        f"## Sub-Agent Instructions\n\n"
+        f"## {section_label}\n\n"
         f"{stage_prompt}\n\n"
         f"---\n\n"
         f"## Issue #{issue['number']}: {issue['title']}\n\n"
         f"{body}"
     )
 
-    # Design spec (all modes need it)
-    if PROGRESS_FILE.exists():
+    # Design spec (Mode A only — Mode B already has it in session context)
+    if mode == "A" and PROGRESS_FILE.exists():
         design_spec = PROGRESS_FILE.read_text(encoding="utf-8")
         prompt += f"\n\n## Design Spec (from DESIGN stage)\n\n{design_spec}"
 
-    # Reference docs — Mode B only (IMPLEMENT sub-agent)
-    if mode == "B":
-        ref_docs = _parse_reference_docs(body)
-        if ref_docs:
-            prompt += "\n\n## Reference Documentation\n\n"
-            for ref in ref_docs:
-                ref_path = PROJECT_ROOT / ref
-                if ref_path.exists():
-                    prompt += f"### {ref}\n\n{ref_path.read_text(encoding='utf-8')}\n\n"
-                else:
-                    prompt += f"### {ref}\n\n(File not found: {ref})\n\n"
+    # Reference docs (all modes)
+    ref_docs = _parse_reference_docs(body)
+    if ref_docs:
+        prompt += "\n\n## Reference Documentation\n\n"
+        for ref in ref_docs:
+            ref_path = PROJECT_ROOT / ref
+            if ref_path.exists():
+                prompt += f"### {ref}\n\n{ref_path.read_text(encoding='utf-8')}\n\n"
+            else:
+                prompt += f"### {ref}\n\n(File not found: {ref})\n\n"
 
     # Mode A isolation notice
     if mode == "A":
@@ -470,6 +438,16 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
             "**ISOLATION NOTICE:** You are a Mode A sub-agent in a fresh session. "
             "You have NO prior context about the codebase. "
             "Do NOT attempt to read implementation code — work from the specification above ONLY."
+        )
+
+    # Mode B continuation notice
+    if mode == "B":
+        prompt += (
+            "\n\n---\n\n"
+            "**CONTEXT NOTE:** You are a Mode B sub-agent continuing from the DESIGN session. "
+            "You inherit full knowledge of the codebase, design decisions, and the issue. "
+            "Test files were written by an independent QA sub-agent (Mode A) who never saw the code. "
+            "Find the test files in tests/ and implement minimal code to make them pass."
         )
 
     return prompt
@@ -537,9 +515,17 @@ def _parse_reference_docs(body: str) -> list[str]:
     return refs
 
 
-def invoke_agent(prompt: str, issue_num: int) -> bool:
+def invoke_agent(prompt: str, issue_num: int, session_file: Optional[Path] = None,
+                 continue_session: bool = False) -> bool:
     """
     Invoke the AI agent (pi or kimi) with the assembled prompt.
+
+    Args:
+        prompt: The assembled prompt text.
+        issue_num: GitHub issue number (for logging).
+        session_file: If set, save/use this session file (enables Mode B context inheritance).
+        continue_session: If True, use --continue to inherit prior session context (Mode B).
+
     Returns True if agent exits successfully.
     """
     # Detect agent binary
@@ -554,18 +540,22 @@ def invoke_agent(prompt: str, issue_num: int) -> bool:
         print("[ralph] ERROR: No AI agent found (pi or kimi). Set RALPH_AGENT.")
         return False
 
-    print(f"[ralph] Invoking {agent_bin} for #{issue_num}...")
-    log_metrics("agent_invoke", issue=str(issue_num), agent=agent_bin)
+    mode_str = " (continue)" if continue_session else ""
+    print(f"[ralph] Invoking {agent_bin} for #{issue_num}{mode_str}...")
+    log_metrics("agent_invoke", issue=str(issue_num), agent=agent_bin,
+                continue_session=continue_session)
 
     try:
         if agent_bin == "pi":
-            # pi --print for non-interactive mode
-            result = run(
-                [agent_bin, "--print", prompt],
-                check=False, capture=False, timeout=None
-            )
+            cmd = [agent_bin, "--print"]
+            if session_file:
+                cmd += ["--session", str(session_file)]
+            if continue_session:
+                cmd += ["--continue"]
+            cmd.append(prompt)
+            result = run(cmd, check=False, capture=False, timeout=None)
         else:
-            # kimi
+            # kimi — session persistence not tested; fall back to basic invocation
             result = run(
                 [agent_bin, "--print", prompt],
                 check=False, capture=False, timeout=None
