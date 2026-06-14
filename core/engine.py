@@ -155,12 +155,17 @@ def transition_label(issue_num: int, add: str, remove: Optional[str] = None):
 # Item 3: Single-Stage Pipeline
 # ─────────────────────────────────────────────────────────
 
-def run_pipeline(issue: dict) -> bool:
+def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     """
     Phase 3: 3-stage pipeline with sub-agents.
     DESIGN saves session for Mode B context inheritance.
     BUILD spawns TEST (Mode A) + IMPLEMENT (Mode B --continue) sub-agents.
     VERIFY runs as Mode A isolated sub-agent.
+
+    Args:
+        issue: The GitHub issue dict.
+        auto_close: If True, close the issue on successful VERIFY
+                    instead of marking status:review.
     """
     issue_num = issue["number"]
     session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
@@ -209,8 +214,13 @@ def run_pipeline(issue: dict) -> bool:
 
     if verify_pass:
         print(f"\n[ralph] #{issue_num} PASSED — handing off for review")
-        transition_label(issue_num, "status:review", "status:verify")
-        log_metrics("pipeline_complete", issue=str(issue_num), result="review")
+        if auto_close:
+            gh("issue", "close", str(issue_num))
+            print(f"[ralph] #{issue_num} auto-closed")
+            log_metrics("pipeline_complete", issue=str(issue_num), result="closed")
+        else:
+            transition_label(issue_num, "status:review", "status:verify")
+            log_metrics("pipeline_complete", issue=str(issue_num), result="review")
     else:
         print(f"\n[ralph] #{issue_num} FAILED VERIFY — marking blocked")
         transition_label(issue_num, "status:blocked", "status:verify")
@@ -523,8 +533,13 @@ def invoke_agent(prompt: str, issue_num: int, session_file: Optional[Path] = Non
     Args:
         prompt: The assembled prompt text.
         issue_num: GitHub issue number (for logging).
-        session_file: If set, save/use this session file (enables Mode B context inheritance).
+        session_file: If set, save/use this session file (pi only — kimi manages sessions internally).
         continue_session: If True, use --continue to inherit prior session context (Mode B).
+            pi: uses --continue --session <file> for explicit session inheritance.
+            kimi: uses --continue to pick up the most recent session for the working directory.
+                  NOTE: kimi --continue picks up the most recently saved session. If TEST
+                  sub-agent ran between DESIGN and IMPLEMENT, kimi may continue TEST's
+                  session instead of DESIGN's. For reliable Mode B, use pi.
 
     Returns True if agent exits successfully.
     """
@@ -554,12 +569,21 @@ def invoke_agent(prompt: str, issue_num: int, session_file: Optional[Path] = Non
                 cmd += ["--continue"]
             cmd.append(prompt)
             result = run(cmd, check=False, capture=False, timeout=None)
+        elif agent_bin == "kimi":
+            # kimi Mode B: use --continue (best-effort — see docstring caveat)
+            if continue_session:
+                if session_file:
+                    print("[ralph] NOTE: kimi manages sessions internally; --session file ignored.")
+                print("[ralph] WARNING: kimi --continue picks up the most recent session. "
+                      "If TEST sub-agent ran, IMPLEMENT may not inherit DESIGN context. "
+                      "Use pi for reliable Mode B.")
+                cmd = [agent_bin, "--print", "--continue", prompt]
+            else:
+                cmd = [agent_bin, "--print", prompt]
+            result = run(cmd, check=False, capture=False, timeout=None)
         else:
-            # kimi — session persistence not tested; fall back to basic invocation
-            result = run(
-                [agent_bin, "--print", prompt],
-                check=False, capture=False, timeout=None
-            )
+            print(f"[ralph] ERROR: Unknown agent '{agent_bin}'")
+            return False
         return result.returncode == 0
     except subprocess.TimeoutExpired:
         print(f"[ralph] Agent timed out for #{issue_num}")
@@ -685,8 +709,14 @@ def release_pid_file():
         PID_FILE.unlink()
 
 
-def run_loop():
-    """The daemon loop. Runs until interrupted."""
+def run_loop(auto_close: bool = False):
+    """
+    The daemon loop. Runs until interrupted.
+
+    Args:
+        auto_close: If True, close issues on success instead of
+                    marking status:review.
+    """
     if not acquire_pid_file():
         sys.exit(1)
 
@@ -735,8 +765,13 @@ def run_loop():
                     verify_pass = run_verify_stage(issue)
                     clear_checkpoint()
                     if verify_pass:
-                        transition_label(issue_num, "status:review", "status:verify")
-                        log_metrics("pipeline_complete", issue=str(issue_num), result="review")
+                        if auto_close:
+                            gh("issue", "close", str(issue_num))
+                            print(f"[ralph] #{issue_num} auto-closed")
+                            log_metrics("pipeline_complete", issue=str(issue_num), result="closed")
+                        else:
+                            transition_label(issue_num, "status:review", "status:verify")
+                            log_metrics("pipeline_complete", issue=str(issue_num), result="review")
                     else:
                         transition_label(issue_num, "status:blocked", "status:verify")
                         log_metrics("pipeline_complete", issue=str(issue_num), result="blocked")
@@ -746,7 +781,7 @@ def run_loop():
                 if resume_stage == "design":
                     # Run the full pipeline from scratch (already rolled back to pre-design)
                     recovered = None
-                    run_pipeline(issue)
+                    run_pipeline(issue, auto_close=auto_close)
                     continue
 
                 recovered = None
@@ -766,7 +801,7 @@ def run_loop():
             # ── Claim & Pipeline ──
             issue_num = issue["number"]
             transition_label(issue_num, "status:design", "status:ready")
-            run_pipeline(issue)
+            run_pipeline(issue, auto_close=auto_close)
 
             # Brief pause between issues
             if not _shutdown_requested:
@@ -802,4 +837,12 @@ def run_loop():
 # ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    run_loop()
+    import argparse
+    parser = argparse.ArgumentParser(description="Ralph v3 Daemon")
+    parser.add_argument(
+        "--auto-close",
+        action="store_true",
+        help="Close issues on success instead of marking status:review",
+    )
+    args = parser.parse_args()
+    run_loop(auto_close=args.auto_close)

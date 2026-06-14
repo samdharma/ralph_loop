@@ -37,17 +37,19 @@ cmd_help() {
     echo "Usage: ralph <command> [options]"
     echo ""
     echo "Commands:"
-    echo "  init [name]     Scaffold a new Ralph project"
-    echo "  setup           Check prerequisites and prepare local dirs"
-    echo "  daemon          Start the build loop (foreground — use & for background)"
-    echo "  status          Show project health dashboard"
-    echo "  validate [opts] Run the validation gate"
-    echo "  report          Generate daily/weekly summary"
-    echo "  version         Show version"
-    echo "  help            Show this help"
+    echo "  init [name]        Scaffold a new Ralph project"
+    echo "  setup              Check prerequisites and prepare local dirs"
+    echo "  daemon [opts]      Start the build loop (foreground — use & for background)"
+    echo "  status             Show project health dashboard"
+    echo "  validate [opts]    Run the validation gate"
+    echo "  report             Generate daily/weekly summary"
+    echo "  generate-test-map  Auto-generate TEST_MAP.yaml from project structure"
+    echo "  version            Show version"
+    echo "  help               Show this help"
     echo ""
     echo "Options:"
     echo "  validate --tier=<smoke|targeted|integration|full>"
+    echo "  daemon --auto-close          Close issues on success (skip human review)"
     echo ""
     echo "Environment:"
     echo "  RALPH_PROJECT_DIR   Project root (default: pwd)"
@@ -80,6 +82,10 @@ cmd_report() {
     exec "${PYTHON_CMD}" "${CORE_DIR}/report.py" "$@"
 }
 
+cmd_generate_test_map() {
+    exec "${PYTHON_CMD}" "${CORE_DIR}/generate_test_map.py" "$@"
+}
+
 # ─────────────────────────────────────────────────────────
 # Dispatch
 # ─────────────────────────────────────────────────────────
@@ -93,6 +99,7 @@ case "${1:-help}" in
     status)                    shift; cmd_status "$@" ;;
     validate)                  shift; cmd_validate "$@" ;;
     report)                    shift; cmd_report "$@" ;;
+    generate-test-map)         shift; cmd_generate_test_map "$@" ;;
     *)
         echo "ralph: unknown command '${1}'"
         echo "Run 'ralph help' for usage."

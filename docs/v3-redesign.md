@@ -568,7 +568,7 @@ flowchart TD
 |---|---|---|
 | **Context** | Fresh agent session. No conversation history. No codebase knowledge. | Full parent context. All prior conversation, codebase familiarity. |
 | **What it receives** | Only what the orchestrator explicitly injects: issue body, design spec, git diff, prompt file. | Everything the parent agent saw plus the orchestrator's stage instructions. |
-| **Implementation** | `pi --print "<assembled prompt>"` — a brand-new invocation with no prior session. | DESIGN saves session via `pi --print --session <file>`; IMPLEMENT resumes it via `pi --continue --session <file> --print`. For `kimi`, context inheritance is not yet implemented; it falls back to `kimi --print` with the continuation prompt. |
+| **Implementation** | `pi --print "<assembled prompt>"` — a brand-new invocation with no prior session. | DESIGN saves session via `pi --print --session <file>`; IMPLEMENT resumes it via `pi --continue --session <file> --print`. For `kimi`, best-effort Mode B is implemented via `kimi --continue --print`; however kimi's `--continue` picks up the most recent session, which may be TEST (not DESIGN) if TEST runs with kimi. A warning is logged. Use pi for reliable Mode B. |
 | **Use for** | TEST, VERIFY — independence is the point | IMPLEMENT — needs to see spec + codebase |
 | **Anti-pattern** | Using Mode A for IMPLEMENT (agent codes blind, can't reference conventions or existing code) | Using Mode B for TEST (agent sees implementation details, writes biased tests) |
 
@@ -841,14 +841,14 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 
 ### Open Items
 
+- [x] ~~The `--auto-close` flag mentioned in Section 5 is not yet implemented~~ ✅ Fixed — `ralph daemon --auto-close` closes issue on success (2026-06-14)
+- [x] ~~TEST_MAP.yaml auto-generation from project structure would be useful~~ ✅ Fixed — `ralph generate-test-map` scans src/ and tests/ and generates mappings (2026-06-14)
 - [ ] `ralph daemon` needs end-to-end testing with real GitHub issues
 - [ ] `ralph setup` needs testing against a real GitHub repo with proper labels
-- [ ] The `--auto-close` flag mentioned in Section 5 is not yet implemented
-- [ ] TEST_MAP.yaml auto-generation from project structure would be useful
 - [x] ~~Remove v2 artifact `core/ralph_validate.sh` and update `install.sh` to stop referencing `core/*.sh`~~ ✅ Fixed (2026-06-14)
 - [x] ~~`ralph daemon` currently runs in the foreground; implement true daemonization or update all CLI/docs text to say foreground~~ ✅ Fixed — help text updated to "foreground — use & for background" (2026-06-14)
 - [x] ~~`SIGINT`/`SIGTERM` should mark the active issue `status:blocked` with note "interrupted" and clear the checkpoint~~ ✅ Fixed in `run_loop()` finally block (2026-06-14)
-- [ ] `kimi` Mode B context inheritance is not implemented; it falls back to `kimi --print`
+- [x] ~~`kimi` Mode B context inheritance is not implemented; it falls back to `kimi --print`~~ ✅ Fixed — best-effort `kimi --continue --print` with warning about session ordering; pi recommended for reliable Mode B (2026-06-14)
 - [x] ~~Crash recovery should re-apply the correct `status:<stage>` label after rollback~~ ✅ Fixed — `recover_from_crash()` now strips stale labels and adds the target (2026-06-14)
 
 ---
