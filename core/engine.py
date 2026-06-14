@@ -42,8 +42,10 @@ PREFLIGHT_SCRIPT = PROJECT_ROOT / "config" / "ralph_preflight.sh"
 def run(cmd: list[str], check: bool = True, capture: bool = True,
         timeout: Optional[int] = None) -> subprocess.CompletedProcess:
     """Run a shell command, return CompletedProcess."""
-    return subprocess.run(cmd, capture_output=capture, text=True,
-                          check=check, timeout=timeout, cwd=PROJECT_ROOT)
+    result = subprocess.run(cmd, capture_output=capture, text=True,
+                            check=check, timeout=timeout, cwd=PROJECT_ROOT)
+    _check_interrupt()
+    return result
 
 
 def gh(*args: str) -> subprocess.CompletedProcess:
@@ -139,16 +141,32 @@ def _parse_depends_on(body: str) -> list[int]:
 # Item 4: Label Management
 # ─────────────────────────────────────────────────────────
 
-def transition_label(issue_num: int, add: str, remove: Optional[str] = None):
-    """Update issue labels via `gh issue edit`."""
+def transition_label(issue_num: int, add: str, remove: Optional[str] = None,
+                     retries: int = 3, backoff: float = 2.0):
+    """Update issue labels via `gh issue edit`. Retries on transient failures."""
     cmd = ["issue", "edit", str(issue_num), "--add-label", add]
     if remove:
         cmd += ["--remove-label", remove]
-    gh(*cmd)
-    action = f"+{add}"
-    if remove:
-        action += f" / -{remove}"
-    print(f"[ralph] #{issue_num} labels: {action}")
+
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            gh(*cmd)
+            action = f"+{add}"
+            if remove:
+                action += f" / -{remove}"
+            print(f"[ralph] #{issue_num} labels: {action}")
+            return
+        except subprocess.CalledProcessError as e:
+            last_error = e
+            if attempt < retries:
+                wait = backoff ** attempt
+                print(f"[ralph] Label transition failed (attempt {attempt}/{retries}), "
+                      f"retrying in {wait:.0f}s...")
+                _check_interrupt()
+                time.sleep(wait)
+    # All retries exhausted
+    raise last_error
 
 
 # ─────────────────────────────────────────────────────────
@@ -569,6 +587,7 @@ def invoke_agent(prompt: str, issue_num: int, session_file: Optional[Path] = Non
                 cmd += ["--continue"]
             cmd.append(prompt)
             result = run(cmd, check=False, capture=False, timeout=None)
+            _check_interrupt()
         elif agent_bin == "kimi":
             # kimi Mode B: use --continue (best-effort — see docstring caveat)
             if continue_session:
@@ -584,6 +603,7 @@ def invoke_agent(prompt: str, issue_num: int, session_file: Optional[Path] = Non
         else:
             print(f"[ralph] ERROR: Unknown agent '{agent_bin}'")
             return False
+        _check_interrupt()
         return result.returncode == 0
     except subprocess.TimeoutExpired:
         print(f"[ralph] Agent timed out for #{issue_num}")
@@ -632,10 +652,10 @@ def recover_from_crash() -> Optional[dict]:
         stage = data.get("stage", "design")
         pre_sha = data.get("pre_stage_sha", "")
 
-        # Roll back to pre-stage state
+        # Roll back to pre-stage state (stay on the current branch)
         if pre_sha:
             print(f"[ralph] Rolling back to commit {pre_sha[:8]} (before {stage})...")
-            git("checkout", pre_sha)
+            git("reset", "--hard", pre_sha)
 
         # Fetch the issue body so we can resume
         result = gh("issue", "view", str(issue_num),
@@ -677,6 +697,12 @@ def recover_from_crash() -> Optional[dict]:
 # ─────────────────────────────────────────────────────────
 
 _shutdown_requested = False
+_in_cleanup = False
+
+
+class RalphInterrupted(BaseException):
+    """Raised when the daemon receives SIGINT/SIGTERM during a stage."""
+    pass
 
 
 def _handle_signal(signum, frame):
@@ -684,6 +710,13 @@ def _handle_signal(signum, frame):
     sig_name = signal.Signals(signum).name
     print(f"\n[ralph] Received {sig_name} — shutting down gracefully...")
     _shutdown_requested = True
+
+
+def _check_interrupt():
+    """Abort the current operation if a shutdown signal has been received."""
+    global _in_cleanup
+    if _shutdown_requested and not _in_cleanup:
+        raise RalphInterrupted()
 
 
 def acquire_pid_file() -> bool:
@@ -807,29 +840,43 @@ def run_loop(auto_close: bool = False):
             if not _shutdown_requested:
                 time.sleep(5)
 
+    except RalphInterrupted:
+        # Graceful shutdown requested; let finally mark the in-flight issue.
+        pass
     except Exception as e:
         print(f"[ralph] Unhandled error: {e}")
         log_metrics("daemon_error", error=str(e))
         raise
     finally:
-        # Item 2: On interrupt (SIGINT/SIGTERM), mark in-flight issue as blocked.
+        global _in_cleanup
+        _in_cleanup = True
+        # On interrupt (SIGINT/SIGTERM), mark in-flight issue as blocked
+        # and remove the active stage label so the Kanban board stays clean.
         if CHECKPOINT_FILE.exists():
             try:
                 data = json.loads(CHECKPOINT_FILE.read_text())
                 issue_num = data["issue"]
+                stage = data.get("stage", "design")
+                stage_label_map = {
+                    "design": "status:design",
+                    "build": "status:build",
+                    "verify": "status:verify",
+                }
+                remove_label = stage_label_map.get(stage, "status:design")
                 # Add note that the issue was interrupted
                 gh("issue", "comment", str(issue_num),
                    "--body", "⏸️ Ralph daemon interrupted (SIGINT/SIGTERM). Issue was in "
-                   f"{data.get('stage', 'design')} stage. Restart daemon to resume.")
-                transition_label(issue_num, "status:blocked", None)
+                   f"{stage} stage. Re-queue the issue (set status:ready) to retry.")
+                transition_label(issue_num, "status:blocked", remove_label)
                 clear_checkpoint()
-                print(f"[ralph] Marked #{issue_num} as status:blocked (interrupted)")
+                print(f"[ralph] Marked #{issue_num} as status:blocked (interrupted, was: {stage})")
             except Exception as e:
                 print(f"[ralph] Error marking interrupted issue: {e}")
                 clear_checkpoint()
         release_pid_file()
         log_metrics("daemon_stop")
         print("[ralph] Daemon stopped")
+        _in_cleanup = False
 
 
 # ─────────────────────────────────────────────────────────

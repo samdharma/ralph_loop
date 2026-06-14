@@ -795,6 +795,10 @@ The agent is instructed to: understand the issue, implement code, write tests, r
 | Git merge hardcoded `origin/main` | Auto-detect current branch via `git rev-parse --abbrev-ref HEAD` |
 | Checkpoint not cleared on stage failure | Added `clear_checkpoint()` before all failure-return paths |
 | Label transitions used wrong remove-label in 3 places | Fixed: pre-flight fail, crash recovery, claim — all now remove correct current label |
+| `core/init.py` dead-code grep false positive | Reworded comment to avoid literal "beads"/"dolt" words |
+| Interrupt left dual status labels (e.g. `status:design` + `status:blocked`) | `finally` block now removes the active stage label when marking blocked |
+| Interrupt comment said "Restart daemon to resume" but checkpoint was cleared | Message now says "Re-queue the issue (set status:ready) to retry" |
+| `transition_label()` crashes killed the daemon on transient `gh` failures | Added retry loop (3 attempts, exponential backoff) inside `transition_label()` |
 
 ### Architecture Decisions
 

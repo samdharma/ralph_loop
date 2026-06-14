@@ -3,7 +3,7 @@
 Ralph v3 — Project Scaffold Wizard
 
 Generates the full project tree as defined in docs/v3-redesign.md Section 8.
-Zero beads references. GitHub Issues as ticket store.
+GitHub Issues as ticket store. No local database.
 
 Usage:
     ralph init [project-name]            # Interactive
