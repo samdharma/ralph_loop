@@ -567,6 +567,24 @@ def _confirm(prompt: str, default: bool = True, yes: bool = False) -> bool:
         return default
 
 
+def _init_git(project_dir: Path):
+    """Initialize a git repository and commit the scaffold."""
+    try:
+        subprocess.run(["git", "init"], cwd=project_dir,
+                       capture_output=True, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=project_dir,
+                       capture_output=True, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "ralph init"],
+            cwd=project_dir, capture_output=True, check=True
+        )
+        print("  ✓  git init && git commit 'ralph init'")
+    except subprocess.CalledProcessError as e:
+        print(f"  ⚠  git init failed: {e.stderr.strip() if e.stderr else e}")
+        print("     You can initialize git manually:")
+        print("       git init && git add -A && git commit -m 'ralph init'")
+
+
 # ─────────────────────────────────────────────────────────
 # GitHub label creation
 # ─────────────────────────────────────────────────────────
@@ -753,6 +771,14 @@ Examples:
 
     # ── Scaffold ──
     scaffold(project_dir, repo, agent=agent, tier=tier)
+
+    # ── Git init (if not already a repo) ──
+    if not (project_dir / ".git").exists():
+        do_git = args.yes or _confirm("Initialize git repository?", default=True)
+        if do_git:
+            print()
+            _init_git(project_dir)
+
     return 0
 
 
