@@ -1,6 +1,7 @@
 # Ralph v3 — Product Requirements Document
 
-> Working draft. Defines the revamped system. Updated as brainstorming progresses.
+> Phase 1 ✅ | Phase 2 ✅ | Phase 3 ⬜
+> Working draft. Defines the revamped system. Updated as phases complete.
 
 ---
 
@@ -686,7 +687,7 @@ Two options for TEST + IMPLEMENT under BUILD:
 
 ## 12. Implementation Sequence
 
-### Phase 1: Core Pipeline Engine (no sub-agents yet)
+### Phase 1: Core Pipeline Engine (no sub-agents yet) ✅ COMPLETE
 
 **Goal:** A working `ralph daemon` that picks up a `status:ready` issue, invokes the agent with an all-in-one prompt, runs validation, and marks it `status:review`. Single Python file for the engine.
 
@@ -744,7 +745,7 @@ The agent is instructed to: understand the issue, implement code, write tests, r
 
 **Acceptance criteria:** `ralph daemon` picks up a `status:ready` issue, invokes the agent, runs validation, marks it `status:review`. The agent does not touch GitHub labels — the orchestrator does.
 
-### Phase 2: 3-Stage Pipeline
+### Phase 2: 3-Stage Pipeline ✅ COMPLETE
 
 **Goal:** Split the single invocation into DESIGN → BUILD → VERIFY with distinct persona prompts.
 
@@ -822,4 +823,82 @@ The agent is instructed to: understand the issue, implement code, write tests, r
 
 ---
 
-*Draft — updated 2026-06-14. Continue brainstorming.*
+---
+
+## 14. Build Notes & Feedback (2026-06-14)
+
+> Written after completing Phase 1 + Phase 2 implementation.
+> Future agent sessions: read this section first for context before working on Phase 3.
+
+### Implementation Summary
+
+| Phase | Status | Commits | Files |
+|-------|--------|---------|-------|
+| Phase 1 | ✅ Done | `93d9ffa`, `72c7c90`, `a617bed` | `bin/ralph`, `core/engine.py`, `core/init.py`, `core/setup.py`, `core/status.py`, `core/report.py`, `core/validate.py`, `scripts/install.sh` |
+| Phase 2 | ✅ Done | `fd38cca` | `core/engine.py` (3-stage split), `core/init.py` (design/build/verify prompts) |
+| Phase 3 | ⬜ TODO | — | Sub-agents (Mode A/B), test.md + implement.md prompts |
+
+### Deviations from Original Design
+
+1. **No separate `templates/` directory in RALPH_HOME.** All templates are inline strings in `core/init.py`. The scaffold generates them into the project's `docs/agent/` directory. This keeps init.py fully self-contained — no external template files to ship.
+
+2. **Prompt stubs `test.md`, `implement.md`, `feature.md`, `bugfix.md`, `docs.md` are empty files.** They exist so the project scaffold directory structure is complete, but their content is deferred to Phase 3 (test.md, implement.md) or future human customization (feature.md, bugfix.md, docs.md).
+
+3. **Validation gate runs inside BUILD and VERIFY stages, not just at the end.** The BUILD stage runs `ralph validate --tier=targeted` after the agent finishes implementing. The VERIFY stage also runs it after the review. This double-gate provides defense-in-depth.
+
+4. **Pre-flight runs at pipeline start AND before BUILD.** A second pre-flight check before BUILD catches environmental issues (e.g., API keys, DB state) that may have changed during the DESIGN stage.
+
+5. **Git branch auto-detection for sync.** Instead of hardcoding `origin/main`, the daemon runs `git rev-parse --abbrev-ref HEAD` and merges `origin/<branch>`. This supports feature branches.
+
+### Bugs Fixed During Implementation
+
+| Bug | Fix |
+|-----|-----|
+| `validate.py` path pointed to `PROJECT_ROOT/core/validate.py` | Use `RALPH_CORE_DIR` env var; fallback to `Path(__file__).parent` |
+| Git merge hardcoded `origin/main` | Auto-detect current branch via `git rev-parse --abbrev-ref HEAD` |
+| Checkpoint not cleared on stage failure | Added `clear_checkpoint()` before all failure-return paths |
+| Label transitions used wrong remove-label in 3 places | Fixed: pre-flight fail, crash recovery, claim — all now remove correct current label |
+
+### Architecture Decisions
+
+- **`bin/ralph` is the only bash file.** All logic is Python. The bash entry point just dispatches via `exec python3 core/<module>.py`. This matches the PRD principle: "No bash beyond the CLI entry point."
+- **`core/validate.py` is a clean port of `ralph_validate.sh`.** Same tier system, same lint tools, same policy. The old `.sh` is still in the repo but unused by v3.
+- **`core/detect_affected_tests.py` is unchanged from v2.** It still works for the targeted tier.
+- **Checkpoint JSON schema:** `{issue, stage, pre_stage_sha, started_at}`. `pre_stage_sha` is the commit hash *before* the stage started, used to rollback on crash.
+- **Crash recovery flow:** On daemon start, if checkpoint exists → rollback to `pre_stage_sha` → fetch issue body from GitHub → jump to `resume_stage`. The `run_loop()` has explicit handling for each stage in the recovery path.
+
+### Phase 3 Implementation Notes
+
+When implementing Phase 3, the key changes are:
+
+1. **`run_build_stage()` in `engine.py`** — split into two invocations:
+   - `run_test_subagent()` — Mode A: `pi --print "<test.md + design spec>"` (fresh session, isolated)
+   - `run_implement_subagent()` — Mode B: `pi --continue` with parent context or use `@mjakl/pi-subagent` extension with `context=inherit`
+   - Sequential order: TEST first (writes test files), then IMPLEMENT (writes code)
+
+2. **`run_verify_stage()` in `engine.py`** — convert to Mode A sub-agent:
+   - Fresh `pi --print` invocation with verify.md prompt + design spec + git diff
+
+3. **`init.py`** — fill `test.md` (QA Engineer persona) and `implement.md` (Developer persona) prompt stubs
+
+4. **The pi invocation model matters:**
+   - `pi --print "prompt"` = fresh session, no context (Mode A)
+   - `pi --continue` = inherits previous session (Mode B)
+   - `@mjakl/pi-subagent` extension may offer cleaner Mode B isolation
+   - For now, Phase 2 uses `pi --print` for all stages (all fresh sessions) — this works but means DESIGN context is lost between stages
+
+5. **`verify.md` prompt already exists** from Phase 2 — it may need minor updates to reflect sub-agent Mode A (already has "independent reviewer" persona, so largely ready).
+
+6. **TEST_MAP.yaml needs to be populated** for `ralph validate --tier=targeted` to actually run affected tests. Currently defaults to `tests/unit/` when no mappings exist.
+
+### Open Items
+
+- [ ] `ralph setup` needs testing against a real GitHub repo with proper labels
+- [ ] `ralph daemon` needs end-to-end testing with real GitHub issues
+- [ ] The `--auto-close` flag mentioned in Section 5 is not yet implemented
+- [ ] TEST_MAP.yaml auto-generation from project structure would be useful
+- [ ] `install.sh` still references `core/*.sh` for backwards compat — those are v2 artifacts
+
+---
+
+*Last updated: 2026-06-14. Phase 1 + 2 complete. Phase 3 pending.*
