@@ -2,18 +2,11 @@
 """
 Ralph v3 — Pipeline Engine
 
-Core loop: fetch ticket → claim → invoke agent → validate → handoff.
-Phase 1: single-stage (all-in-one agent per issue).
+Core loop: fetch ticket → claim → DESIGN → BUILD → VERIFY → handoff.
+Phase 2: 3-stage pipeline with distinct persona prompts per stage.
 
 Usage (via CLI):
     ralph daemon
-
-Sub-modules:
-    fetch_ready_ticket()  — Item 2
-    run_pipeline()        — Item 3 (single-stage loop)
-    transition_label()    — Item 4
-    daemon loop           — Item 6
-    checkpoint/restore    — Item 7
 """
 
 import json
@@ -37,6 +30,8 @@ PID_FILE = Path("/tmp") / f"ralph_daemon_{PROJECT_ROOT.name}.pid"
 LOG_DIR = PROJECT_ROOT / "logs"
 METRICS_FILE = LOG_DIR / "ralph_metrics.jsonl"
 PROMPT_FILE = PROJECT_ROOT / "docs" / "agent" / "PROMPT.md"
+PROGRESS_FILE = PROJECT_ROOT / "docs" / "agent" / "PROGRESS.md"
+PROMPTS_DIR = PROJECT_ROOT / "docs" / "agent" / "prompts"
 PREFLIGHT_SCRIPT = PROJECT_ROOT / "config" / "ralph_preflight.sh"
 
 
@@ -162,9 +157,9 @@ def transition_label(issue_num: int, add: str, remove: Optional[str] = None):
 
 def run_pipeline(issue: dict) -> bool:
     """
-    Phase 1: Single-stage pipeline.
-    Assembles prompt, invokes agent, runs validation.
-    Returns True on success.
+    Phase 2: 3-stage pipeline (DESIGN → BUILD → VERIFY).
+    Each stage gets its own persona prompt and commits independently.
+    Returns True on success (issue goes to review).
     """
     issue_num = issue["number"]
     print(f"\n{'='*50}")
@@ -181,17 +176,83 @@ def run_pipeline(issue: dict) -> bool:
             transition_label(issue_num, "status:blocked", "status:design")
             return False
 
-    # ── Checkpoint: save issue + pre-commit SHA ──
-    pre_sha = git("rev-parse", "HEAD").stdout.strip()
-    save_checkpoint(issue_num, pre_sha)
+    # ── STAGE 1: DESIGN ──
+    save_checkpoint(issue_num, "design")
+    if not run_design_stage(issue):
+        clear_checkpoint()
+        transition_label(issue_num, "status:blocked", "status:design")
+        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="design")
+        return False
+    commit_stage(issue_num, "design")
+    transition_label(issue_num, "status:build", "status:design")
 
-    # ── Assemble prompt ──
-    prompt = assemble_prompt(issue)
+    # ── STAGE 2: BUILD ──
+    save_checkpoint(issue_num, "build")
+    if not run_build_stage(issue):
+        clear_checkpoint()
+        transition_label(issue_num, "status:blocked", "status:build")
+        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="build")
+        return False
+    commit_stage(issue_num, "build")
+    transition_label(issue_num, "status:verify", "status:build")
 
-    # ── Invoke agent (all-in-one) ──
+    # ── STAGE 3: VERIFY ──
+    save_checkpoint(issue_num, "verify")
+    verify_pass = run_verify_stage(issue)
+    clear_checkpoint()
+
+    if verify_pass:
+        print(f"\n[ralph] #{issue_num} PASSED — handing off for review")
+        transition_label(issue_num, "status:review", "status:verify")
+        log_metrics("pipeline_complete", issue=str(issue_num), result="review")
+    else:
+        print(f"\n[ralph] #{issue_num} FAILED VERIFY — marking blocked")
+        transition_label(issue_num, "status:blocked", "status:verify")
+        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="verify")
+
+    return verify_pass
+
+
+# ─────────────────────────────────────────────────────────
+# Stage runners
+# ─────────────────────────────────────────────────────────
+
+def run_design_stage(issue: dict) -> bool:
+    """STAGE 1: Architect persona — reads issue + codebase, writes design spec."""
+    issue_num = issue["number"]
+    print(f"\n[ralph] STAGE 1/3: DESIGN for #{issue_num}")
+    log_metrics("stage_start", issue=str(issue_num), stage="design")
+
+    prompt = assemble_stage_prompt(issue, "design.md")
     success = invoke_agent(prompt, issue_num)
 
-    # ── Validate ──
+    log_metrics("stage_complete", issue=str(issue_num), stage="design")
+    return success
+
+
+def run_build_stage(issue: dict) -> bool:
+    """STAGE 2: Developer persona — reads design spec, writes code + tests."""
+    issue_num = issue["number"]
+    print(f"\n[ralph] STAGE 2/3: BUILD for #{issue_num}")
+    log_metrics("stage_start", issue=str(issue_num), stage="build")
+
+    # Run pre-flight before build
+    if PREFLIGHT_SCRIPT.exists():
+        result = run(["bash", str(PREFLIGHT_SCRIPT)], check=False)
+        if result.returncode != 0:
+            print(f"[ralph] Pre-flight FAILED for #{issue_num}")
+            return False
+
+    prompt = assemble_stage_prompt(issue, "build.md")
+
+    # Include design spec content in the prompt
+    if PROGRESS_FILE.exists():
+        design_spec = PROGRESS_FILE.read_text(encoding="utf-8")
+        prompt += f"\n\n## Design Spec (from DESIGN stage)\n\n{design_spec}"
+
+    success = invoke_agent(prompt, issue_num)
+
+    # Run validation after build
     if success:
         print(f"\n[ralph] Running validation gate...")
         core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
@@ -202,26 +263,61 @@ def run_pipeline(issue: dict) -> bool:
         )
         success = (val_result.returncode == 0)
 
-    # ── Handoff ──
-    clear_checkpoint()
-
-    if success:
-        print(f"\n[ralph] #{issue_num} PASSED — handing off for review")
-        transition_label(issue_num, "status:review", "status:design")
-        log_metrics("pipeline_complete", issue=str(issue_num), result="review")
-    else:
-        print(f"\n[ralph] #{issue_num} FAILED — marking blocked")
-        transition_label(issue_num, "status:blocked", "status:design")
-        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked")
-
+    log_metrics("stage_complete", issue=str(issue_num), stage="build")
     return success
 
 
-def assemble_prompt(issue: dict) -> str:
-    """Build the all-in-one agent prompt from PROMPT.md + issue body."""
+def run_verify_stage(issue: dict) -> bool:
+    """STAGE 3: Independent reviewer persona — reviews diff, validates."""
+    issue_num = issue["number"]
+    print(f"\n[ralph] STAGE 3/3: VERIFY for #{issue_num}")
+    log_metrics("stage_start", issue=str(issue_num), stage="verify")
+
+    # Get the git diff for the reviewer to inspect
+    pre_sha = git("rev-parse", "HEAD~1").stdout.strip()
+    diff = git("diff", pre_sha, "HEAD").stdout
+
+    prompt = assemble_stage_prompt(issue, "verify.md")
+
+    # Include design spec
+    if PROGRESS_FILE.exists():
+        design_spec = PROGRESS_FILE.read_text(encoding="utf-8")
+        prompt += f"\n\n## Design Spec\n\n{design_spec}"
+
+    # Include git diff
+    prompt += f"\n\n## Git Diff (changes to review)\n\n```diff\n{diff[:8000]}\n```"
+
+    if len(diff) > 8000:
+        prompt += "\n\n(…diff truncated — review key files from the repo)"
+
+    success = invoke_agent(prompt, issue_num)
+
+    # Run validation gate after review
+    if success:
+        print(f"\n[ralph] Running validation gate...")
+        core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
+        val_result = run(
+            [sys.executable, os.path.join(core_dir, "validate.py"),
+             "--tier", "targeted"],
+            check=False, capture=False
+        )
+        success = (val_result.returncode == 0)
+
+    log_metrics("stage_complete", issue=str(issue_num), stage="verify")
+    return success
+
+
+def assemble_stage_prompt(issue: dict, stage_prompt_file: str) -> str:
+    """Build a stage-specific prompt from PROMPT.md + stage persona + issue body."""
     base = ""
     if PROMPT_FILE.exists():
         base = PROMPT_FILE.read_text(encoding="utf-8")
+
+    # Stage-specific persona instructions
+    stage_prompt = ""
+    stage_path = PROMPTS_DIR / stage_prompt_file
+    if stage_path.exists():
+        stage_prompt = stage_path.read_text(encoding="utf-8")
 
     body = issue.get("body") or "(No description)"
 
@@ -240,20 +336,26 @@ def assemble_prompt(issue: dict) -> str:
     prompt = (
         f"{base}\n\n"
         f"---\n\n"
+        f"## Stage Instructions\n\n"
+        f"{stage_prompt}\n\n"
+        f"---\n\n"
         f"## Issue #{issue['number']}: {issue['title']}\n\n"
         f"{body}"
         f"{ref_section}"
-        f"\n\n---\n\n"
-        f"## Instructions\n\n"
-        f"1. Read the issue above carefully.\n"
-        f"2. Research the codebase to understand existing patterns.\n"
-        f"3. Implement the changes described in the issue.\n"
-        f"4. Write tests for all new/changed functionality.\n"
-        f"5. Run `ralph validate --tier=targeted` to verify.\n"
-        f"6. Commit your changes with a descriptive message.\n"
-        f"7. Do NOT modify GitHub labels or issues.\n"
     )
     return prompt
+
+
+def commit_stage(issue_num: int, stage: str):
+    """Commit all changes after a pipeline stage completes."""
+    msg = f"[ralph] {stage}: #{issue_num}"
+    try:
+        git("add", "-A")
+        git("commit", "-m", msg)
+        print(f"[ralph] Committed: {msg}")
+    except subprocess.CalledProcessError:
+        # No changes to commit (e.g., DESIGN stage may not change files)
+        print(f"[ralph] Nothing to commit for {stage}")
 
 
 def _parse_reference_docs(body: str) -> list[str]:
@@ -313,12 +415,14 @@ def invoke_agent(prompt: str, issue_num: int) -> bool:
 # Item 7: Checkpoint & Crash Recovery
 # ─────────────────────────────────────────────────────────
 
-def save_checkpoint(issue_num: int, pre_sha: str):
-    """Save checkpoint for crash recovery."""
+def save_checkpoint(issue_num: int, stage: str):
+    """Save checkpoint for crash recovery with stage info."""
     CHECKPOINT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    pre_sha = git("rev-parse", "HEAD").stdout.strip()
     data = {
         "issue": issue_num,
-        "pre_commit_sha": pre_sha,
+        "stage": stage,
+        "pre_stage_sha": pre_sha,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
     CHECKPOINT_FILE.write_text(json.dumps(data, indent=2))
@@ -330,40 +434,49 @@ def clear_checkpoint():
         CHECKPOINT_FILE.unlink()
 
 
-def recover_from_crash():
+def recover_from_crash() -> Optional[dict]:
     """
     Check for interrupted work from previous run.
-    If found: roll back to pre-commit SHA, mark issue blocked, clear checkpoint.
+    If found: roll back to pre-stage SHA, return issue dict for resume.
+    Returns None if no crash recovery needed.
     """
     if not CHECKPOINT_FILE.exists():
-        return
+        return None
 
     print("[ralph] Found checkpoint from previous run — recovering...")
     try:
         data = json.loads(CHECKPOINT_FILE.read_text())
         issue_num = data["issue"]
-        pre_sha = data.get("pre_commit_sha", "")
+        stage = data.get("stage", "design")
+        pre_sha = data.get("pre_stage_sha", "")
 
-        # Roll back to pre-pipeline state
+        # Roll back to pre-stage state
         if pre_sha:
-            print(f"[ralph] Rolling back to commit {pre_sha[:8]}...")
+            print(f"[ralph] Rolling back to commit {pre_sha[:8]} (before {stage})...")
             git("checkout", pre_sha)
 
-        # Mark issue as blocked (interrupted)
-        try:
-            transition_label(issue_num, "status:blocked", "status:design")
-            # Add a comment about the interruption
-            gh("issue", "comment", str(issue_num),
-               "--body", "⚠️ Ralph was interrupted while processing this issue. "
-                         "Please review and re-mark as `status:ready` if still needed.")
-        except subprocess.CalledProcessError:
-            print(f"[ralph] Could not update #{issue_num} — continuing anyway")
+        # Fetch the issue body so we can resume
+        result = gh("issue", "view", str(issue_num),
+                    "--json", "number,title,body")
+        issue = json.loads(result.stdout)
 
-        log_metrics("crash_recovery", issue=str(issue_num))
+        # Restore the correct label for this stage
+        stage_label_map = {
+            "design": "status:design",
+            "build": "status:build",
+            "verify": "status:verify",
+        }
+        current_label = stage_label_map.get(stage, "status:design")
+
+        print(f"[ralph] Resuming #{issue_num} at stage: {stage}")
+        log_metrics("crash_recovery", issue=str(issue_num), stage=stage)
+
+        return {"issue": issue, "resume_stage": stage}
+
     except Exception as e:
         print(f"[ralph] Recovery error: {e}")
-    finally:
         clear_checkpoint()
+        return None
 
 
 # ─────────────────────────────────────────────────────────
@@ -415,27 +528,67 @@ def run_loop():
     log_metrics("daemon_start")
 
     try:
-        recover_from_crash()
+        recovered = recover_from_crash()
 
         while not _shutdown_requested:
             # ── Sync ──
             print("[ralph] Syncing with remote...")
             try:
                 git("fetch", "origin")
-                # Detect current branch and merge its upstream
                 branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
                 upstream = f"origin/{branch}"
                 git("merge", upstream, "--ff-only")
             except subprocess.CalledProcessError:
                 print("[ralph] Warning: git sync failed — continuing with local state")
 
+            # ── Handle crash recovery resume ──
+            if recovered:
+                issue = recovered["issue"]
+                resume_stage = recovered["resume_stage"]
+                issue_num = issue["number"]
+                print(f"[ralph] Resuming #{issue_num} from stage: {resume_stage}")
+
+                if resume_stage == "build":
+                    save_checkpoint(issue_num, "build")
+                    success = run_build_stage(issue)
+                    if not success:
+                        transition_label(issue_num, "status:blocked", "status:build")
+                        clear_checkpoint()
+                        recovered = None
+                        continue
+                    commit_stage(issue_num, "build")
+                    transition_label(issue_num, "status:verify", "status:build")
+                    # Fall through to VERIFY
+                    resume_stage = "verify"
+
+                if resume_stage == "verify":
+                    save_checkpoint(issue_num, "verify")
+                    verify_pass = run_verify_stage(issue)
+                    clear_checkpoint()
+                    if verify_pass:
+                        transition_label(issue_num, "status:review", "status:verify")
+                        log_metrics("pipeline_complete", issue=str(issue_num), result="review")
+                    else:
+                        transition_label(issue_num, "status:blocked", "status:verify")
+                        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked")
+                    recovered = None
+                    continue
+
+                if resume_stage == "design":
+                    # Run the full pipeline from scratch (already rolled back to pre-design)
+                    recovered = None
+                    run_pipeline(issue)
+                    continue
+
+                recovered = None
+                continue
+
             # ── Fetch next ready ticket ──
             issue = fetch_ready_ticket()
             if issue is None:
                 print("[ralph] No ready tickets. Sleeping...")
                 log_metrics("daemon_idle")
-                # Sleep with interrupt check
-                for _ in range(60):  # Check every second for shutdown
+                for _ in range(60):
                     if _shutdown_requested:
                         break
                     time.sleep(1)
