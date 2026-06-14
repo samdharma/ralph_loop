@@ -847,8 +847,8 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 
 - [x] ~~The `--auto-close` flag mentioned in Section 5 is not yet implemented~~ ✅ Fixed — `ralph daemon --auto-close` closes issue on success (2026-06-14)
 - [x] ~~TEST_MAP.yaml auto-generation from project structure would be useful~~ ✅ Fixed — `ralph generate-test-map` scans src/ and tests/ and generates mappings (2026-06-14)
-- [ ] `ralph daemon` needs end-to-end testing with real GitHub issues
-- [ ] `ralph setup` needs testing against a real GitHub repo with proper labels
+- [x] `ralph daemon` needs end-to-end testing with real GitHub issues ✅ (E2E run 2026-06-14: issue #1 completed ready→design→build→verify→review on pi)
+- [x] `ralph setup` needs testing against a real GitHub repo with proper labels ✅ (E2E run 2026-06-14: samdharma/ralph-e2e-test, all checks passed)
 - [x] ~~Remove v2 artifact `core/ralph_validate.sh` and update `install.sh` to stop referencing `core/*.sh`~~ ✅ Fixed (2026-06-14)
 - [x] ~~`ralph daemon` currently runs in the foreground; implement true daemonization or update all CLI/docs text to say foreground~~ ✅ Fixed — help text updated to "foreground — use & for background" (2026-06-14)
 - [x] ~~`SIGINT`/`SIGTERM` should mark the active issue `status:blocked` with note "interrupted" and clear the checkpoint~~ ✅ Fixed in `run_loop()` finally block (2026-06-14)
@@ -876,12 +876,12 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 | P1.5 | `bin/ralph help` lists all 6 commands | Wired y/n | ✅ PASS |
 | P1.6 | All `core/*.py` files compile (`py_compile`) | Wired y/n | ✅ PASS |
 | P1.7 | `ralph setup` checks gh auth, git remote, python, agent, labels, dirs | E2E | ✅ PASS |
-| P1.8 | `engine.py` can fetch ticket via `gh issue list` (mocked or real) | E2E | ⬜ TODO |
-| P1.9 | `engine.py` can transition labels via `gh issue edit` (mocked or real) | E2E | ⬜ TODO |
-| P1.10 | `validate.py --tier=targeted` runs pytest + lint on modified files | E2E | ⬜ TODO |
+| P1.8 | `engine.py` can fetch ticket via `gh issue list` (mocked or real) | E2E | ✅ PASS |
+| P1.9 | `engine.py` can transition labels via `gh issue edit` (mocked or real) | E2E | ✅ PASS |
+| P1.10 | `validate.py --tier=targeted` runs pytest + lint on modified files | E2E | ✅ PASS |
 | P1.11 | Daemon PID-file singleton prevents duplicate runs | Wired y/n | ✅ PASS |
 | P1.12 | Checkpoint save → crash → recover flow works | E2E | ⬜ TODO |
-| P1.13 | Agent invocation (pi --print) succeeds with assembled prompt | E2E | ⬜ TODO |
+| P1.13 | Agent invocation (pi --print) succeeds with assembled prompt | E2E | ✅ PASS |
 | P1.14 | No empty/stub prompt files in scaffold (PROMPT.md, PROGRESS.md, AGENTS.md, config.toml populated) | Stub check | ✅ PASS |
 | P1.15 | `scripts/install.sh` checks for `gh` (not `bd`) as prerequisite | Dead code | ✅ PASS |
 
@@ -898,7 +898,7 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 | P2.5 | Crash during DESIGN resumes at DESIGN on restart | E2E | ⬜ TODO |
 | P2.6 | Crash during BUILD resumes at BUILD on restart | E2E | ⬜ TODO |
 | P2.7 | Crash during VERIFY resumes at VERIFY on restart | E2E | ⬜ TODO |
-| P2.8 | Label flow: ready → design → build → verify → review (full run) | E2E | ⬜ TODO |
+| P2.8 | Label flow: ready → design → build → verify → review (full run) | E2E | ✅ PASS |
 | P2.9 | Label flow: design → blocked (stage failure) | E2E | ⬜ TODO |
 | P2.10 | Stage commits have format `[ralph] <stage>: #<issue>` | Wired y/n | ✅ PASS |
 | P2.11 | `commit_stage()` handles "nothing to commit" gracefully | Wired y/n | ✅ PASS |
@@ -919,16 +919,16 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 | P3.3 | `run_build_stage()` spawns TEST sub-agent in Mode A (fresh `pi --print`) | Wired y/n | ✅ PASS |
 | P3.4 | `run_build_stage()` spawns IMPLEMENT sub-agent in Mode B (context inherit) | Wired y/n | ✅ PASS |
 | P3.5 | `run_verify_stage()` spawns VERIFY sub-agent in Mode A (fresh `pi --print`) | Wired y/n | ✅ PASS |
-| P3.6 | TEST sub-agent sees design spec ONLY, not implementation code | E2E | ⬜ TODO |
-| P3.7 | IMPLEMENT sub-agent sees design spec + test files + codebase | E2E | ⬜ TODO |
-| P3.8 | VERIFY sub-agent sees issue + spec + git diff only (fresh session) | E2E | ⬜ TODO |
-| P3.9 | TEST writes failing tests (before implementation exists) | E2E | ⬜ TODO |
-| P3.10 | IMPLEMENT writes minimal code to make TESTs pass | E2E | ⬜ TODO |
-| P3.11 | VERIFY does 5-axis review on the git diff | E2E | ⬜ TODO |
+| P3.6 | TEST sub-agent sees design spec ONLY, not implementation code | E2E | ✅ PASS |
+| P3.7 | IMPLEMENT sub-agent sees design spec + test files + codebase | E2E | ✅ PASS |
+| P3.8 | VERIFY sub-agent sees issue + spec + git diff only (fresh session) | E2E | ✅ PASS |
+| P3.9 | TEST writes failing tests (before implementation exists) | E2E | ✅ PASS |
+| P3.10 | IMPLEMENT writes minimal code to make TESTs pass | E2E | ✅ PASS |
+| P3.11 | VERIFY does 5-axis review on the git diff | E2E | ✅ PASS |
 | P3.12 | No dead code: `run_build_stage()` no longer invokes a single agent inline | Dead code | ✅ PASS |
 | P3.13 | No dead code: `run_verify_stage()` no longer invokes a single agent inline | Dead code | ✅ PASS |
 | P3.14 | `ralph setup` checks for `pi-subagent` extension (engine uses native `pi --continue`, so extension is optional) | Wired y/n | ✅ PASS |
-| P3.15 | Full end-to-end: issue created → DESIGN → TEST writes tests → IMPLEMENT writes code → VERIFY reviews → status:review | E2E | ⬜ TODO |
+| P3.15 | Full end-to-end: issue created → DESIGN → TEST writes tests → IMPLEMENT writes code → VERIFY reviews → status:review | E2E | ✅ PASS |
 
 **Phase 3 Joint Review:** Human + agent verify: full end-to-end run with a real GitHub issue. Confirm TEST sub-agent writes tests without seeing code. Confirm IMPLEMENT sub-agent makes tests pass. Confirm VERIFY sub-agent does independent review. Run `ralph status` and `ralph report` mid-run to verify observability.
 
