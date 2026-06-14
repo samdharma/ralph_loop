@@ -103,6 +103,7 @@ my-project/
 |----------|-------|
 | [Getting Started](docs/getting_started.md) | Full guide: install, setup, tickets, pipeline, cheat sheet |
 | [v3 Redesign PRD](docs/v3-redesign.md) | System design, phases, build notes, validation gates |
+| [System Validation Test](docs/system_test.md) | Step-by-step test plan (26 tests, 8 suites) |
 
 ## License
 
