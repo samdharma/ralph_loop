@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# Ralph v3 — CLI Entry Point
+#
+# Dispatches to Python modules for all subcommands.
+# No beads. No dolt. GitHub-native.
+
+set -euo pipefail
+
+# Detect RALPH_HOME
+if [[ -n "${RALPH_HOME:-}" ]]; then
+    RALPH_HOME="${RALPH_HOME}"
+elif [[ -L "$0" ]]; then
+    # Follow symlink to find the real location
+    RALPH_HOME="$(cd "$(dirname "$(readlink "$0")")/.." && pwd)"
+else
+    RALPH_HOME="$(cd "$(dirname "$0")/.." && pwd)"
+fi
+
+CORE_DIR="${RALPH_HOME}/core"
+PYTHON_CMD="${RALPH_PYTHON_CMD:-python3}"
+PROJECT_DIR="${RALPH_PROJECT_DIR:-$(pwd)}"
+
+export RALPH_PROJECT_DIR="${PROJECT_DIR}"
+export RALPH_CORE_DIR="${CORE_DIR}"
+
+# ─────────────────────────────────────────────────────────
+# Commands
+# ─────────────────────────────────────────────────────────
+
+cmd_version() {
+    echo "ralph v3.0.0"
+}
+
+cmd_help() {
+    echo "Ralph v3 — Automated Build System"
+    echo ""
+    echo "Usage: ralph <command> [options]"
+    echo ""
+    echo "Commands:"
+    echo "  init [name]     Scaffold a new Ralph project"
+    echo "  setup           Check prerequisites and prepare local dirs"
+    echo "  daemon          Start the build loop (background)"
+    echo "  status          Show project health dashboard"
+    echo "  validate [opts] Run the validation gate"
+    echo "  report          Generate daily/weekly summary"
+    echo "  version         Show version"
+    echo "  help            Show this help"
+    echo ""
+    echo "Options:"
+    echo "  validate --tier=<smoke|targeted|integration|full>"
+    echo ""
+    echo "Environment:"
+    echo "  RALPH_PROJECT_DIR   Project root (default: pwd)"
+    echo "  RALPH_HOME          Ralph install directory"
+    echo "  RALPH_PYTHON_CMD    Python executable (default: python3)"
+    echo "  RALPH_AGENT         AI agent binary (pi or kimi)"
+}
+
+cmd_init() {
+    exec "${PYTHON_CMD}" "${CORE_DIR}/init.py" "$@"
+}
+
+cmd_setup() {
+    exec "${PYTHON_CMD}" "${CORE_DIR}/setup.py" "$@"
+}
+
+cmd_daemon() {
+    exec "${PYTHON_CMD}" "${CORE_DIR}/engine.py" "$@"
+}
+
+cmd_status() {
+    exec "${PYTHON_CMD}" "${CORE_DIR}/status.py" "$@"
+}
+
+cmd_validate() {
+    exec "${PYTHON_CMD}" "${CORE_DIR}/validate.py" "$@"
+}
+
+cmd_report() {
+    exec "${PYTHON_CMD}" "${CORE_DIR}/report.py" "$@"
+}
+
+# ─────────────────────────────────────────────────────────
+# Dispatch
+# ─────────────────────────────────────────────────────────
+
+case "${1:-help}" in
+    version|--version|-v)      cmd_version ;;
+    help|--help|-h)            cmd_help ;;
+    init)                      shift; cmd_init "$@" ;;
+    setup)                     shift; cmd_setup "$@" ;;
+    daemon)                    shift; cmd_daemon "$@" ;;
+    status)                    shift; cmd_status "$@" ;;
+    validate)                  shift; cmd_validate "$@" ;;
+    report)                    shift; cmd_report "$@" ;;
+    *)
+        echo "ralph: unknown command '${1}'"
+        echo "Run 'ralph help' for usage."
+        exit 1
+        ;;
+esac

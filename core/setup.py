@@ -1,0 +1,219 @@
+#!/usr/bin/env python3
+"""
+Ralph v3 — Setup
+
+Post-clone environment check. Verifies all prerequisites and creates
+local directories. Run once after `git clone`.
+
+Usage:
+    ralph setup
+"""
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
+
+CHECKS = []
+
+
+def ok(msg: str):
+    print(f"  \033[32m✓\033[0m {msg}")
+
+
+def warn(msg: str):
+    print(f"  \033[33m⚠\033[0m  {msg}")
+
+
+def fail(msg: str):
+    print(f"  \033[31m✗\033[0m {msg}")
+
+
+def check(desc: str, fn) -> bool:
+    """Run a check, print result, return pass/fail."""
+    try:
+        result, detail = fn()
+        if result:
+            ok(f"{desc} ({detail})" if detail else desc)
+            return True
+        else:
+            fail(f"{desc} — {detail}")
+            return False
+    except Exception as e:
+        fail(f"{desc} — {e}")
+        return False
+
+
+# ─────────────────────────────────────────────────────────
+# Individual checks
+# ─────────────────────────────────────────────────────────
+
+def check_gh_auth():
+    """Verify GitHub CLI is authenticated."""
+    result = subprocess.run(
+        ["gh", "auth", "status"],
+        capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        return True, "authenticated"
+    return False, "run: gh auth login"
+
+
+def check_git_remote():
+    """Verify we're in a git repo with a remote."""
+    result = subprocess.run(
+        ["git", "remote", "get-url", "origin"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT
+    )
+    if result.returncode == 0:
+        return True, result.stdout.strip()
+    return False, "no origin remote"
+
+
+def check_python():
+    """Verify Python 3.10+ is available."""
+    result = subprocess.run(
+        [sys.executable, "--version"],
+        capture_output=True, text=True
+    )
+    ver_str = result.stdout.strip()
+    # Parse "Python 3.x.y"
+    parts = ver_str.split()
+    if len(parts) >= 2:
+        ver = parts[1]
+        major, minor = ver.split(".")[:2]
+        if int(major) >= 3 and int(minor) >= 10:
+            return True, ver_str
+        return False, f"need 3.10+, got {ver_str}"
+    return False, f"unexpected version output: {ver_str}"
+
+
+def check_agent():
+    """Verify at least one AI agent is available."""
+    for agent in ["pi", "kimi"]:
+        result = subprocess.run(
+            ["which", agent], capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            return True, agent
+    return False, "install pi or kimi"
+
+
+def check_gh_repo_access():
+    """Verify gh can list issues for this repo."""
+    try:
+        remote = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, cwd=PROJECT_ROOT
+        ).stdout.strip()
+
+        # Extract owner/repo from remote URL
+        repo = None
+        for prefix in ["https://github.com/", "git@github.com:"]:
+            if remote.startswith(prefix):
+                path = remote[len(prefix):]
+                if path.endswith(".git"):
+                    path = path[:-4]
+                repo = path
+                break
+
+        if not repo:
+            return False, "cannot parse repo from remote"
+
+        result = subprocess.run(
+            ["gh", "issue", "list", "--repo", repo, "--limit", "1"],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0:
+            return True, repo
+        return False, f"cannot access {repo}"
+    except Exception as e:
+        return False, str(e)
+
+
+def check_gh_labels():
+    """Verify required labels exist in the repo."""
+    try:
+        remote = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, cwd=PROJECT_ROOT
+        ).stdout.strip()
+
+        repo = None
+        for prefix in ["https://github.com/", "git@github.com:"]:
+            if remote.startswith(prefix):
+                path = remote[len(prefix):]
+                if path.endswith(".git"):
+                    path = path[:-4]
+                repo = path
+                break
+
+        if not repo:
+            return False, "cannot parse repo from remote"
+
+        result = subprocess.run(
+            ["gh", "label", "list", "--repo", repo, "--json", "name"],
+            capture_output=True, text=True
+        )
+        import json
+        labels = [l["name"] for l in json.loads(result.stdout)]
+
+        required = [
+            "status:ready", "status:design", "status:build",
+            "status:verify", "status:review", "status:blocked",
+        ]
+        missing = [l for l in required if l not in labels]
+
+        if not missing:
+            return True, "all required labels present"
+        return False, f"missing: {', '.join(missing)}"
+    except Exception as e:
+        return False, str(e)
+
+
+# ─────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────
+
+def main() -> int:
+    print("╔══════════════════════════════════════════╗")
+    print("║   Ralph v3 — Setup                       ║")
+    print("╚══════════════════════════════════════════╝")
+    print()
+    print(f"Project: {PROJECT_ROOT}")
+    print()
+
+    all_pass = True
+    all_pass &= check("GitHub CLI authenticated", check_gh_auth)
+    all_pass &= check("Git remote", check_git_remote)
+    all_pass &= check("Python 3.10+", check_python)
+    all_pass &= check("AI agent (pi/kimi)", check_agent)
+    all_pass &= check("GitHub repo access", check_gh_repo_access)
+    all_pass &= check("Required labels", check_gh_labels)
+
+    print()
+
+    # ── Create local directories ──
+    for d in ["logs", ".ralph"]:
+        dp = PROJECT_ROOT / d
+        if not dp.exists():
+            dp.mkdir(parents=True, exist_ok=True)
+            ok(f"Created {d}/")
+        else:
+            ok(f"{d}/ exists")
+
+    print()
+
+    if all_pass:
+        print("Setup complete! Run 'ralph daemon' to start building.")
+        return 0
+    else:
+        print("Some checks failed. Fix the issues above and re-run 'ralph setup'.")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

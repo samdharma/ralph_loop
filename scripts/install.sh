@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Ralph Wiggum Loop Build System — One-Line Installer
+# Ralph v3 — One-Line Installer
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/main/scripts/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
 #
 # Or from a local clone:
 #   bash scripts/install.sh
@@ -27,7 +27,7 @@ MISSING=()
 WARNINGS=()
 
 RALPH_HOME="${RALPH_HOME:-$HOME/.ralph}"
-RALPH_VERSION="1.3.0"
+RALPH_VERSION="3.0.0"
 
 # Determine the source directory (where this script lives)
 if [[ -f "${BASH_SOURCE[0]}" ]]; then
@@ -38,7 +38,7 @@ else
 fi
 
 echo "╔══════════════════════════════════════════╗"
-echo "║   Ralph Wiggum Loop Build System        ║"
+echo "║   Ralph v3 — Automated Build System      ║"
 echo "║   Installer v${RALPH_VERSION}                     ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
@@ -67,6 +67,15 @@ else
     MISSING+=("git — https://git-scm.com/downloads (macOS: brew install git)")
 fi
 
+# Check gh (GitHub CLI)
+if command -v gh &>/dev/null; then
+    GH_VER=$(gh --version 2>/dev/null | head -1)
+    pass "gh (${GH_VER})"
+else
+    fail "gh — GitHub CLI not found in PATH"
+    MISSING+=("gh — https://cli.github.com/ (macOS: brew install gh)")
+fi
+
 # Check Python 3.10+
 PYTHON_CMD=""
 for py in python3 python; do
@@ -84,15 +93,6 @@ done
 if [[ -z "${PYTHON_CMD}" ]]; then
     fail "Python 3.10+ not found"
     MISSING+=("Python 3.10+ — https://www.python.org/downloads/ (macOS: brew install python@3.12)")
-fi
-
-# Check beads (bd)
-if command -v bd &>/dev/null; then
-    BD_VER=$(bd --version 2>/dev/null || echo "installed")
-    pass "beads (bd) — ${BD_VER}"
-else
-    warn "beads (bd) — not found (required for ticket management)"
-    WARNINGS+=("beads (bd) — https://github.com/beadsboard/beads")
 fi
 
 # Check AI agents (kimi or pi)
@@ -173,14 +173,15 @@ if [[ ! -f "${RALPH_HOME}/bin/ralph" ]]; then
         echo "    export RALPH_HOME=/path/to/ralph"
         exit 1
     }
-    pass "Cloned Ralph to ${RALPH_HOME}"
+    # Checkout the ralph-v3 branch
+    git -C "${RALPH_HOME}" checkout ralph-v3 2>/dev/null || true
+    pass "Cloned Ralph v3 to ${RALPH_HOME}"
 fi
 
 # Make everything executable
 chmod +x "${RALPH_HOME}/bin/ralph" 2>/dev/null || true
-chmod +x "${RALPH_HOME}/init.py" 2>/dev/null || true
-chmod +x "${RALPH_HOME}/core/"*.sh 2>/dev/null || true
 chmod +x "${RALPH_HOME}/core/"*.py 2>/dev/null || true
+chmod +x "${RALPH_HOME}/core/"*.sh 2>/dev/null || true
 
 # Install to PATH
 INSTALL_PATH=""
@@ -209,7 +210,7 @@ fi
 if [[ -n "${SHELL_PROFILE}" ]] && ! grep -q "RALPH_HOME" "${SHELL_PROFILE}" 2>/dev/null; then
     {
         echo ""
-        echo "# Ralph Wiggum Loop Build System"
+        echo "# Ralph v3 — Automated Build System"
         echo "export RALPH_HOME=\"${RALPH_HOME}\""
     } >> "${SHELL_PROFILE}"
     pass "Added RALPH_HOME to ${SHELL_PROFILE}"
@@ -235,16 +236,10 @@ else
 fi
 
 if [[ -d "${RALPH_HOME}/core" ]]; then
-    CORE_COUNT=$(ls -1 "${RALPH_HOME}/core/"*.sh "${RALPH_HOME}/core/"*.py 2>/dev/null | wc -l | tr -d ' ')
-    pass "Core scripts: ${CORE_COUNT} files in ${RALPH_HOME}/core/"
+    CORE_COUNT=$(ls -1 "${RALPH_HOME}/core/"*.py "${RALPH_HOME}/core/"*.sh 2>/dev/null | wc -l | tr -d ' ')
+    pass "Core modules: ${CORE_COUNT} files in ${RALPH_HOME}/core/"
 else
-    fail "Core scripts directory missing: ${RALPH_HOME}/core/"
-fi
-
-if [[ -d "${RALPH_HOME}/templates" ]]; then
-    pass "Templates directory found"
-else
-    fail "Templates directory missing: ${RALPH_HOME}/templates/"
+    fail "Core directory missing: ${RALPH_HOME}/core/"
 fi
 
 echo ""
@@ -255,19 +250,15 @@ echo ""
 echo "  Quick start:"
 echo "    source ~/.zshrc          # Reload shell (or ~/.bashrc)"
 echo "    ralph version            # Verify: ralph v${RALPH_VERSION}"
-echo "    ralph init               # Create a new project"
-echo "    ralph help               # Show all commands"
-echo ""
-echo "  4-Session Pipeline:"
-echo "    ralph design --ticket=<id>     # Plan architecture"
-echo "    ralph test --ticket=<id>        # Write functional tests from spec"
-echo "    ralph implement --ticket=<id>   # Code to pass tests + unit tests"
-echo "    ralph verify --ticket=<id>      # Validate & close"
+echo "    ralph init my-project    # Create a new project"
+echo "    cd my-project            # Enter the project"
+echo "    ralph setup              # Verify prerequisites"
+echo "    ralph daemon             # Start the build loop"
 echo ""
 echo "  Dependencies installed:"
 echo "    git           $(git --version 2>/dev/null | head -1 || echo 'missing')"
+echo "    gh            $(gh --version 2>/dev/null | head -1 || echo 'missing')"
 echo "    python        $(python3 --version 2>/dev/null || echo 'missing')"
-echo "    beads (bd)    $(bd --version 2>/dev/null || echo 'not installed')"
 echo "    kimi          $(command -v kimi &>/dev/null && echo 'available' || echo 'not installed')"
 echo "    pi            $(command -v pi &>/dev/null && echo 'available' || echo 'not installed')"
 echo ""
