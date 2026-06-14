@@ -3,10 +3,10 @@
 > AI-agent-powered continuous build loop. GitHub Issues as tickets, GitHub Labels as
 > status, GitHub Kanban as dashboard. No databases. No beads. Just git and gh.
 
-Ralph is a global CLI tool installed at `~/.ralph/`. It reads your ticket queue from
-GitHub Issues, feeds tickets to an AI coding agent (pi or kimi) through a 3-stage
-pipeline (DESIGN → BUILD → VERIFY), validates the output, and commits — all in a
-continuous loop. You write the tickets; Ralph builds the code.
+Ralph reads your ticket queue from GitHub Issues, feeds tickets to an AI coding agent
+(pi or kimi) through a 3-stage pipeline (DESIGN → BUILD → VERIFY), validates the
+output, and commits — all in a continuous loop. You write the tickets; Ralph builds
+the code.
 
 ```mermaid
 graph LR
@@ -20,20 +20,32 @@ graph LR
 ## Quick Install
 
 ```bash
-git clone https://github.com/samdharma/Ralph_loop.git ~/.ralph
-cd ~/.ralph && git checkout ralph-v3
-bash ~/.ralph/scripts/install.sh
+# One-line install (macOS / Linux)
+curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
 source ~/.zshrc
-ralph version   # verify: ralph v3.0.0
+ralph version   # → ralph v3.0.0
 ```
+
+Requires: **git**, **gh** (GitHub CLI), **python 3.10+**, and **pi** or **kimi**.
+The installer checks all prerequisites and shows install instructions for any
+that are missing.
 
 ## Quick Start
 
 ```bash
-ralph init my-project          # scaffold a new project
-cd my-project
-ralph setup                    # check prerequisites (gh auth, labels, etc.)
-ralph daemon                   # start the background build loop
+# 1. Create a new project (with GitHub labels)
+ralph init my-project --create-labels
+
+# 2. Or init an existing cloned repo
+git clone https://github.com/you/your-repo.git
+cd your-repo
+ralph init --create-labels
+
+# 3. Verify everything
+ralph setup
+
+# 4. Create a GitHub issue with label status:ready, then:
+ralph daemon
 ```
 
 ## How It Works
@@ -44,8 +56,8 @@ flowchart TB
         S[Sync git] --> F[Fetch ready ticket<br/>gh issue list]
         F --> C[Claim ticket<br/>+status:design -status:ready]
         C --> D[DESIGN<br/>Architect persona]
-        D --> B[BUILD<br/>Developer persona]
-        B --> V[VERIFY<br/>Reviewer persona]
+        D --> B[BUILD<br/>TEST + IMPLEMENT sub-agents]
+        B --> V[VERIFY<br/>Independent reviewer]
         V -->|pass| R[status:review]
         V -->|fail| BL[status:blocked]
         R --> S
@@ -75,29 +87,22 @@ my-project/
 
 | Command | Purpose |
 |---------|---------|
-| `ralph init [name]` | Scaffold a new Ralph project |
-| `ralph setup` | Check prerequisites (gh auth, git remote, labels, deps) |
-| `ralph daemon` | Start the background build loop |
+| `ralph init [dir]` | Scaffold a Ralph project (default: current directory) |
+| `ralph setup` | Check prerequisites (gh auth, labels, deps, create dirs) |
+| `ralph daemon [--auto-close]` | Start the build loop (foreground) |
 | `ralph status` | Show daemon PID, active issue, recent metrics |
 | `ralph validate [--tier=...]` | Run validation gate (pytest + lint) |
 | `ralph report` | Generate daily/weekly summary |
+| `ralph generate-test-map` | Auto-generate TEST_MAP.yaml from project structure |
 | `ralph version` | Show version |
 | `ralph help` | Show help |
-
-## Prerequisites
-
-| Tool | Purpose |
-|------|---------|
-| **git** 2.30+ | Version control |
-| **gh** (GitHub CLI) 2.0+ | Issue read/write, label management |
-| **python3** 3.10+ | Core orchestrator (all engine code is Python) |
-| **pi** or **kimi** | AI coding agent |
 
 ## Documentation
 
 | Document | Topic |
 |----------|-------|
-| [v3 Redesign PRD](docs/v3-redesign.md) | Full system design, phases, build notes |
+| [Getting Started](docs/getting_started.md) | Full guide: install, setup, tickets, pipeline, cheat sheet |
+| [v3 Redesign PRD](docs/v3-redesign.md) | System design, phases, build notes, validation gates |
 
 ## License
 
