@@ -879,7 +879,7 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 | P1.8 | `engine.py` can fetch ticket via `gh issue list` (mocked or real) | E2E | ⬜ TODO |
 | P1.9 | `engine.py` can transition labels via `gh issue edit` (mocked or real) | E2E | ⬜ TODO |
 | P1.10 | `validate.py --tier=targeted` runs pytest + lint on modified files | E2E | ⬜ TODO |
-| P1.11 | Daemon PID-file singleton prevents duplicate runs | Wired y/n | ⬜ TODO |
+| P1.11 | Daemon PID-file singleton prevents duplicate runs | Wired y/n | ✅ PASS |
 | P1.12 | Checkpoint save → crash → recover flow works | E2E | ⬜ TODO |
 | P1.13 | Agent invocation (pi --print) succeeds with assembled prompt | E2E | ⬜ TODO |
 | P1.14 | No empty/stub prompt files in scaffold (PROMPT.md, PROGRESS.md, AGENTS.md, config.toml populated) | Stub check | ✅ PASS |
@@ -900,7 +900,7 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 | P2.7 | Crash during VERIFY resumes at VERIFY on restart | E2E | ⬜ TODO |
 | P2.8 | Label flow: ready → design → build → verify → review (full run) | E2E | ⬜ TODO |
 | P2.9 | Label flow: design → blocked (stage failure) | E2E | ⬜ TODO |
-| P2.10 | Stage commits have format `[ralph] <stage>: #<issue>` | Wired y/n | ⬜ TODO |
+| P2.10 | Stage commits have format `[ralph] <stage>: #<issue>` | Wired y/n | ✅ PASS |
 | P2.11 | `commit_stage()` handles "nothing to commit" gracefully | Wired y/n | ✅ PASS |
 | P2.12 | DESIGN prompt instructs "do NOT write code" | Wired y/n | ✅ PASS |
 | P2.13 | BUILD prompt references design spec from PROGRESS.md | Wired y/n | ✅ PASS |
