@@ -11,6 +11,7 @@ Usage:
 """
 
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -28,7 +29,7 @@ version = "3.0.0"
 
 [agent]
 # AI agent binary: "pi" or "kimi"
-binary = "pi"
+binary = "{agent}"
 
 [ticket]
 # GitHub repo (owner/repo) — auto-detected from git remote
@@ -36,7 +37,7 @@ repo = "{repo}"
 
 [validate]
 # Default test tier for the loop
-default_tier = "targeted"
+default_tier = "{tier}"
 
 # Lint tools to run on modified files
 lint_tools = ["black", "isort", "flake8", "mypy"]
@@ -394,7 +395,8 @@ def write_file(path: Path, content: str, executable: bool = False):
         path.chmod(0o755)
 
 
-def scaffold(project_dir: Path, repo: str = "owner/repo"):
+def scaffold(project_dir: Path, repo: str = "owner/repo",
+              agent: str = "pi", tier: str = "targeted"):
     """Generate the full Ralph v3 project scaffold."""
 
     print(f"Scaffolding Ralph v3 project at: {project_dir}")
@@ -424,7 +426,9 @@ def scaffold(project_dir: Path, repo: str = "owner/repo"):
 
     # ── .ralph/ ──────────────────────────────────────────
     write_file(project_dir / ".ralph" / "config.toml",
-               CONFIG_TOML.replace("{repo}", repo))
+               CONFIG_TOML.replace("{repo}", repo)
+                          .replace("{agent}", agent)
+                          .replace("{tier}", tier))
     print("  ✓  .ralph/config.toml")
 
     # ── config/ ──────────────────────────────────────────
@@ -479,12 +483,153 @@ def scaffold(project_dir: Path, repo: str = "owner/repo"):
     print()
     print("Project scaffold complete!")
     print()
-    print("Next steps:")
-    print("  1. cd", project_dir.name if project_dir.resolve() != Path.cwd() else ".")
-    print("  2. git init && git add -A && git commit -m 'ralph init'")
-    print("  3. ralph setup")
-    print("  4. ralph daemon")
+    if project_dir.resolve() != Path.cwd():
+        print(f"  cd {project_dir.name}")
+    print("  ralph setup")
+    print("  ralph daemon")
     print()
+
+
+# ─────────────────────────────────────────────────────────
+# Detection helpers
+# ─────────────────────────────────────────────────────────
+
+def _detect_project_name(project_dir: Path) -> str:
+    """Infer a project name from the directory name."""
+    name = project_dir.resolve().name
+    # Sanitize: lowercase, replace spaces/special chars with hyphens
+    import re
+    name = re.sub(r'[^a-zA-Z0-9_-]', '-', name).strip('-')
+    return name or "my-project"
+
+
+def _extract_repo_from_url(url: str) -> str | None:
+    """Extract owner/repo from a git remote URL."""
+    for prefix in ["https://github.com/", "git@github.com:"]:
+        if url.startswith(prefix):
+            path = url[len(prefix):]
+            if path.endswith(".git"):
+                path = path[:-4]
+            return path
+    return None
+
+
+def _detect_repo(project_dir: Path) -> str:
+    """Try to detect the GitHub repo from git remote."""
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, cwd=project_dir
+        )
+        if result.returncode == 0:
+            repo = _extract_repo_from_url(result.stdout.strip())
+            if repo:
+                return repo
+    except Exception:
+        pass
+    return "owner/repo"
+
+
+def _detect_agent() -> str:
+    """Check which AI agents are available."""
+    for agent in ["pi", "kimi"]:
+        if subprocess.run(["which", agent], capture_output=True).returncode == 0:
+            return agent
+    return "pi"  # default
+
+
+def _prompt(prompt: str, default: str, yes: bool = False) -> str:
+    """Ask the user a question, return their answer or the default."""
+    if yes:
+        print(f"{prompt} [{default}]: {default}")
+        return default
+    try:
+        answer = input(f"{prompt} [{default}]: ").strip()
+        return answer if answer else default
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return default
+
+
+def _confirm(prompt: str, default: bool = True, yes: bool = False) -> bool:
+    """Ask a yes/no question. Returns True/False."""
+    yn = "Y/n" if default else "y/N"
+    if yes:
+        print(f"{prompt} [{yn}]: {'Y' if default else 'N'}")
+        return default
+    try:
+        answer = input(f"{prompt} [{yn}]: ").strip().lower()
+        if not answer:
+            return default
+        return answer in ("y", "yes")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return default
+
+
+# ─────────────────────────────────────────────────────────
+# GitHub label creation
+# ─────────────────────────────────────────────────────────
+
+RALPH_LABELS = [
+    # Status labels (Ralph manages these)
+    ("status:ready", "0E8A16", "Ready to be picked up by the build pipeline"),
+    ("status:design", "1D76DB", "In design stage — agent researching and writing spec"),
+    ("status:build", "0052CC", "In build stage — agent implementing changes"),
+    ("status:verify", "5319E7", "In verify stage — independent review running"),
+    ("status:review", "D4C5F9", "Awaiting human review"),
+    ("status:blocked", "B60205", "Cannot proceed — needs human intervention"),
+    # Type labels (set by human)
+    ("type:task", "0E8A16", "Work ticket"),
+    ("type:bug", "D73A4A", "Bug fix"),
+    ("type:feature", "0075CA", "Feature container"),
+    ("type:epic", "3F2D7E", "Epic container"),
+    ("type:exit", "FBCA04", "Exit / integration ticket"),
+    # Phase labels (set by human)
+    ("phase:1", "F9D0C4", "Phase 1"),
+    ("phase:2", "FEF2C0", "Phase 2"),
+    ("phase:3", "C2E0C6", "Phase 3"),
+    # Priority labels (optional)
+    ("priority:1", "D93F0B", "Critical priority"),
+    ("priority:2", "E99695", "High priority"),
+    ("priority:3", "F9D0C4", "Medium priority"),
+]
+
+
+def _create_labels(repo: str) -> tuple[int, int]:
+    """Create all Ralph labels on the GitHub repo.
+    Returns (created, skipped) counts."""
+    import json
+    # Get existing labels
+    try:
+        result = subprocess.run(
+            ["gh", "label", "list", "--repo", repo, "--json", "name"],
+            capture_output=True, text=True
+        )
+        existing = {l["name"] for l in json.loads(result.stdout)}
+    except Exception:
+        existing = set()
+
+    created = 0
+    skipped = 0
+    for name, color, desc in RALPH_LABELS:
+        if name in existing:
+            skipped += 1
+            continue
+        try:
+            subprocess.run(
+                ["gh", "label", "create", name,
+                 "--color", color,
+                 "--description", desc,
+                 "--repo", repo],
+                capture_output=True, check=True
+            )
+            created += 1
+            print(f"  ✓  {name}")
+        except subprocess.CalledProcessError as e:
+            print(f"  ✗  {name} — {e.stderr.strip() if e.stderr else 'failed'}")
+
+    return created, skipped
 
 
 # ─────────────────────────────────────────────────────────
@@ -492,72 +637,122 @@ def scaffold(project_dir: Path, repo: str = "owner/repo"):
 # ─────────────────────────────────────────────────────────
 
 def main() -> int:
-    project_name = None
+    import argparse
 
-    # Parse args
-    args = sys.argv[1:]
-    interactive = True
-    for a in args:
-        if a == "--no-input":
-            interactive = False
-        elif not a.startswith("--"):
-            project_name = a
+    parser = argparse.ArgumentParser(
+        description="Scaffold a new Ralph v3 project",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+Examples:
+  ralph init                  Init current directory (interactive)
+  ralph init my-project       Create and init a new directory (interactive)
+  ralph init . --yes          Init current directory with all defaults
+  ralph init . --yes --create-labels   Also create GitHub labels
+        """)
+    parser.add_argument(
+        "name", nargs="?", default=None,
+        help="Project name or path (default: current directory)")
+    parser.add_argument(
+        "--yes", "-y", "--no-input", action="store_true",
+        help="Non-interactive: use all defaults, skip prompts")
+    parser.add_argument(
+        "--create-labels", action="store_true",
+        help="Create Ralph labels on the GitHub repo")
+    parser.add_argument(
+        "--agent", choices=["pi", "kimi"], default=None,
+        help="AI agent to use (default: auto-detected)")
+    parser.add_argument(
+        "--tier", choices=["smoke", "targeted", "integration", "full"],
+        default=None, help="Default test tier (default: targeted)")
 
-    # Interactive: ask for project name
-    if interactive and project_name is None:
-        try:
-            project_name = input("Project name: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nCancelled.")
-            return 1
+    args = parser.parse_args()
 
-    if not project_name:
-        print("Usage: ralph init <project-name> [--no-input]")
-        return 1
+    # ── Determine project directory ──
+    if args.name is None or args.name == ".":
+        project_dir = Path.cwd()
+        project_name = _detect_project_name(project_dir)
+        creating_new = False
+    else:
+        project_dir = Path(args.name).resolve()
+        project_name = args.name.rstrip("/")
+        creating_new = not project_dir.exists()
 
-    project_dir = Path(project_name).resolve()
+    # ── Validate directory ──
     if project_dir.exists():
         if not project_dir.is_dir():
-            print(f"Error: {project_name} exists and is not a directory.")
+            print(f"Error: '{project_dir}' exists and is not a directory.")
             return 1
+        # Allow non-empty dirs in interactive mode (warn but proceed)
         contents = list(project_dir.iterdir())
-        if contents:
-            if interactive:
-                overwrite = input(
-                    f"Directory {project_name} is not empty. Overwrite? [y/N]: "
-                ).strip().lower()
-                if overwrite != "y":
-                    print("Cancelled.")
-                    return 1
-            else:
-                print(f"Error: {project_name} is not empty. Use --no-input only on empty dirs.")
+        # Filter out .git and .ralph (already initialized)
+        non_ralph = [c for c in contents
+                     if c.name not in (".git", ".ralph", ".gitignore", "AGENTS.md")]
+        if non_ralph and not args.yes:
+            print(f"Directory '{project_dir}' is not empty ({len(non_ralph)} items).")
+            print("Ralph will add its files alongside existing content.")
+            if not _confirm("Continue?", default=True):
+                print("Cancelled.")
                 return 1
 
     project_dir.mkdir(parents=True, exist_ok=True)
 
-    # Detect repo from git remote (if in a git repo)
-    repo = "owner/repo"
-    try:
-        import subprocess
-        result = subprocess.run(
-            ["git", "remote", "get-url", "origin"],
-            capture_output=True, text=True, cwd=project_dir
-        )
-        if result.returncode == 0:
-            url = result.stdout.strip()
-            # Extract owner/repo from git URL
-            # Supports: https://github.com/owner/repo.git, git@github.com:owner/repo.git
-            for prefix in ["https://github.com/", "git@github.com:"]:
-                if url.startswith(prefix):
-                    path = url[len(prefix):]
-                    if path.endswith(".git"):
-                        path = path[:-4]
-                    repo = path
-                    break
-    except Exception:
-        pass
+    # ── Collect configuration ──
+    print()
+    print("╔══════════════════════════════════════════╗")
+    print("║   Ralph v3 — Project Setup Wizard        ║")
+    print("╚══════════════════════════════════════════╝")
+    print()
 
-    scaffold(project_dir, repo)
+    # Repo detection
+    repo = _detect_repo(project_dir)
+    if repo == "owner/repo" and creating_new:
+        # Guess from directory name + gh auth user
+        try:
+            user_result = subprocess.run(
+                ["gh", "api", "user", "--jq", ".login"],
+                capture_output=True, text=True
+            )
+            if user_result.returncode == 0:
+                user = user_result.stdout.strip()
+                repo = f"{user}/{project_name}"
+        except Exception:
+            pass
+
+    repo = _prompt("GitHub repo (owner/name)", repo, yes=args.yes)
+
+    # Agent detection
+    agent = args.agent or _detect_agent()
+    agent = _prompt("AI agent", agent, yes=args.yes)
+
+    # Test tier
+    tier = args.tier or "targeted"
+    tier = _prompt("Default test tier", tier, yes=args.yes)
+
+    print()
+
+    # ── GitHub labels ──
+    if args.create_labels:
+        do_labels = True
+    elif args.yes:
+        do_labels = False
+    else:
+        do_labels = _confirm("Create Ralph labels on GitHub?", default=True)
+
+    if do_labels and repo != "owner/repo":
+        print()
+        print(f"Creating labels on {repo}...")
+        created, skipped = _create_labels(repo)
+        if skipped:
+            print(f"  ({skipped} already existed)")
+        print(f"  ✓  {created} labels created")
+        print()
+    elif do_labels:
+        print("  ⚠  Skipping labels — no valid repo detected.")
+        print("     Run 'ralph setup' after setting up your remote.")
+        print()
+
+    # ── Scaffold ──
+    scaffold(project_dir, repo, agent=agent, tier=tier)
     return 0
 
 

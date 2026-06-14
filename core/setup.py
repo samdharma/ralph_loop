@@ -190,7 +190,7 @@ def check_gh_labels():
 
         if not missing:
             return True, "all required labels present"
-        return False, f"missing: {', '.join(missing)}"
+        return False, f"missing: {', '.join(missing)} (run 'ralph init --create-labels' to auto-create)"
     except Exception as e:
         return False, str(e)
 
