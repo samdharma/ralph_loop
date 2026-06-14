@@ -194,8 +194,9 @@ def run_pipeline(issue: dict) -> bool:
     # ── Validate ──
     if success:
         print(f"\n[ralph] Running validation gate...")
+        core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
         val_result = run(
-            [sys.executable, str(PROJECT_ROOT / "core" / "validate.py"),
+            [sys.executable, os.path.join(core_dir, "validate.py"),
              "--tier", "targeted"],
             check=False, capture=False
         )
@@ -421,7 +422,10 @@ def run_loop():
             print("[ralph] Syncing with remote...")
             try:
                 git("fetch", "origin")
-                git("merge", "origin/main", "--ff-only")
+                # Detect current branch and merge its upstream
+                branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+                upstream = f"origin/{branch}"
+                git("merge", upstream, "--ff-only")
             except subprocess.CalledProcessError:
                 print("[ralph] Warning: git sync failed — continuing with local state")
 
