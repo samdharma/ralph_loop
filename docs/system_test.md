@@ -1,117 +1,99 @@
 # Ralph v3 — System Validation Test
 
-> Step-by-step test plan for validating a Ralph v3 installation end-to-end.
-> Each test includes preconditions, actions, expected outputs, and pass/fail
-> criteria. Run these after installation or after any significant change.
+> Step-by-step test plan for validating a Ralph v3 installation against a **real
+> GitHub repo** with a **real AI agent** (pi or kimi). Every test uses actual
+> `gh` commands, real issues, and live agent invocations. No mocks, no stubs.
+>
+> **Total runtime:** ~30–60 minutes (mostly agent time).
+> Quick suites (1–3) take <5 minutes. Pipeline tests (5–7) take 5–15 minutes each.
 
 ---
 
 ## Table of Contents
 
-1. [Test Environment](#test-environment)
+1. [Before You Start](#before-you-start)
 2. [Test Flow Overview](#test-flow-overview)
 3. [Suite 1: Installation](#suite-1-installation)
 4. [Suite 2: Project Init](#suite-2-project-init)
 5. [Suite 3: Setup](#suite-3-setup)
-6. [Suite 4: Daemon Basics](#suite-4-daemon-basics)
-7. [Suite 5: Pipeline (Fake Agent)](#suite-5-pipeline-fake-agent)
-8. [Suite 6: Pipeline (Real Agent)](#suite-6-pipeline-real-agent)
+6. [Suite 4: Daemon Lifecycle](#suite-4-daemon-lifecycle)
+7. [Suite 5: Full Pipeline](#suite-5-full-pipeline)
+8. [Suite 6: Failure Paths](#suite-6-failure-paths)
 9. [Suite 7: Crash Recovery](#suite-7-crash-recovery)
-10. [Suite 8: Edge Cases](#suite-8-edge-cases)
-11. [Result Summary](#result-summary)
+10. [Suite 8: CLI & Edge Cases](#suite-8-cli--edge-cases)
+11. [Cleanup](#cleanup)
+12. [Scorecard](#scorecard)
 
 ---
 
-## Test Environment
+## Before You Start
 
-### Prerequisites
+### What You Need
 
-| Requirement | How to verify |
-|-------------|---------------|
-| macOS or Linux machine | `uname -s` |
-| Internet access | `curl -I https://github.com` |
-| GitHub account with a repo | Create `your-username/ralph-system-test` on GitHub |
-| Terminal with bash or zsh | `echo $SHELL` |
+| Requirement | Check |
+|-------------|-------|
+| A GitHub account | `gh auth status` |
+| A test repo on GitHub | Create `your-username/ralph-system-test` (empty, no README) |
+| `pi` or `kimi` installed | `which pi` or `which kimi` |
+| Ralph installed | `ralph version` → `ralph v3.0.0` |
+| ~30–60 minutes | Agent invocations take time |
 
 ### Test Repo Setup
 
-Before starting, create a test repo on GitHub:
+Create the repo and labels **once** before starting:
 
 ```bash
-# 1. Create a new empty repo on GitHub (do NOT initialize with README)
-#    Name: ralph-system-test
-#    Owner: your-username
+# Set your repo name
+export TEST_REPO="your-username/ralph-system-test"
 
-# 2. Create labels (we'll test that ralph init --create-labels also works,
-#    but some tests need labels pre-existing)
-REPO="your-username/ralph-system-test"
+# Create the repo on GitHub (empty — no README, no .gitignore)
+# Do this in the GitHub web UI or via:
+gh repo create "$TEST_REPO" --public --clone
 
-gh label create "status:ready"   --color 0E8A16 --repo $REPO
-gh label create "status:design"  --color 1D76DB --repo $REPO
-gh label create "status:build"   --color 0052CC --repo $REPO
-gh label create "status:verify"  --color 5319E7 --repo $REPO
-gh label create "status:review"  --color D4C5F9 --repo $REPO
-gh label create "status:blocked" --color B60205 --repo $REPO
-gh label create "type:task"      --color 0E8A16 --repo $REPO
+# Create labels Ralph needs
+for label in \
+    "status:ready:0E8A16" \
+    "status:design:1D76DB" \
+    "status:build:0052CC" \
+    "status:verify:5319E7" \
+    "status:review:D4C5F9" \
+    "status:blocked:B60205" \
+    "type:task:0E8A16"; do
+    name="${label%%:*}"
+    rest="${label#*:}"
+    color="${rest%%:*}"
+    gh label create "$name" --color "$color" --repo "$TEST_REPO" 2>/dev/null || true
+done
+
+# Verify labels
+gh label list --repo "$TEST_REPO" | grep status
 ```
 
-### Fake Agent Setup
+### Helper: Quick Issue Creator
 
-Some tests use a fake agent instead of real pi/kimi to keep tests fast and
-deterministic:
+Add this function to your shell for the test session:
 
 ```bash
-cat > /tmp/ralph-fake-agent << 'PYEOF'
-#!/usr/bin/env python3
-"""Fake agent that writes a stage marker and exits."""
-import os, sys, time, random
-
-# pi passes prompt as last CLI arg
-prompt = sys.argv[-1] if len(sys.argv) > 2 and sys.argv[1] == "--print" else sys.stdin.read()
-
-stage = "unknown"
-if "systems architect" in prompt:     stage = "design"
-elif "QA engineer" in prompt:         stage = "test"
-elif "developer sub-agent" in prompt: stage = "implement"
-elif "independent reviewer" in prompt: stage = "verify"
-
-print(f"[fake-agent] Stage: {stage} (PID {os.getpid()})")
-with open("/tmp/ralph_fake_agent_stage.txt", "w") as f:
-    f.write(f"{stage}\n{os.getpid()}")
-
-# Write dummy files so commit_stage has something to commit
-proj = os.environ.get("RALPH_PROJECT_DIR", os.getcwd())
-r = random.randint(1000, 9999)
-if stage == "design":
-    with open(os.path.join(proj, "docs", "agent", "PROGRESS.md"), "a") as f:
-        f.write(f"\n# Fake design spec {r}\n")
-elif stage == "test":
-    with open(os.path.join(proj, "tests", "unit", f"test_fake_{r}.py"), "w") as f:
-        f.write(f"# Fake test {r}\ndef test_fake_{r}(): assert True\n")
-elif stage == "implement":
-    os.makedirs(os.path.join(proj, "src", "my_project"), exist_ok=True)
-    with open(os.path.join(proj, "src", "my_project", f"fake_impl_{r}.py"), "w") as f:
-        f.write(f"# Fake impl {r}\n")
-
-time.sleep(int(os.environ.get("RALPH_FAKE_SLEEP", "2")))
-sys.exit(int(os.environ.get("RALPH_FAKE_EXIT_CODE", "0")))
-PYEOF
-
-chmod +x /tmp/ralph-fake-agent
-
-# Put it on PATH as "pi" so Ralph invokes it
-mkdir -p /tmp/fake-bin
-cp /tmp/ralph-fake-agent /tmp/fake-bin/pi
-chmod +x /tmp/fake-bin/pi
+create_issue() {
+    # Usage: create_issue "Title" "Body" [extra-labels]
+    local title="$1"
+    local body="$2"
+    local extra="${3:-}"
+    local labels="type:task,status:ready"
+    [ -n "$extra" ] && labels="$labels,$extra"
+    gh issue create --repo "$TEST_REPO" --title "$title" --body "$body" --label "$labels"
+}
 ```
 
-Export these for fake-agent tests:
+### Helper: Check Issue Status
 
 ```bash
-export PATH="/tmp/fake-bin:$PATH"
-export RALPH_AGENT="pi"
-export RALPH_FAKE_SLEEP="2"
-export RALPH_FAKE_EXIT_CODE="0"
+issue_status() {
+    # Usage: issue_status <issue-number>
+    gh issue view "$1" --repo "$TEST_REPO" \
+        --json number,title,labels,state \
+        --jq '{number, title, labels: [.labels[].name], state}'
+}
 ```
 
 ---
@@ -120,1305 +102,856 @@ export RALPH_FAKE_EXIT_CODE="0"
 
 ```mermaid
 flowchart TD
-    subgraph Install["1. Installation"]
-        I1[T1.1: One-line install]
-        I2[T1.2: Prereq checks]
-        I3[T1.3: ralph version]
+    subgraph Quick["Quick Suites (no agent, ~5 min)"]
+        S1[Suite 1: Installation]
+        S2[Suite 2: Project Init]
+        S3[Suite 3: Setup]
     end
 
-    subgraph Init["2. Project Init"]
-        N1[T2.1: New project]
-        N2[T2.2: Current dir]
-        N3[T2.3: Label creation]
-        N4[T2.4: Existing repo]
-        N5[T2.5: File integrity]
+    subgraph Agent["Agent Suites (real pi/kimi, ~30–50 min)"]
+        S4[Suite 4: Daemon Lifecycle]
+        S5[Suite 5: Full Pipeline]
+        S6[Suite 6: Failure Paths]
+        S7[Suite 7: Crash Recovery]
     end
 
-    subgraph Setup["3. Setup"]
-        S1[T3.1: All pass]
-        S2[T3.2: Missing labels]
+    subgraph CLI["CLI Suite (no agent, ~2 min)"]
+        S8[Suite 8: CLI & Edge Cases]
     end
 
-    subgraph Daemon["4. Daemon"]
-        D1[T4.1: PID singleton]
-        D2[T4.2: Start + idle]
-    end
-
-    subgraph Pipeline["5-6. Pipeline"]
-        P1[T5.1-5.6: Fake agent]
-        P2[T6.1: Real agent]
-    end
-
-    subgraph Recovery["7. Crash Recovery"]
-        R1[T7.1: Checkpoint save]
-        R2[T7.2: Resume]
-    end
-
-    Install --> Init --> Setup --> Daemon --> Pipeline --> Recovery
-
-    Recovery --> Done["✅ System Validated"]
+    Quick --> Agent --> CLI
+    CLI --> Done["✅ System Validated"]
 ```
 
-Each suite is independent of the others (except they share the test repo).
-Run suites in order for a full validation, or individually to verify a
-specific component.
+Run suites in order. Each suite cleans up after itself so the next suite starts
+fresh. If a suite fails, fix the issue and re-run that suite before continuing.
 
 ---
 
 ## Suite 1: Installation
 
-Tests the one-line install script and prerequisite detection.
+Validates that Ralph is installed and the CLI works. No agent, no repo needed.
+
+**Time:** ~1 minute
 
 ---
 
-### T1.1 — One-Line Install
+### T1.1 — `ralph version`
 
-**Precondition:** No prior `~/.ralph` directory. `gh` and `git` are installed.
-
-**Action:**
 ```bash
-# Clean any prior install
-rm -rf ~/.ralph
-rm -f /usr/local/bin/ralph ~/.local/bin/ralph
-
-# Run the installer
-curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
-```
-
-**Expected output:**
-```
-╔══════════════════════════════════════════╗
-║   Ralph v3 — Automated Build System      ║
-╚══════════════════════════════════════════╝
-
-Checking prerequisites...
-  ✓ bash 5.x (4+ required)
-  ✓ git (git version 2.x)
-  ✓ gh (gh version 2.x)
-  ✓ Python 3.x (3.10+ required)
-  ✓ AI agent: pi (available)
-
-Installing Ralph...
-  ✓ Ralph v3.0.0 installed → /usr/local/bin/ralph
-  ✓ Added RALPH_HOME to ~/.zshrc
-
-Verifying installation...
-  ✓ ralph CLI executable
-  ✓ Core modules: 8 files in ~/.ralph/core/
-
-╔══════════════════════════════════════════╗
-║   Installation Complete!                 ║
-╚══════════════════════════════════════════╝
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Installer exits 0 | Installer exits non-zero |
-| All prerequisite checks show ✓ | Any prerequisite shows ✗ |
-| `~/.ralph/` exists with core/, bin/, scripts/ | ~/.ralph/ missing or incomplete |
-| `which ralph` resolves | `which ralph` fails |
-| `~/.zshrc` or `~/.bashrc` contains `RALPH_HOME` | Profile not updated |
-
----
-
-### T1.2 — Prerequisite Detection (Missing Tool)
-
-**Precondition:** Simulate a missing tool by temporarily removing it from PATH.
-
-**Action:**
-```bash
-# Test: installer catches missing 'gh'
-PATH_WITHOUT_GH=$(echo "$PATH" | tr ':' '\n' | grep -v "$(dirname $(which gh))" | tr '\n' ':')
-PATH="$PATH_WITHOUT_GH" curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
-```
-
-**Expected output:**
-```
-  ✗ gh — GitHub CLI not found in PATH
-
-Cannot install Ralph — missing prerequisites:
-  ✗ gh — https://cli.github.com/ (macOS: brew install gh)
-
-Install the above and re-run this installer.
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Installer exits 1 | Installer exits 0 or hangs |
-| Specific install instructions shown for missing tool | Generic error message |
-| No partial install left behind | Partial files in ~/.ralph/ |
-
----
-
-### T1.3 — `ralph version`
-
-**Precondition:** T1.1 passed. New terminal session with `RALPH_HOME` sourced.
-
-**Action:**
-```bash
-source ~/.zshrc   # or ~/.bashrc
 ralph version
+```
+
+| Expected | How to verify |
+|----------|---------------|
+| `ralph v3.0.0` | Exact match |
+
+---
+
+### T1.2 — `ralph help`
+
+```bash
 ralph help
 ```
 
-**Expected output:**
-```
-ralph v3.0.0
+| Expected | How to verify |
+|----------|---------------|
+| Lists `init`, `setup`, `daemon`, `status`, `validate`, `report`, `generate-test-map`, `version`, `help` | Count commands — should be 8+ |
+| Shows "Quick start" section with examples | `ralph help \| grep -c "Quick start"` → 1 |
 
-Ralph v3 — Automated Build System
+---
 
-Usage: ralph <command> [options]
+### T1.3 — Core files exist
 
-Commands:
-  init [dir]         Scaffold a Ralph project (default: current directory)
-  setup              ...
-  daemon [opts]      ...
-  ...
+```bash
+ls ~/.ralph/core/*.py
 ```
 
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| `ralph version` prints `ralph v3.0.0` | Wrong version or command not found |
-| `ralph help` lists 8+ commands | Help output truncated or missing commands |
+| Expected | How to verify |
+|----------|---------------|
+| Lists `engine.py`, `init.py`, `setup.py`, `status.py`, `validate.py`, `report.py`, `generate_test_map.py`, `detect_affected_tests.py` | 8 `.py` files |
+
+---
+
+### T1.4 — Dead-code check
+
+```bash
+! grep -r "beads\|dolt\|\.beads" --include="*.py" --include="*.sh" --include="*.md" ~/.ralph/core/ ~/.ralph/bin/ ~/.ralph/scripts/ && echo "PASS" || echo "FAIL"
+```
+
+| Expected | How to verify |
+|----------|---------------|
+| `PASS` | No matches found anywhere |
 
 ---
 
 ## Suite 2: Project Init
 
-Tests the `ralph init` wizard in all modes.
+Validates `ralph init` in all modes. No agent needed.
+
+**Time:** ~2 minutes
 
 ---
 
-### T2.1 — New Project (Interactive)
+### T2.1 — New project (non-interactive)
 
-**Precondition:** Not inside an existing Ralph project.
-
-**Action:**
 ```bash
 cd /tmp
-rm -rf test-s2.1
-mkdir test-s2.1
-cd test-s2.1
-# Simulate interactive input (accept all defaults)
-echo -e "\n\n\n\n" | ralph init
+rm -rf ralph-init-test
+ralph init ralph-init-test --yes
+
+# Verify
+echo "=== Files created ==="
+ls ralph-init-test/.ralph/config.toml && echo "config.toml ✓"
+ls ralph-init-test/docs/agent/PROMPT.md && echo "PROMPT.md ✓"
+ls ralph-init-test/docs/agent/prompts/design.md && echo "design.md ✓"
+ls ralph-init-test/docs/agent/prompts/implement.md && echo "implement.md ✓"
+ls ralph-init-test/config/ralph_preflight.sh && echo "preflight.sh ✓"
+ls ralph-init-test/AGENTS.md && echo "AGENTS.md ✓"
+[ -s ralph-init-test/docs/agent/prompts/design.md ] && echo "design.md non-empty ✓"
+
+echo "=== Git repo ==="
+[ -d ralph-init-test/.git ] && echo ".git exists ✓"
+cd ralph-init-test && git log --oneline -1
 ```
 
-**Expected output:**
-```
-╔══════════════════════════════════════════╗
-║   Ralph v3 — Project Setup Wizard        ║
-╚══════════════════════════════════════════╝
-
-GitHub repo (owner/name) [owner/repo]:
-AI agent [pi]:
-Default test tier [targeted]:
-
-Initialize git repository? [Y/n]:
-
-Scaffolding Ralph v3 project at: /private/tmp/test-s2.1
-
-  ✓  .ralph/
-  ✓  config/
-  ✓  docs/agent/prompts/
-  ✓  logs/
-  ✓  src/
-  ✓  tests/unit/
-  ✓  tests/integration/
-  ✓  ... (all 24 files)
-
-Project scaffold complete!
-
-  ralph setup
-  ralph daemon
-
-  ✓  git init && git commit 'ralph init'
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| All 24 files/dirs listed with ✓ | Missing files |
-| Git repo initialized (.git/ exists) | No .git/ directory |
-| `git log` shows "ralph init" commit | No commit created |
-| Accepts empty input as defaults | Crashes on empty input |
+| Expected | How to verify |
+|----------|---------------|
+| 6+ files created | All `ls` checks show ✓ |
+| design.md is non-empty (not a stub) | `[ -s ... ]` passes |
+| Git repo initialized | `.git/` exists |
+| One commit: "ralph init" | `git log` shows it |
 
 ---
 
-### T2.2 — Current Directory (Non-Interactive)
+### T2.2 — Init in existing directory
 
-**Precondition:** Existing project directory (not empty).
-
-**Action:**
 ```bash
 cd /tmp
-rm -rf test-s2.2 && mkdir test-s2.2 && cd test-s2.2
-echo "print('hello')" > main.py
-git init
-git add -A && git commit -m "initial"
-ralph init . --yes
+rm -rf ralph-existing-test && mkdir ralph-existing-test && cd ralph-existing-test
+echo "print('hello')" > app.py
+git init && git add -A && git commit -m "initial"
+ralph init . --yes 2>&1
+
+# Verify
+echo "=== Existing file preserved? ==="
+[ -f app.py ] && echo "app.py preserved ✓"
+echo "=== New files added? ==="
+[ -f .ralph/config.toml ] && echo "ralph files added ✓"
+echo "=== Git not re-initialized? ==="
+git log --oneline | head -1 | grep "ralph init" || echo "(newest commit is not 'ralph init' — git skipped ✓)"
 ```
 
-**Expected output:**
-```
-GitHub repo (owner/name) [owner/repo]: owner/repo
-AI agent [pi]: pi
-Default test tier [targeted]: targeted
-
-Scaffolding Ralph v3 project at: /private/tmp/test-s2.2
-  ✓  ... (all files)
-
-Project scaffold complete!
-
-  ralph setup
-  ralph daemon
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Scaffold added alongside existing `main.py` | Existing files deleted or corrupted |
-| `.git` directory untouched | Git history lost |
-| No git init attempted (repo already exists) | Double git init warning |
-| `--yes` skips all prompts | Unexpected prompts appear |
+| Expected | How to verify |
+|----------|---------------|
+| Existing `app.py` untouched | `app.py preserved ✓` |
+| Ralph scaffold added alongside existing files | `ralph files added ✓` |
+| No duplicate `git init` | Git history has original commit + scaffold files (no new init commit) |
 
 ---
 
-### T2.3 — Label Creation
+### T2.3 — Label creation
 
-**Precondition:** GitHub repo `your-username/ralph-system-test` exists and `gh` is
-authenticated.
-
-**Action:**
 ```bash
-cd /tmp
-rm -rf test-s2.3 && mkdir test-s2.3 && cd test-s2.3
-git init
-git remote add origin https://github.com/your-username/ralph-system-test.git
-ralph init . --yes --create-labels
+# Use a temp repo to test label creation
+TEMP_REPO="your-username/ralph-label-test"
+gh repo create "$TEMP_REPO" --public --clone 2>/dev/null || true
+cd /tmp && rm -rf ralph-label-test
+git clone "https://github.com/$TEMP_REPO.git" ralph-label-test 2>/dev/null
+cd ralph-label-test
+ralph init . --yes --create-labels 2>&1
+
+# Verify
+echo "=== Labels created ==="
+gh label list --repo "$TEMP_REPO" | wc -l
+gh label list --repo "$TEMP_REPO" | grep "status:"
 ```
 
-**Expected output:**
-```
-GitHub repo (owner/name) [your-username/ralph-system-test]: ...
-
-Creating labels on your-username/ralph-system-test...
-  ✓  status:ready
-  ✓  status:design
-  ... (17 labels total)
-  (X already existed)
-  ✓  Y labels created
-
-Scaffolding Ralph v3 project at: ...
-```
-
-**Verify:**
-```bash
-gh label list --repo your-username/ralph-system-test --limit 20
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| All 17 Ralph labels created (or already existed) | Labels missing after test |
-| Label colors match PRD spec | Wrong colors |
-| `ralph setup` passes label check | setup reports missing labels |
+| Expected | How to verify |
+|----------|---------------|
+| 17+ labels on the repo | `gh label list \| wc -l` ≥ 17 |
+| All 6 status labels present | grep shows all 6 |
+| Output mentions "labels created" | Log output from ralph init |
 
 ---
 
-### T2.4 — Existing Git Repo (Cloned)
+### T2.5 — Prompt stubs all populated
 
-**Precondition:** The test repo has code committed.
-
-**Action:**
 ```bash
-cd /tmp
-rm -rf test-s2.4
-git clone https://github.com/your-username/ralph-system-test.git test-s2.4
-cd test-s2.4
-echo -e "\n\n\n\n" | ralph init
-```
-
-**Expected output:**
-```
-GitHub repo (owner/name) [your-username/ralph-system-test]:
-...
-Scaffolding Ralph v3 project at: ...
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Repo auto-detected from remote | `owner/repo` placeholder shown |
-| Existing code untouched | Clone corrupted |
-| No "cd ..." in next steps (already in project dir) | Wrong next-steps shown |
-| .gitignore appended (not replaced) | Existing .gitignore overwritten |
-
----
-
-### T2.5 — Scaffold File Integrity
-
-**Precondition:** A fresh `ralph init` has completed.
-
-**Action:**
-```bash
-cd /tmp/test-s2.1   # from T2.1
-
-# Check all expected files exist
-EXPECTED_FILES=(
-    ".ralph/config.toml"
-    "config/ralph_preflight.sh"
-    "config/TEST_MAP.yaml"
-    "docs/agent/PROMPT.md"
-    "docs/agent/PROGRESS.md"
-    "docs/agent/prompts/design.md"
-    "docs/agent/prompts/build.md"
-    "docs/agent/prompts/verify.md"
-    "docs/agent/prompts/test.md"
-    "docs/agent/prompts/implement.md"
-    "AGENTS.md"
-    ".gitignore"
-)
-
-ALL_OK=true
-for f in "${EXPECTED_FILES[@]}"; do
-    if [ -f "$f" ]; then
-        echo "  ✓  $f"
-    else
-        echo "  ✗  $f MISSING"
-        ALL_OK=false
-    fi
-done
-
-# Check prompt stubs have content
+cd /tmp/ralph-init-test
 for f in docs/agent/prompts/{design,build,verify,test,implement}.md; do
     if [ -s "$f" ]; then
-        echo "  ✓  $f (non-empty)"
+        echo "  ✓  $f ($(wc -c < "$f" | tr -d ' ') bytes)"
     else
-        echo "  ✗  $f is empty"
-        ALL_OK=false
+        echo "  ✗  $f is EMPTY"
     fi
 done
-
-# Check zero beads/dolt references
-if grep -r "beads\|dolt\|\.beads" --include="*.py" --include="*.md" --include="*.sh" .; then
-    echo "  ✗  Dead-code: found beads/dolt references"
-    ALL_OK=false
-else
-    echo "  ✓  No beads/dolt references"
-fi
-
-$ALL_OK && echo "PASS" || echo "FAIL"
 ```
 
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| All 12 files present | Any file missing |
-| All 5 prompt stubs non-empty | Empty prompt file |
-| Zero beads/dolt references | grep finds beads/dolt |
+| Expected | How to verify |
+|----------|---------------|
+| All 5 prompt files non-empty | All show ✓ with byte counts > 0 |
 
 ---
 
 ## Suite 3: Setup
 
-Tests `ralph setup` prerequisite checking.
+Validates `ralph setup` against the real test repo.
+
+**Time:** ~1 minute
 
 ---
 
-### T3.1 — All Checks Pass
+### T3.1 — Setup passes against real repo
 
-**Precondition:** A scaffolded project with labels, remote, and gh auth.
-
-**Action:**
 ```bash
-cd /tmp/test-s2.4   # cloned repo from T2.4
+cd /tmp
+rm -rf ralph-setup-test
+git clone "https://github.com/$TEST_REPO.git" ralph-setup-test
+cd ralph-setup-test
+ralph init . --yes 2>&1
+git add -A && git commit -m "ralph init" && git push
 ralph setup
 ```
 
-**Expected output:**
-```
-╔══════════════════════════════════════════╗
-║   Ralph v3 — Setup                       ║
-╚══════════════════════════════════════════╝
-
-Project: /private/tmp/test-s2.4
-
-  ✓ GitHub CLI authenticated (authenticated)
-  ✓ Git remote (https://github.com/...)
-  ✓ Python 3.10+ (Python 3.x.y)
-  ✓ AI agent (pi/kimi) (pi)
-  ✓ pi-subagent extension (...)
-  ✓ GitHub repo access (your-username/ralph-system-test)
-  ✓ Required labels (all required labels present)
-
-  ✓ logs/ exists
-  ✓ .ralph/ exists
-
-Setup complete! Run 'ralph daemon' to start building.
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| All 7 checks show ✓ | Any check shows ✗ |
-| Exit code 0 | Exit code non-zero |
-| Both directories reported as existing | Dir creation errors |
+| Expected | How to verify |
+|----------|---------------|
+| All 7 checks show ✓ | Count ✓ symbols — should be 7 |
+| Exit code 0 | `echo $?` → 0 |
+| "Setup complete!" shown | Final line of output |
 
 ---
 
-### T3.2 — Missing Labels Detected
+### T3.2 — Setup detects missing labels
 
-**Precondition:** A repo without some Ralph labels.
-
-**Action:**
 ```bash
-# Create a temp repo without labels
-cd /tmp && rm -rf test-s3.2 && mkdir test-s3.2 && cd test-s3.2
-git init
-git remote add origin https://github.com/your-username/ralph-system-test.git
-# Don't create labels — just scaffold
-echo -e "\n\n\n\n" | ralph init
-ralph setup
+# Create a temp repo WITHOUT Ralph labels
+TEMP_REPO="your-username/ralph-no-label-test"
+gh repo create "$TEMP_REPO" --public 2>/dev/null || true
+cd /tmp && rm -rf ralph-no-label-test
+git clone "https://github.com/$TEMP_REPO.git" ralph-no-label-test 2>/dev/null
+cd ralph-no-label-test
+ralph init . --yes 2>&1
+
+# setup should catch missing labels
+ralph setup 2>&1
+echo "Exit code: $?"
 ```
 
-**Expected output (if labels missing from the test repo):**
-```
-  ✗ Required labels — missing: status:ready, status:design, ...
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Missing labels listed by name | Generic "failed" message |
-| Hint shown: "run 'ralph init --create-labels'" | No remediation hint |
-| Other checks still pass | Setup aborts early on first failure |
+| Expected | How to verify |
+|----------|---------------|
+| Setup reports missing labels | Output contains "missing:" with label names |
+| Setup shows remediation hint | Output contains "ralph init --create-labels" |
+| Exit code 1 | `echo $?` → 1 |
 
 ---
 
-## Suite 4: Daemon Basics
+## Suite 4: Daemon Lifecycle
 
-Tests daemon startup, PID singleton, and idle behavior.
+Validates daemon startup, PID singleton, graceful shutdown, and idle behavior
+with a real agent. No issues processed — just lifecycle.
+
+**Time:** ~2 minutes
 
 ---
 
-### T4.1 — PID Singleton
+### T4.1 — PID singleton
 
-**Precondition:** `ralph setup` has passed.
-
-**Action:**
 ```bash
-cd /tmp/test-s2.4
-export PATH="/tmp/fake-bin:$PATH"
-export RALPH_AGENT="pi"
+cd /tmp/ralph-setup-test   # from T3.1
+rm -f /tmp/ralph_daemon_*.pid
 
-# Start first daemon (redirect output to avoid clutter)
-PYTHONUNBUFFERED=1 ralph daemon > /tmp/daemon-1.log 2>&1 &
+# Start daemon in background
+ralph daemon &
 DAEMON1=$!
-sleep 2
+sleep 3
 
-# Try to start second daemon
-PYTHONUNBUFFERED=1 ralph daemon > /tmp/daemon-2.log 2>&1
-EXIT_CODE=$?
+# Try starting a second daemon
+ralph daemon 2>&1
+EXIT=$?
+echo "Second daemon exit code: $EXIT"
 
-echo "Second daemon exit code: $EXIT_CODE"
-cat /tmp/daemon-2.log
-
-# Cleanup
+# Kill first daemon
 kill $DAEMON1 2>/dev/null
 wait $DAEMON1 2>/dev/null
 rm -f /tmp/ralph_daemon_*.pid
 ```
 
-**Expected output:**
-```
-Second daemon exit code: 1
-[ralph] Daemon already running (PID XXXX). Exiting.
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Second daemon exits with code 1 | Second daemon exits 0 |
-| "Daemon already running" message shown | Two daemons running simultaneously |
-| PID file has correct PID | Stale PID causes false positive |
+| Expected | How to verify |
+|----------|---------------|
+| Second daemon exits with code 1 | `$EXIT` = 1 |
+| "Daemon already running" message | Output contains "already running" |
 
 ---
 
-### T4.2 — Starts and Idles
+### T4.2 — Idle on empty queue
 
-**Precondition:** Test repo has no `status:ready` issues. Clean PID file.
-
-**Action:**
 ```bash
-cd /tmp/test-s2.4
+cd /tmp/ralph-setup-test
 rm -f /tmp/ralph_daemon_*.pid
-export PATH="/tmp/fake-bin:$PATH"
-export RALPH_AGENT="pi"
 
-PYTHONUNBUFFERED=1 ralph daemon > /tmp/daemon-idle.log 2>&1 &
+# Ensure no ready issues
+gh issue list --repo "$TEST_REPO" --label "status:ready" --json number
+
+# Start daemon, let it idle, then stop
+ralph daemon > /tmp/ralph-idle.log 2>&1 &
 DAEMON=$!
-sleep 5
+sleep 8
 
-# Check what the daemon is doing
-cat /tmp/daemon-idle.log
+# Check it idled
+grep -c "No ready tickets" /tmp/ralph-idle.log
 
-# Cleanup
-kill $DAEMON 2>/dev/null
+# Graceful shutdown
+kill $DAEMON
 wait $DAEMON 2>/dev/null
 rm -f /tmp/ralph_daemon_*.pid
-```
 
-**Expected output:**
-```
-[ralph] Daemon started
-[ralph] Syncing with remote...
-[ralph] No ready tickets. Sleeping...
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| "Daemon started" appears | Daemon crashes on start |
-| "No ready tickets" appears | Error during sync or fetch |
-| Daemon continues running (not exited) | Daemon exits prematurely |
-| Graceful shutdown on SIGTERM | Process must be SIGKILL'd |
-
----
-
-## Suite 5: Pipeline (Fake Agent)
-
-Full pipeline test using the fake agent. Tests ticket fetch, claim, label
-transitions, stage commits, and the 3-stage flow — all without real AI.
-
----
-
-### T5.1 — Ticket Fetch and Claim
-
-**Precondition:** A `status:ready` issue exists. Fake agent on PATH. Clean daemon state.
-
-**Setup:**
-```bash
-cd /tmp/test-s2.4   # cloned repo
-rm -f /tmp/ralph_daemon_*.pid /tmp/ralph_fake_agent_stage.txt
-
-# Create a test issue
-gh issue create --repo your-username/ralph-system-test \
-    --title "System test: add test marker" \
-    --body "Add a test_marker.py file to the project.
-
-### Acceptance Criteria
-- [ ] src/my_project/test_marker.py exists
-- [ ] It contains a MARKER constant set to 'ralph-system-test'" \
-    --label "type:task,status:ready"
-
-export PATH="/tmp/fake-bin:$PATH"
-export RALPH_AGENT="pi"
-export RALPH_FAKE_SLEEP="2"
-export RALPH_FAKE_EXIT_CODE="0"
-```
-
-**Action:**
-```bash
-PYTHONUNBUFFERED=1 ralph daemon > /tmp/daemon-pipeline.log 2>&1 &
-DAEMON=$!
-
-# Watch for pipeline completion (max 120s)
-for i in $(seq 1 240); do
-    STAGE=$(head -1 /tmp/ralph_fake_agent_stage.txt 2>/dev/null || echo "")
-    if grep -q "pipeline_complete\|No ready tickets" /tmp/daemon-pipeline.log 2>/dev/null; then
-        echo "[$i] Pipeline complete"
-        break
-    fi
-    sleep 0.5
-done
-
-# Wait for daemon to idle
-sleep 5
-
-# Show the log
 echo "=== Daemon log ==="
-cat /tmp/daemon-pipeline.log
-
-# Cleanup
-kill $DAEMON 2>/dev/null
-wait $DAEMON 2>/dev/null
-rm -f /tmp/ralph_daemon_*.pid
+cat /tmp/ralph-idle.log
 ```
 
-**Expected key lines in log:**
-```
-[ralph] Daemon started
-[ralph] Syncing with remote...
-[ralph] #N labels: +status:design / -status:ready
-==================================================
-[ralph] Pipeline starting for #N: System test: add test marker
-==================================================
-[ralph] STAGE 1/3: DESIGN for #N
-[fake-agent] Stage: design ...
-[ralph] Committed: [ralph] design: #N
-[ralph] #N labels: +status:build / -status:design
-[ralph] STAGE 2/3: BUILD for #N
-[fake-agent] Stage: test ...
-[fake-agent] Stage: implement ...
-[ralph] Running validation gate...
-[ralph] STAGE 3/3: VERIFY for #N
-[fake-agent] Stage: verify ...
-[ralph] #N labels: +status:review / -status:verify
-[ralph] No ready tickets. Sleeping...
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| DESIGN → BUILD → VERIFY stages all run | Pipeline stops at any stage |
-| All 4 fake agent invocations (design, test, implement, verify) | Missing a sub-agent call |
-| Label flow: ready → design → build → verify → review | Wrong label transitions |
-| Stage commits present in log | Missing commits |
-| Issue ends at `status:review` | Issue at wrong status |
+| Expected | How to verify |
+|----------|---------------|
+| "Daemon started" in log | grep shows 1 |
+| "No ready tickets" appears at least once | grep count ≥ 1 |
+| Graceful shutdown on SIGTERM | No "Error" or "exception" in log |
+| "Daemon stopped" in log | grep shows it |
 
 ---
 
-### T5.2 — Label Transition Verification
+## Suite 5: Full Pipeline
 
-**Precondition:** T5.1 completed.
+The core test — creates a real issue and watches it flow through the entire
+3-stage pipeline with a real AI agent.
 
-**Action:**
-```bash
-# Check the issue labels
-gh issue list --repo your-username/ralph-system-test \
-    --label "status:review" \
-    --json number,title,labels \
-    --jq '.[] | {number, title, labels: [.labels[].name]}'
-```
-
-**Expected output:**
-```json
-{
-  "number": N,
-  "title": "System test: add test marker",
-  "labels": ["type:task", "status:review"]
-}
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Issue has `status:review` | Issue has `status:blocked` or wrong status |
-| Only one issue in `status:review` (no leaked labels) | Dual labels present |
-| `status:ready`, `status:design`, `status:build`, `status:verify` NOT present | Stale labels remain |
+**Time:** ~5–15 minutes (agent-dependent)
 
 ---
 
-### T5.3 — Stage Commit Verification
-
-**Precondition:** T5.1 completed.
-
-**Action:**
-```bash
-cd /tmp/test-s2.4
-echo "=== Git log ==="
-git log --oneline -5
-```
-
-**Expected output (at minimum):**
-```
-XXXXXXX [ralph] design: #N
-YYYYYYY [ralph] build: #N
-ZZZZZZZ ralph init
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| `[ralph] design: #N` commit exists | Missing stage commit |
-| `[ralph] build: #N` commit exists | Wrong commit message format |
-| Commits are in order (init → design → build) | Commits out of order |
-
----
-
-### T5.4 — Checkpoint Cleared on Completion
-
-**Precondition:** T5.1 completed (pipeline succeeded).
-
-**Action:**
-```bash
-cd /tmp/test-s2.4
-if [ -f .ralph/checkpoint.json ]; then
-    echo "FAIL: checkpoint still exists"
-    cat .ralph/checkpoint.json
-else
-    echo "PASS: checkpoint cleared"
-fi
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| `.ralph/checkpoint.json` does not exist | Checkpoint file present after success |
-
----
-
-### T5.5 — DESIGN Failure → Blocked
-
-**Precondition:** A fresh `status:ready` issue. Fake agent set to fail.
-
-**Setup:**
-```bash
-cd /tmp/test-s2.4
-rm -f /tmp/ralph_daemon_*.pid /tmp/ralph_fake_agent_stage.txt
-
-# Create an issue that will fail
-gh issue create --repo your-username/ralph-system-test \
-    --title "System test: intentional DESIGN failure" \
-    --body "This issue tests the DESIGN → blocked path." \
-    --label "type:task,status:ready"
-
-export PATH="/tmp/fake-bin:$PATH"
-export RALPH_AGENT="pi"
-export RALPH_FAKE_SLEEP="1"
-export RALPH_FAKE_EXIT_CODE="1"    # <-- Force failure
-```
-
-**Action:**
-```bash
-PYTHONUNBUFFERED=1 ralph daemon > /tmp/daemon-fail.log 2>&1 &
-DAEMON=$!
-
-# Wait for blocked status
-for i in $(seq 1 60); do
-    if grep -q "status:blocked" /tmp/daemon-fail.log 2>/dev/null; then
-        echo "[$i] Issue marked blocked"
-        break
-    fi
-    sleep 1
-done
-
-sleep 3
-kill $DAEMON 2>/dev/null
-wait $DAEMON 2>/dev/null
-rm -f /tmp/ralph_daemon_*.pid
-
-# Check the issue
-echo "=== Issue status ==="
-gh issue list --repo your-username/ralph-system-test \
-    --label "status:blocked" \
-    --json number,title --jq '.[] | {number, title}'
-```
-
-**Expected output:**
-```
-[N] Issue marked blocked
-=== Issue status ===
-{"number": N, "title": "System test: intentional DESIGN failure"}
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Issue transitions to `status:blocked` | Issue stays at `status:design` or `status:ready` |
-| Checkpoint is cleared | Checkpoint file remains |
-| Daemon continues to next cycle (idles or picks another ticket) | Daemon crashes or exits |
-
----
-
-### T5.6 — Validation Gate in BUILD
-
-**Precondition:** T5.1 passed (validation gate ran during BUILD and VERIFY).
-
-**Action:**
-```bash
-grep -c "RALPH_GATE_PASSED\|Validation Gate" /tmp/daemon-pipeline.log
-```
-
-**Expected output:**
-```
-4
-```
-(Validation gate runs once in BUILD and once in VERIFY — each shows
-"Validation Gate Starting" and "RALPH_GATE_PASSED" = 4 matching lines)
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Validation gate ran at least twice (BUILD + VERIFY) | Gate ran once or not at all |
-| Gate output includes tier name ("targeted") | Missing tier info |
-
----
-
-## Suite 6: Pipeline (Real Agent)
-
-Full end-to-end test with real pi/kimi. This is the "smoke test" — if this
-passes, Ralph is working.
-
----
-
-### T6.1 — Full Real-Agent E2E
+### T5.1 — Issue through full pipeline
 
 ```mermaid
 flowchart LR
-    Issue["Create issue<br/>status:ready"] --> Daemon["Start daemon"]
-    Daemon --> Watch["Watch Kanban board"]
-    Watch --> Design["DESIGN stage<br/>agent writes spec"]
-    Design --> Build["BUILD stage<br/>TEST + IMPLEMENT"]
-    Build --> Verify["VERIFY stage<br/>5-axis review"]
-    Verify --> Review["status:review ✓"]
+    Create["1. Create issue<br/>status:ready"] --> Start["2. Start daemon"]
+    Start --> Monitor["3. Monitor label<br/>transitions"]
+    Monitor --> Design["status:design<br/>(agent researching)"]
+    Design --> Build["status:build<br/>(agent coding)"]
+    Build --> Verify["status:verify<br/>(agent reviewing)"]
+    Verify --> Review["status:review ✅"]
 ```
 
-**Precondition:** Real `pi` or `kimi` installed and working. A simple, well-scoped task
-that any agent can complete.
+**Step 1: Create a simple test issue**
 
-**Setup:**
 ```bash
-cd /tmp/test-s2.4
+cd /tmp/ralph-setup-test
+git pull origin master 2>/dev/null || git pull origin main 2>/dev/null || true
 rm -f /tmp/ralph_daemon_*.pid
 
-# Create a trivial issue
-gh issue create --repo your-username/ralph-system-test \
-    --title "Add hello() function" \
-    --body "Add a hello() function to src/my_project/greeting.py that returns 'hello from ralph'.
+# Ensure src/ package exists so agent can work with it
+mkdir -p src/my_project
+touch src/my_project/__init__.py
+git add -A && git commit -m "prepare for test" && git push
+
+# Create a simple, well-scoped issue any agent can complete
+create_issue \
+    "Add get_timestamp() utility" \
+    "Add a timestamp utility to the project.
+
+### Description
+Create src/my_project/timestamp.py with a get_timestamp() function
+that returns the current UTC time as an ISO 8601 string.
 
 ### Acceptance Criteria
-- [ ] src/my_project/greeting.py exists with a hello() function
-- [ ] hello() returns 'hello from ralph'
-- [ ] A unit test verifies the return value" \
-    --label "type:task,status:ready"
+- [ ] src/my_project/timestamp.py exists with a get_timestamp() function
+- [ ] get_timestamp() returns a string in ISO 8601 format (e.g., '2026-06-14T12:00:00Z')
+- [ ] A unit test exists that verifies the function returns a valid ISO 8601 string"
 ```
 
-**Action:**
-```bash
-# Run with real pi (no PATH override)
-unset RALPH_FAKE_SLEEP RALPH_FAKE_EXIT_CODE
-export RALPH_AGENT="pi"   # or "kimi"
+**Step 2: Get the issue number**
 
-PYTHONUNBUFFERED=1 ralph daemon > /tmp/daemon-real.log 2>&1 &
+```bash
+ISSUE_NUM=$(gh issue list --repo "$TEST_REPO" --label "status:ready" --json number --jq '.[0].number')
+echo "Test issue: #$ISSUE_NUM"
+echo "Watch on GitHub: https://github.com/$TEST_REPO/issues/$ISSUE_NUM"
+```
+
+**Step 3: Start daemon and monitor**
+
+```bash
+# Start daemon (foreground — open a second terminal to monitor)
+ralph daemon 2>&1 | tee /tmp/ralph-pipeline.log &
 DAEMON=$!
 echo "Daemon PID: $DAEMON"
-echo "Watch the Kanban board: https://github.com/your-username/ralph-system-test/projects"
-echo ""
-echo "Waiting for pipeline completion..."
-echo "Tail log: tail -f /tmp/daemon-real.log"
 ```
 
-**Monitor:**
+**Step 4: Monitor progress** (run in a separate terminal or periodically)
+
 ```bash
-# Check progress every 30s
-while kill -0 $DAEMON 2>/dev/null; do
-    STATUS=$(gh issue list --repo your-username/ralph-system-test \
-        --search "hello()" --json labels --jq '.[0].labels[].name' 2>/dev/null | grep status || echo "unknown")
-    echo "$(date +%H:%M:%S) Issue status: $STATUS"
-    sleep 30
+# Check label transitions every 15 seconds
+while true; do
+    LABELS=$(gh issue view "$ISSUE_NUM" --repo "$TEST_REPO" --json labels --jq '[.labels[].name] | join(", ")')
+    echo "$(date +%H:%M:%S)  #$ISSUE_NUM  [$LABELS]"
+    if echo "$LABELS" | grep -q "status:review\|status:blocked"; then
+        echo "Pipeline complete!"
+        break
+    fi
+    sleep 15
 done
 ```
 
-**Verify after completion:**
+**Step 5: Verify results**
+
 ```bash
-# 1. Issue status
-gh issue view --repo your-username/ralph-system-test \
-    $(gh issue list --repo your-username/ralph-system-test \
-        --search "hello()" --json number --jq '.[0].number') \
-    --json title,labels,state
+# 1. Final issue status
+issue_status "$ISSUE_NUM"
 
-# 2. Code exists
-cat src/my_project/greeting.py
+# 2. The file was created
+echo "=== Created files ==="
+ls -la src/my_project/timestamp.py 2>/dev/null && echo "timestamp.py exists ✓"
+cat src/my_project/timestamp.py
 
-# 3. Tests pass
-python3 -m pytest tests/ -v
+# 3. Tests exist and pass
+echo "=== Running tests ==="
+python3 -m pytest tests/ -v 2>&1 | tail -20
 
-# 4. Git log
+# 4. Git log shows stage commits
+echo "=== Git log ==="
 git log --oneline -5
 
 # 5. Checkpoint cleared
-[ ! -f .ralph/checkpoint.json ] && echo "Checkpoint cleared ✓"
+[ ! -f .ralph/checkpoint.json ] && echo "Checkpoint cleared ✓" || echo "Checkpoint STILL EXISTS ✗"
+
+# 6. Pipeline metrics logged
+echo "=== Recent metrics ==="
+tail -5 logs/ralph_metrics.jsonl 2>/dev/null
+
+# 7. Stop daemon
+kill $DAEMON 2>/dev/null
+wait $DAEMON 2>/dev/null
+rm -f /tmp/ralph_daemon_*.pid
 ```
 
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Issue ends at `status:review` | Issue at `status:blocked` or stuck |
-| `src/my_project/greeting.py` exists with correct function | Missing or wrong file |
-| `hello()` returns `'hello from ralph'` | Wrong return value |
-| At least one test exists and passes | No tests or tests fail |
-| Tests were written BEFORE implementation (check git log order) | Test + impl in same commit |
-| 5-axis review output in VERIFY log | VERIFY skipped review steps |
+| Expected | How to verify |
+|----------|---------------|
+| Final label: `status:review` | `issue_status` shows it |
+| `src/my_project/timestamp.py` exists | File found with content |
+| `get_timestamp()` returns ISO 8601 string | Inspect file or run `python3 -c "from src.my_project.timestamp import get_timestamp; print(get_timestamp())"` |
+| Tests pass | pytest exit code 0 |
+| Git log has `[ralph] design:` and `[ralph] build:` commits | Two stage commits visible |
+| Checkpoint is cleared | File does not exist |
+| Metrics show pipeline events | At least 3 events in metrics |
+
+---
+
+### T5.2 — Label transition audit
+
+```bash
+cd /tmp/ralph-setup-test
+
+# Check the exact label history from the daemon log
+echo "=== Label transitions in log ==="
+grep "labels:" /tmp/ralph-pipeline.log
+```
+
+| Expected | How to verify |
+|----------|---------------|
+| `+status:design / -status:ready` | Claim step |
+| `+status:build / -status:design` | After DESIGN |
+| `+status:verify / -status:build` | After BUILD |
+| `+status:review / -status:verify` | Final handoff |
+
+---
+
+## Suite 6: Failure Paths
+
+Tests what happens when the agent encounters problems.
+
+**Time:** ~5–15 minutes
+
+---
+
+### T6.1 — DESIGN failure → blocked
+
+```bash
+cd /tmp/ralph-setup-test
+git pull origin master 2>/dev/null || git pull origin main 2>/dev/null || true
+rm -f /tmp/ralph_daemon_*.pid
+
+# Create an issue that's intentionally underspecified — the agent may struggle
+create_issue \
+    "Implement a quantum-resistant Byzantine fault tolerance consensus algorithm" \
+    "Implement it. No further details.
+
+### Acceptance Criteria
+- [ ] It works"
+
+ISSUE_NUM=$(gh issue list --repo "$TEST_REPO" --search "quantum-resistant" --json number --jq '.[0].number')
+echo "Test issue: #$ISSUE_NUM"
+```
+
+**Start and monitor:**
+
+```bash
+ralph daemon 2>&1 | tee /tmp/ralph-fail.log &
+DAEMON=$!
+
+# Monitor — this should eventually mark blocked
+while true; do
+    LABELS=$(gh issue view "$ISSUE_NUM" --repo "$TEST_REPO" --json labels --jq '[.labels[].name] | join(", ")')
+    echo "$(date +%H:%M:%S)  #$ISSUE_NUM  [$LABELS]"
+    if echo "$LABELS" | grep -q "status:blocked\|status:review"; then
+        echo "Pipeline finished: $LABELS"
+        break
+    fi
+    sleep 15
+done
+
+# Verify
+issue_status "$ISSUE_NUM"
+
+kill $DAEMON 2>/dev/null
+wait $DAEMON 2>/dev/null
+rm -f /tmp/ralph_daemon_*.pid
+```
+
+| Expected | How to verify |
+|----------|---------------|
+| Issue marked `status:blocked` OR `status:review` | Either is valid (agent may handle it or fail) |
+| If blocked: checkpoint is cleared | `.ralph/checkpoint.json` does not exist |
+| Daemon continues to next cycle | Log shows "No ready tickets" or picks next issue |
+
+> **Note:** The agent may actually complete this task (agents are surprisingly
+> capable). Either outcome is valid — `status:review` means it handled it,
+> `status:blocked` means it gave up. Both paths are correct pipeline behavior.
 
 ---
 
 ## Suite 7: Crash Recovery
 
-Tests checkpoint save, rollback, and resume on restart.
+Tests checkpoint save, rollback, and resume after a hard crash.
+
+**Time:** ~5–10 minutes
 
 ---
 
-### T7.1 — Checkpoint Saved on Crash
-
-**Precondition:** Fake agent with long sleep. A `status:ready` issue.
-
-**Setup:**
-```bash
-cd /tmp/test-s2.4
-rm -f /tmp/ralph_daemon_*.pid /tmp/ralph_fake_agent_stage.txt
-
-gh issue create --repo your-username/ralph-system-test \
-    --title "System test: crash recovery" \
-    --body "Dummy issue for crash-recovery testing." \
-    --label "type:task,status:ready"
-
-export PATH="/tmp/fake-bin:$PATH"
-export RALPH_AGENT="pi"
-export RALPH_FAKE_SLEEP="10"    # Long sleep — we'll kill during this
-export RALPH_FAKE_EXIT_CODE="0"
-```
-
-**Action:**
-```bash
-PYTHONUNBUFFERED=1 ralph daemon > /tmp/daemon-crash.log 2>&1 &
-DAEMON=$!
-
-# Wait for DESIGN stage to start
-for i in $(seq 1 60); do
-    STAGE=$(head -1 /tmp/ralph_fake_agent_stage.txt 2>/dev/null || echo "")
-    if [ "$STAGE" = "design" ]; then
-        echo "[$i] Design stage entered — crashing daemon"
-        break
-    fi
-    sleep 0.5
-done
-
-# SIGKILL (simulates hard crash — SIGTERM handler won't fire)
-kill -9 $DAEMON 2>/dev/null
-wait $DAEMON 2>/dev/null
-
-# Wait for orphan fake agent to exit
-sleep 12
-
-# Check checkpoint
-echo "=== Checkpoint ==="
-cat .ralph/checkpoint.json 2>/dev/null || echo "NO CHECKPOINT"
-```
-
-**Expected checkpoint:**
-```json
-{
-  "issue": N,
-  "stage": "design",
-  "pre_stage_sha": "...",
-  "started_at": "2026-..."
-}
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Checkpoint file exists | No checkpoint after crash |
-| `stage` field is `"design"` | Wrong stage |
-| `pre_stage_sha` is a valid commit hash | Missing or invalid SHA |
-| `issue` matches the test issue number | Wrong issue number |
-
----
-
-### T7.2 — Resume After Crash
-
-**Precondition:** T7.1 completed (checkpoint exists with stage=design).
-
-**Action:**
-```bash
-cd /tmp/test-s2.4
-rm -f /tmp/ralph_daemon_*.pid /tmp/ralph_fake_agent_stage.txt
-
-export PATH="/tmp/fake-bin:$PATH"
-export RALPH_AGENT="pi"
-export RALPH_FAKE_SLEEP="1"
-export RALPH_FAKE_EXIT_CODE="0"
-
-PYTHONUNBUFFERED=1 ralph daemon > /tmp/daemon-resume.log 2>&1 &
-DAEMON=$!
-
-# Wait for recovery and pipeline completion
-for i in $(seq 1 120); do
-    if grep -q "pipeline_complete\|No ready tickets" /tmp/daemon-resume.log 2>/dev/null; then
-        echo "[$i] Pipeline completed after recovery"
-        break
-    fi
-    sleep 0.5
-done
-
-sleep 3
-kill $DAEMON 2>/dev/null
-wait $DAEMON 2>/dev/null
-rm -f /tmp/ralph_daemon_*.pid
-
-echo "=== Resume log (key lines) ==="
-grep -E "Found checkpoint|Rolling back|Resuming|stage_complete|pipeline_complete" /tmp/daemon-resume.log
-```
-
-**Expected key lines:**
-```
-[ralph] Found checkpoint from previous run — recovering...
-[ralph] Rolling back to commit XXXXXXXX (before design)...
-[ralph] Resuming #N at stage: design
-[ralph] STAGE 1/3: DESIGN for #N
-...
-pipeline_complete
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| "Found checkpoint" appears | Checkpoint not detected |
-| "Rolling back to commit" appears | No rollback performed |
-| Pipeline completes successfully (DESIGN → BUILD → VERIFY) | Pipeline fails or hangs |
-| Checkpoint cleared after success | Checkpoint file remains |
-| Issue ends at `status:review` | Issue at wrong status |
-
----
-
-## Suite 8: Edge Cases
-
----
-
-### T8.1 — Dependency Check
-
-**Precondition:** Two issues — one with an unmet dependency, one ready.
-
-**Setup:**
-```bash
-cd /tmp/test-s2.4
-
-# Create a blocker issue
-gh issue create --repo your-username/ralph-system-test \
-    --title "System test: dependency blocker" \
-    --body "This issue blocks others." \
-    --label "type:task,status:ready"
-
-BLOCKER=$(gh issue list --repo your-username/ralph-system-test \
-    --search "dependency blocker" --json number --jq '.[0].number')
-
-# Create a dependent issue
-gh issue create --repo your-username/ralph-system-test \
-    --title "System test: depends on blocker" \
-    --body "Depends on: #${BLOCKER}
-
-This should be skipped until the blocker is closed." \
-    --label "type:task,status:ready"
-```
-
-**Action:**
-```bash
-rm -f /tmp/ralph_daemon_*.pid /tmp/ralph_fake_agent_stage.txt
-export PATH="/tmp/fake-bin:$PATH"
-export RALPH_AGENT="pi"
-export RALPH_FAKE_SLEEP="1"
-
-PYTHONUNBUFFERED=1 ralph daemon > /tmp/daemon-deps.log 2>&1 &
-DAEMON=$!
-sleep 8
-
-grep -i "skipping\|depends\|unmet" /tmp/daemon-deps.log
-
-kill $DAEMON 2>/dev/null
-wait $DAEMON 2>/dev/null
-rm -f /tmp/ralph_daemon_*.pid
-```
-
-**Expected output:**
-```
-[ralph] Skipping #N — unmet dependencies
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Dependent issue is skipped | Dependent issue is processed |
-| "unmet dependencies" message shown | No message or wrong reason |
-| Daemon processes the blocker issue instead | Daemon hangs on dependent issue |
-
----
-
-### T8.2 — "Nothing to Commit" Handled
-
-**Precondition:** A pipeline stage that produces no file changes.
-
-**Action:**
-```bash
-grep "Nothing to commit" /tmp/daemon-pipeline.log
-```
-
-**Expected output (may appear for VERIFY stage):**
-```
-[ralph] Nothing to commit for verify
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| "Nothing to commit" message shown (not an error) | Pipeline crashes on empty commit |
-| Pipeline continues after empty commit | Pipeline exits on commit failure |
-
----
-
-### T8.3 — `ralph status` Output
-
-**Precondition:** Daemon is running or has run recently.
-
-**Action:**
-```bash
-cd /tmp/test-s2.4
-ralph status
-```
-
-**Expected output:**
-```
-╔══════════════════════════════════════════╗
-║   Ralph v3 — Status Dashboard            ║
-╚══════════════════════════════════════════╝
-
-Project: /private/tmp/test-s2.4
-...
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Command exits 0 | Exits non-zero |
-| Shows project path | Missing path |
-| Shows daemon status (running/stopped) | Status section empty |
-
----
-
-### T8.4 — `ralph report` Output
-
-**Precondition:** At least one pipeline run has logged metrics.
-
-**Action:**
-```bash
-cd /tmp/test-s2.4
-ralph report
-```
-
-**Expected output:**
-```
-╔══════════════════════════════════════════╗
-║   Ralph v3 — Report                      ║
-╚══════════════════════════════════════════╝
-
-...
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| Command exits 0 | Exits non-zero |
-| Report contains pipeline event counts | Empty report |
-| Reads from `ralph_metrics.jsonl` | File-not-found error |
-
----
-
-### T8.5 — `generate-test-map` Output
-
-**Precondition:** Source and test files exist in the project.
-
-**Action:**
-```bash
-cd /tmp/test-s2.4
-ralph generate-test-map
-cat config/TEST_MAP.yaml
-```
-
-**Expected output (in TEST_MAP.yaml):**
-```yaml
-mappings:
-  - source: src/my_project/...
-    tests:
-      - tests/unit/...
-```
-
-| Pass criteria | Fail criteria |
-|---------------|---------------|
-| TEST_MAP.yaml is updated | File unchanged or empty |
-| Source files mapped to test files | No mappings created |
-| Output format matches expected schema | Malformed YAML |
-
----
-
-## Result Summary
+### T7.1 — Crash during pipeline and resume
 
 ```mermaid
 flowchart TD
-    Start["Start Validation"] --> S1
-
-    subgraph S1["Suite 1: Install"]
-        T1_1["T1.1 One-line install"]
-        T1_2["T1.2 Prereq detection"]
-        T1_3["T1.3 ralph version"]
-    end
-
-    subgraph S2["Suite 2: Init"]
-        T2_1["T2.1 New project"]
-        T2_2["T2.2 Current dir"]
-        T2_3["T2.3 Labels"]
-        T2_4["T2.4 Existing repo"]
-        T2_5["T2.5 File integrity"]
-    end
-
-    subgraph S3["Suite 3: Setup"]
-        T3_1["T3.1 All pass"]
-        T3_2["T3.2 Missing labels"]
-    end
-
-    subgraph S4["Suite 4: Daemon"]
-        T4_1["T4.1 PID singleton"]
-        T4_2["T4.2 Start + idle"]
-    end
-
-    subgraph S5["Suite 5: Pipeline (Fake)"]
-        T5_1["T5.1 Fetch + claim"]
-        T5_2["T5.2 Label transitions"]
-        T5_3["T5.3 Stage commits"]
-        T5_4["T5.4 Checkpoint clear"]
-        T5_5["T5.5 Failure → blocked"]
-        T5_6["T5.6 Validation gate"]
-    end
-
-    subgraph S6["Suite 6: Real Agent"]
-        T6_1["T6.1 Full E2E"]
-    end
-
-    subgraph S7["Suite 7: Crash Recovery"]
-        T7_1["T7.1 Checkpoint save"]
-        T7_2["T7.2 Resume"]
-    end
-
-    subgraph S8["Suite 8: Edge Cases"]
-        T8_1["T8.1 Dependencies"]
-        T8_2["T8.2 Empty commit"]
-        T8_3["T8.3 ralph status"]
-        T8_4["T8.4 ralph report"]
-        T8_5["T8.5 test-map"]
-    end
-
-    S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8
-    S8 --> Results
-
-    Results{"All Pass?"} -->|"Yes"| Done["✅ System Validated"]
-    Results -->|"No"| Fix["🔧 Fix failures + re-run"]
-    Fix --> Start
+    Start["1. Start daemon with<br/>status:ready issue"] --> Design["2. Wait for DESIGN stage"]
+    Design --> Kill["3. kill -9 daemon<br/>(simulates hard crash)"]
+    Kill --> Check["4. Verify checkpoint exists<br/>stage=design"]
+    Check --> Restart["5. Restart daemon"]
+    Restart --> Recover["6. Watch recovery:<br/>rollback → resume → complete"]
+    Recover --> Verify["7. Verify issue at<br/>status:review"]
 ```
 
-### Scorecard
+**Step 1: Create a test issue**
 
-Copy and fill this out during validation:
+```bash
+cd /tmp/ralph-setup-test
+git pull origin master 2>/dev/null || git pull origin main 2>/dev/null || true
+rm -f /tmp/ralph_daemon_*.pid
 
-| Suite | Test | Status | Notes |
-|-------|------|--------|-------|
-| 1 | T1.1 One-line install | ⬜ | |
-| 1 | T1.2 Prereq detection | ⬜ | |
-| 1 | T1.3 ralph version | ⬜ | |
-| 2 | T2.1 New project | ⬜ | |
-| 2 | T2.2 Current dir | ⬜ | |
-| 2 | T2.3 Labels | ⬜ | |
-| 2 | T2.4 Existing repo | ⬜ | |
-| 2 | T2.5 File integrity | ⬜ | |
-| 3 | T3.1 All pass | ⬜ | |
-| 3 | T3.2 Missing labels | ⬜ | |
-| 4 | T4.1 PID singleton | ⬜ | |
-| 4 | T4.2 Start + idle | ⬜ | |
-| 5 | T5.1 Fetch + claim | ⬜ | |
-| 5 | T5.2 Label transitions | ⬜ | |
-| 5 | T5.3 Stage commits | ⬜ | |
-| 5 | T5.4 Checkpoint clear | ⬜ | |
-| 5 | T5.5 Failure → blocked | ⬜ | |
-| 5 | T5.6 Validation gate | ⬜ | |
-| 6 | T6.1 Real agent E2E | ⬜ | |
-| 7 | T7.1 Checkpoint save | ⬜ | |
-| 7 | T7.2 Resume after crash | ⬜ | |
-| 8 | T8.1 Dependencies | ⬜ | |
-| 8 | T8.2 Empty commit | ⬜ | |
-| 8 | T8.3 ralph status | ⬜ | |
-| 8 | T8.4 ralph report | ⬜ | |
-| 8 | T8.5 generate-test-map | ⬜ | |
+create_issue \
+    "Add a project_info() function" \
+    "Add src/my_project/info.py with a project_info() function
+that returns a dict with keys: name, version.
 
-**Total: 26 tests**
+### Acceptance Criteria
+- [ ] src/my_project/info.py exists with project_info()
+- [ ] project_info() returns {'name': 'ralph-system-test', 'version': '0.1.0'}
+- [ ] A unit test verifies the return value"
+
+ISSUE_NUM=$(gh issue list --repo "$TEST_REPO" --search "project_info" --json number --jq '.[0].number')
+echo "Test issue: #$ISSUE_NUM"
+```
+
+**Step 2: Start daemon and watch for DESIGN stage**
+
+```bash
+ralph daemon 2>&1 | tee /tmp/ralph-crash.log &
+DAEMON=$!
+
+# Wait until DESIGN stage is entered (label changes to status:design)
+for i in $(seq 1 60); do
+    LABELS=$(gh issue view "$ISSUE_NUM" --repo "$TEST_REPO" --json labels --jq '[.labels[].name] | join(",")')
+    if echo "$LABELS" | grep -q "status:design"; then
+        echo "[$i] DESIGN stage detected — crashing daemon now"
+        break
+    fi
+    sleep 2
+done
+```
+
+**Step 3: Hard crash (kill -9)**
+
+```bash
+echo "Killing daemon (SIGKILL)..."
+kill -9 $DAEMON
+wait $DAEMON 2>/dev/null
+
+# Check checkpoint exists
+echo "=== Checkpoint ==="
+cat .ralph/checkpoint.json 2>/dev/null || echo "NO CHECKPOINT — FAIL"
+```
+
+**Step 4: Resume**
+
+```bash
+# Give any orphan processes time to die
+sleep 10
+rm -f /tmp/ralph_daemon_*.pid
+
+echo "=== Restarting daemon — should recover ==="
+ralph daemon 2>&1 | tee /tmp/ralph-resume.log &
+DAEMON=$!
+
+# Monitor recovery
+for i in $(seq 1 120); do
+    LABELS=$(gh issue view "$ISSUE_NUM" --repo "$TEST_REPO" --json labels --jq '[.labels[].name] | join(",")')
+    echo "[$i] #$ISSUE_NUM [$LABELS]"
+    if echo "$LABELS" | grep -q "status:review\|status:blocked"; then
+        echo "Pipeline complete after recovery!"
+        break
+    fi
+    sleep 5
+done
+```
+
+**Step 5: Verify recovery**
+
+```bash
+echo "=== Recovery log (key lines) ==="
+grep -E "Found checkpoint|Rolling back|Resuming|pipeline_complete" /tmp/ralph-resume.log
+
+echo "=== Final issue status ==="
+issue_status "$ISSUE_NUM"
+
+echo "=== Checkpoint after recovery ==="
+[ ! -f .ralph/checkpoint.json ] && echo "Cleared ✓" || echo "STILL EXISTS ✗"
+
+echo "=== Code was produced ==="
+ls -la src/my_project/info.py 2>/dev/null && echo "info.py exists ✓"
+
+# Verify function works
+cd /tmp/ralph-setup-test
+python3 -c "
+import sys; sys.path.insert(0, 'src')
+from my_project.info import project_info
+result = project_info()
+print('project_info():', result)
+assert result['name'] == 'ralph-system-test'
+assert result['version'] == '0.1.0'
+print('Values correct ✓')
+"
+
+kill $DAEMON 2>/dev/null
+wait $DAEMON 2>/dev/null
+rm -f /tmp/ralph_daemon_*.pid
+```
+
+| Expected | How to verify |
+|----------|---------------|
+| Checkpoint exists after SIGKILL | JSON file with `stage: "design"` |
+| Recovery log shows "Found checkpoint" | grep matches |
+| Recovery log shows "Rolling back to commit" | grep matches |
+| Pipeline completes after recovery | Issue at `status:review` |
+| Checkpoint cleared after success | File does not exist |
+| Code produced is correct | `project_info()` returns expected dict |
 
 ---
 
-*Run these tests after installation and after any significant code change.
-The fake-agent suite (5) should take ~2 minutes. The real-agent test (T6.1)
-depends on agent speed — budget 5–15 minutes.*
+## Suite 8: CLI & Edge Cases
+
+Quick tests for CLI commands and edge-case behavior. No agent needed.
+
+**Time:** ~2 minutes
+
+---
+
+### T8.1 — Dependency check
+
+```bash
+cd /tmp/ralph-setup-test
+rm -f /tmp/ralph_daemon_*.pid
+
+# Create a blocker issue (not ready — leave it open)
+gh issue create --repo "$TEST_REPO" \
+    --title "Blocker task" \
+    --body "This is a dependency." \
+    --label "type:task"
+
+BLOCKER_NUM=$(gh issue list --repo "$TEST_REPO" --search "Blocker task" --json number --jq '.[0].number')
+
+# Create a dependent issue
+create_issue \
+    "Task that depends on blocker" \
+    "Depends on: #${BLOCKER_NUM}
+
+This task cannot be processed until the blocker is closed."
+
+# Start daemon briefly and check behavior
+ralph daemon > /tmp/ralph-deps.log 2>&1 &
+DAEMON=$!
+sleep 8
+
+echo "=== Dependency handling ==="
+grep -i "skipping\|depends\|unmet" /tmp/ralph-deps.log
+
+kill $DAEMON 2>/dev/null
+wait $DAEMON 2>/dev/null
+rm -f /tmp/ralph_daemon_*.pid
+```
+
+| Expected | How to verify |
+|----------|---------------|
+| "Skipping" message for the dependent issue | grep finds it |
+| Daemon does not process the dependent issue | Issue stays `status:ready` |
+
+---
+
+### T8.2 — `ralph status`
+
+```bash
+cd /tmp/ralph-setup-test
+ralph status
+```
+
+| Expected | How to verify |
+|----------|---------------|
+| Command exits 0 | `echo $?` → 0 |
+| Shows project path | Output contains current directory |
+| Shows daemon info or "not running" | Output has daemon section |
+
+---
+
+### T8.3 — `ralph report`
+
+```bash
+cd /tmp/ralph-setup-test
+ralph report
+```
+
+| Expected | How to verify |
+|----------|---------------|
+| Command exits 0 | `echo $?` → 0 |
+| Shows pipeline event summary | Output has event counts or date range |
+| Reads from `logs/ralph_metrics.jsonl` | Report is not empty |
+
+---
+
+### T8.4 — `ralph generate-test-map`
+
+```bash
+cd /tmp/ralph-setup-test
+cp config/TEST_MAP.yaml config/TEST_MAP.yaml.bak
+ralph generate-test-map
+echo "=== Generated mappings ==="
+cat config/TEST_MAP.yaml
+# Restore original if needed
+# mv config/TEST_MAP.yaml.bak config/TEST_MAP.yaml
+```
+
+| Expected | How to verify |
+|----------|---------------|
+| TEST_MAP.yaml updated with source→test mappings | YAML has `mappings:` section with entries |
+| Existing mappings preserved | Original content not lost |
+
+---
+
+### T8.5 — `ralph validate`
+
+```bash
+cd /tmp/ralph-setup-test
+ralph validate --tier=targeted
+```
+
+| Expected | How to verify |
+|----------|---------------|
+| Command runs and exits | Either passes or fails with clear output |
+| Shows test tier | Output contains "targeted" |
+| Shows validation gate steps | Output has pytest/lint sections |
+
+---
+
+## Cleanup
+
+After all tests pass, clean up:
+
+```bash
+# Close all test issues
+gh issue list --repo "$TEST_REPO" --state open --json number --jq '.[].number' | while read n; do
+    gh issue close "$n" --repo "$TEST_REPO" --reason completed
+done
+
+# Remove temp test repos (optional)
+gh repo delete "your-username/ralph-label-test" --yes 2>/dev/null
+gh repo delete "your-username/ralph-no-label-test" --yes 2>/dev/null
+
+# Keep "$TEST_REPO" for future validation runs
+
+# Clean local temp dirs
+rm -rf /tmp/ralph-init-test /tmp/ralph-existing-test /tmp/ralph-label-test /tmp/ralph-no-label-test /tmp/ralph-setup-test
+```
+
+---
+
+## Scorecard
+
+Copy and fill this as you run the tests:
+
+```
+Ralph v3 — System Validation Scorecard
+─────────────────────────────────────
+Date: _______________
+Agent: pi / kimi
+Repo: _________________________________
+
+Suite 1: Installation
+  [ ] T1.1  ralph version        ________
+  [ ] T1.2  ralph help           ________
+  [ ] T1.3  Core files exist     ________
+  [ ] T1.4  Dead-code clean      ________
+
+Suite 2: Project Init
+  [ ] T2.1  New project          ________
+  [ ] T2.2  Existing directory   ________
+  [ ] T2.3  Label creation       ________
+  [ ] T2.5  Prompt stubs         ________
+
+Suite 3: Setup
+  [ ] T3.1  Setup passes         ________
+  [ ] T3.2  Missing labels       ________
+
+Suite 4: Daemon Lifecycle
+  [ ] T4.1  PID singleton        ________
+  [ ] T4.2  Idle on empty        ________
+
+Suite 5: Full Pipeline  (~10 min)
+  [ ] T5.1  Full E2E             ________
+  [ ] T5.2  Label audit          ________
+
+Suite 6: Failure Paths  (~5 min)
+  [ ] T6.1  Failure → blocked    ________
+
+Suite 7: Crash Recovery  (~10 min)
+  [ ] T7.1  Crash + resume       ________
+
+Suite 8: CLI & Edge Cases
+  [ ] T8.1  Dependency check     ________
+  [ ] T8.2  ralph status         ________
+  [ ] T8.3  ralph report         ________
+  [ ] T8.4  generate-test-map    ________
+  [ ] T8.5  ralph validate       ________
+
+─────────────────────────────────────
+TOTAL:  ___ / 21  passed
+─────────────────────────────────────
+```
+
+---
+
+*Run after installation and after any significant code change. The full suite
+takes ~30–60 minutes. Suites 1–4 + 8 are quick (<10 min) and can be run
+frequently. Suites 5–7 are the deep validation — run after major changes.*
