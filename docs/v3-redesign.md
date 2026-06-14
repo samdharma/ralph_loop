@@ -157,46 +157,30 @@ Ralph v2 was a "decoupling" effort that produced more coupling:
 
 ## 2. Architecture Overview
 
-```
-┌─────────────────────────────────────────────────────┐
-│                  GitHub (Remote)                     │
-│  ┌──────────┐  ┌──────────────┐  ┌───────────────┐  │
-│  │ Issues   │  │ Repo (git)   │  │ Projects      │  │
-│  │ (tickets)│  │ (code+docs)  │  │ (Kanban board)│  │
-│  └────┬─────┘  └──────┬───────┘  └───────┬───────┘  │
-└───────┼───────────────┼──────────────────┼──────────┘
-        │               │                  │
-   gh issue list   git clone/pull     Human visualization
-   gh issue edit   git add/commit     (read-only for Ralph)
-        │           git push
-        │               │
-┌───────┴───────────────┴──────────────────────────────┐
-│                   Local Machine                       │
-│                                                       │
-│  ┌─────────────────────────────────────────────┐     │
-│  │              Ralph CLI (bin/ralph)           │     │
-│  │  init | daemon | status | validate | report │     │
-│  └─────────────────┬───────────────────────────┘     │
-│                    │                                  │
-│  ┌─────────────────┴───────────────────────────┐     │
-│  │         Ralph Pipeline Engine               │     │
-│  │                                             │     │
-│  │  Fetch Tickets  →  Pipeline Loop  →  Commit │     │
-│  │  (gh issue list)   (3 stages)      (git)    │     │
-│  └─────────────────┬───────────────────────────┘     │
-│                    │                                  │
-│  ┌─────────────────┴───────────────────────────┐     │
-│  │           Agent Invocation Layer             │     │
-│  │                                             │     │
-│  │  Parent Agent (pi/kimi)                     │     │
-│  │    └─ Sub-agents (pi-subagent / kimi)       │     │
-│  └─────────────────────────────────────────────┘     │
-│                                                       │
-│  ┌─────────────────────────────────────────────┐     │
-│  │           Validation Gate                    │     │
-│  │  pytest (tiered) + lint + type-check         │     │
-│  └─────────────────────────────────────────────┘     │
-└───────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph GitHub["GitHub (Remote)"]
+        Issues["Issues<br/>(tickets)"]
+        Repo["Repo<br/>(code + docs)"]
+        Projects["Projects<br/>(Kanban board)"]
+    end
+
+    subgraph Local["Local Machine"]
+        CLI["Ralph CLI<br/>bin/ralph<br/>init | daemon | status | validate | report"]
+        Engine["Pipeline Engine<br/>Fetch → Pipeline → Commit<br/>(gh + 3 stages + git)"]
+        Agent["Agent Invocation<br/>Parent Agent (pi/kimi)<br/>└─ Sub-agents (pi-subagent)"]
+        Gate["Validation Gate<br/>pytest (tiered) + lint + type-check"]
+
+        CLI --> Engine
+        Engine --> Agent
+        Agent --> Gate
+    end
+
+    Issues -.->|"gh issue list"| Engine
+    Engine -.->|"gh issue edit"| Issues
+    Repo -.->|"git clone/pull"| Engine
+    Engine -.->|"git add/commit/push"| Repo
+    Projects -.->|"Human visualization<br/>(read-only for Ralph)"| GitHub
 ```
 
 ### Key Dependencies
@@ -294,48 +278,32 @@ An exit ticket is simply a `type:exit` issue whose body lists acceptance criteri
 
 ## 4. The 3-Stage Pipeline
 
-```
-Issue #31 (status:ready)
-    │
-    ▼
-┌──────────┐
-│ STAGE 1  │  DESIGN
-│ DESIGN   │  Parent Agent, Mode B (full context)
-│          │  → Reads ticket + codebase
-│          │  → Produces design spec in PROGRESS.md
-│          │  → Updates label: status:design
-└────┬─────┘
-     │
-     ▼
-┌──────────────────────────┐
-│ STAGE 2                  │  BUILD
-│ BUILD                    │
-│                          │
-│  ┌─────────┐  ┌─────────┐│
-│  │TEST     │  │IMPLEMENT││
-│  │Sub-agt  │  │Sub-agt  ││
-│  │Mode A   │  │Mode B   ││
-│  │(no ctxt)│  │(full    ││
-│  │         │  │ context)││
-│  │Writes   │  │Writes   ││
-│  │tests    │  │code +   ││
-│  │from spec│  │unit test││
-│  └─────────┘  └─────────┘│
-│                          │
-│  Updates label: status:build
-└────────────┬─────────────┘
-             │
-             ▼
-┌──────────┐
-│ STAGE 3  │  VERIFY
-│ VERIFY   │  Sub-agent, Mode A (no context)
-│          │  → Sees ticket + design spec + git diff only
-│          │  → 5-axis review + acceptance criteria check
-│          │  → Validation gate (ralph validate)
-│          │  → Updates label: status:verify (during)
-│          │  → On pass: status:review (handoff to human)
-│          │  → On fail: status:blocked (back to human)
-└──────────┘
+```mermaid
+flowchart TD
+    READY["Issue #31<br/>status:ready"] --> DESIGN
+
+    subgraph DESIGN_BOX["STAGE 1: DESIGN"]
+        DESIGN["Parent Agent<br/>Mode B (full context)<br/><br/>→ Reads ticket + codebase<br/>→ Produces design spec<br/>  in PROGRESS.md<br/>→ Label: status:design"]
+    end
+
+    DESIGN --> BUILD
+
+    subgraph BUILD_BOX["STAGE 2: BUILD"]
+        BUILD["<br/><br/>"]
+        TEST["TEST Sub-agent<br/>Mode A (isolated)<br/><br/>→ Sees spec only<br/>→ Writes tests<br/>  from spec"]
+        IMPL["IMPLEMENT Sub-agent<br/>Mode B (full context)<br/><br/>→ Sees spec + codebase<br/>→ Writes code + unit tests"]
+        BUILD --- TEST
+        BUILD --- IMPL
+    end
+
+    BUILD --> VERIFY
+
+    subgraph VERIFY_BOX["STAGE 3: VERIFY"]
+        VERIFY["Sub-agent<br/>Mode A (isolated)<br/><br/>→ Sees ticket + spec + diff<br/>→ 5-axis review<br/>→ Acceptance criteria check<br/>→ Validation gate<br/><br/>Label: status:verify"]
+    end
+
+    VERIFY -->|pass| REVIEW["status:review<br/>(handoff to human)"]
+    VERIFY -->|fail| BLOCKED["status:blocked<br/>(back to human)"]
 ```
 
 ### Sub-Agent Modes
@@ -358,17 +326,26 @@ Issue #31 (status:ready)
 
 Each stage follows a strict entry/exit contract:
 
-```
-Enter Stage:
-  1. Update issue label to status:<stage>
-  2. Assemble prompt for agent/sub-agent
-  3. Invoke agent
+```mermaid
+flowchart LR
+    subgraph Enter["ENTER STAGE"]
+        direction TB
+        E1["1. Update label → status:&lt;stage&gt;"]
+        E2["2. Assemble prompt"]
+        E3["3. Invoke agent"]
+        E1 --> E2 --> E3
+    end
 
-Exit Stage:
-  1. Agent signals completion
-  2. Commit all changes: git add -A && git commit -m "[ralph] <stage>: #<issue>"
-  3. Update issue label to next stage's status
-  4. Log metrics event
+    subgraph Exit["EXIT STAGE"]
+        direction TB
+        X1["1. Agent signals completion"]
+        X2["2. Commit: git add -A &&<br/>git commit -m '[ralph] &lt;stage&gt;: #&lt;issue&gt;'"]
+        X3["3. Update label → next status"]
+        X4["4. Log metrics event"]
+        X1 --> X2 --> X3 --> X4
+    end
+
+    Enter --> Exit
 ```
 
 ---
@@ -377,53 +354,27 @@ Exit Stage:
 
 ### Continuous Loop Flow
 
-```
-START (ralph daemon)
-    │
-    ▼
-┌─────────────────────┐
-│ 1. SYNC             │
-│  git fetch origin   │
-│  git merge/ff       │
-│  (safety gate:      │
-│   divergence = stop)│
-└────────┬────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│ 2. FETCH TICKET     │
-│  gh issue list      │
-│  --label ready      │
-│  --state open       │
-│  → smallest number  │
-└────────┬────────────┘
-         │ no ready tickets → sleep 60s, loop
-         ▼
-┌─────────────────────┐
-│ 3. CLAIM TICKET     │
-│  gh issue edit      │
-│  add: status:design │
-│  remove: ready      │
-└────────┬────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│ 4. PIPELINE         │
-│  DESIGN → BUILD →   │
-│  VERIFY              │
-│  (3 stages as above) │
-└────────┬────────────┘
-         │
-         ▼
-┌─────────────────────┐
-│ 5. HANDOFF          │
-│  Ticket marked       │
-│  status:review       │
-│  (if --auto-close:   │
-│   close issue)      │
-└────────┬────────────┘
-         │
-    sleep 5s, loop
+```mermaid
+flowchart TD
+    START(["START<br/>ralph daemon"]) --> SYNC
+
+    SYNC["1. SYNC<br/>git fetch origin<br/>git merge --ff-only<br/>(divergence = stop)"]
+    SYNC --> FETCH
+
+    FETCH["2. FETCH TICKET<br/>gh issue list<br/>--label status:ready<br/>→ smallest number"]
+    FETCH -->|no ready tickets| SLEEP["Sleep 60s"]
+    SLEEP --> SYNC
+    FETCH -->|ticket found| CLAIM
+
+    CLAIM["3. CLAIM TICKET<br/>gh issue edit<br/>+status:design<br/>-status:ready"]
+    CLAIM --> PIPELINE
+
+    PIPELINE["4. PIPELINE<br/>DESIGN → BUILD → VERIFY<br/>(3 stages)"]
+    PIPELINE --> HANDOFF
+
+    HANDOFF["5. HANDOFF<br/>status:review<br/>(--auto-close: close issue)"]
+    HANDOFF --> PAUSE["Sleep 5s"]
+    PAUSE --> SYNC
 ```
 
 ### Signal Handling & Crash Recovery
@@ -587,46 +538,26 @@ The orchestrator is the pipeline engine. It is NOT a bash wrapper around an all-
 
 ### Sub-Agent Invocation Model
 
-```
-┌─────────────────────────────────────────────┐
-│            Parent Agent (DESIGN)             │
-│  Full codebase context. Produces spec.       │
-└──────────────────┬──────────────────────────┘
-                   │ spec (PROGRESS.md)
-     ┌─────────────┴─────────────┐
-     ▼                           ▼
-┌──────────────┐         ┌──────────────┐
-│ TEST Sub-Agt │         │IMPL Sub-Agt  │
-│   Mode A     │         │   Mode B     │
-│              │         │              │
-│ Fresh session│         │ Inherits     │
-│ Sees: spec   │         │ parent ctx   │
-│ only         │         │ Sees: spec + │
-│              │         │ codebase +   │
-│ Writes: test │         │ test files   │
-│ files        │         │              │
-│              │         │ Writes: code │
-│              │         │ + unit tests │
-└──────┬───────┘         └──────┬───────┘
-       │                        │
-       └──────────┬─────────────┘
-                  │ code + tests committed
-                  ▼
-         ┌──────────────┐
-         │VERIFY Sub-Agt│
-         │   Mode A     │
-         │              │
-         │ Fresh session│
-         │ Sees: issue  │
-         │ + spec + diff│
-         │              │
-         │ 5-axis review│
-         │ + validation │
-         │ gate         │
-         └──────┬───────┘
-                │
-                ▼
-         status:review
+```mermaid
+flowchart TD
+    PARENT["<b>Parent Agent (DESIGN)</b><br/>Full codebase context<br/>Produces spec"]
+
+    PARENT -->|"spec (PROGRESS.md)"| TEST
+    PARENT -->|"spec (PROGRESS.md)"| IMPL
+
+    subgraph BUILD_PHASE["BUILD Stage"]
+        TEST["<b>TEST Sub-Agent</b><br/>Mode A (Isolated)<br/><br/>Fresh session<br/>Sees: spec only<br/>Writes: test files"]
+        IMPL["<b>IMPLEMENT Sub-Agent</b><br/>Mode B (Sequential)<br/><br/>Inherits parent context<br/>Sees: spec + codebase + tests<br/>Writes: code + unit tests"]
+    end
+
+    TEST --> MERGE["Code + tests<br/>committed"]
+    IMPL --> MERGE
+
+    MERGE --> VERIFY_SA
+
+    VERIFY_SA["<b>VERIFY Sub-Agent</b><br/>Mode A (Isolated)<br/><br/>Fresh session<br/>Sees: issue + spec + diff<br/>5-axis review<br/>+ validation gate"]
+
+    VERIFY_SA --> REVIEW["status:review"]
 ```
 
 ### Mode A vs Mode B — Implementation Detail
@@ -641,35 +572,39 @@ The orchestrator is the pipeline engine. It is NOT a bash wrapper around an all-
 
 ### State Machine
 
-```
-[status:ready]
-     │ gh issue edit → status:design
-     ▼
-┌─────────┐
-│ DESIGN  │── crash → on restart, find status:design, resume DESIGN
-└────┬────┘
-     │ git commit + gh issue edit → status:build
-     ▼
-┌─────────┐
-│ BUILD   │── crash → on restart, find status:build, resume BUILD
-└────┬────┘
-     │ git commit + gh issue edit → status:verify
-     ▼
-┌─────────┐
-│ VERIFY  │── crash → on restart, find status:verify, resume VERIFY
-└────┬────┘
-     │
-  ┌──┴──┐
-  ▼     ▼
-PASS   FAIL
-  │     │
-  │     ▼
-  │  status:blocked
-  │  + blocking note
-  │
-  ▼
-status:review
-(human inspects, closes)
+```mermaid
+stateDiagram-v2
+    [*] --> status_ready : Human creates issue
+
+    status_ready --> DESIGN : gh issue edit<br/>+status:design<br/>-status:ready
+
+    state DESIGN {
+        [*] --> design_active
+        design_active --> design_crash : crash
+    }
+    design_crash --> DESIGN : restart, resume
+
+    DESIGN --> BUILD : git commit + gh issue edit<br/>+status:build<br/>-status:design
+
+    state BUILD {
+        [*] --> build_active
+        build_active --> build_crash : crash
+    }
+    build_crash --> BUILD : restart, resume
+
+    BUILD --> VERIFY : git commit + gh issue edit<br/>+status:verify<br/>-status:build
+
+    state VERIFY {
+        [*] --> verify_active
+        verify_active --> verify_crash : crash
+    }
+    verify_crash --> VERIFY : restart, resume
+
+    VERIFY --> status_review : PASS
+    VERIFY --> status_blocked : FAIL
+
+    status_blocked --> status_ready : Human re-queues
+    status_review --> [*] : Human inspects, closes
 ```
 
 ### Build Order Within BUILD Stage
@@ -898,6 +833,120 @@ When implementing Phase 3, the key changes are:
 - [ ] The `--auto-close` flag mentioned in Section 5 is not yet implemented
 - [ ] TEST_MAP.yaml auto-generation from project structure would be useful
 - [ ] `install.sh` still references `core/*.sh` for backwards compat — those are v2 artifacts
+
+---
+
+---
+
+## 15. Phase Validation Gates
+
+> Each phase must pass ALL checks below before it is considered complete.
+> The final step is a **human + agent joint review** that walks the entire
+> execution path end-to-end.
+
+### 15.1 Phase 1 Validation
+
+| # | Check | Type | Expected |
+|---|-------|------|----------|
+| P1.1 | `ralph init my-project --no-input` exits 0 | Wired y/n | ✅ PASS |
+| P1.2 | Scaffold contains all files from Section 8 | Wired y/n | ✅ PASS |
+| P1.3 | Zero `bd`, `beads`, `dolt`, `.beads/` in any scaffolded file | Dead code | ✅ PASS |
+| P1.4 | `bin/ralph version` prints `ralph v3.0.0` | Wired y/n | ✅ PASS |
+| P1.5 | `bin/ralph help` lists all 6 commands | Wired y/n | ✅ PASS |
+| P1.6 | All `core/*.py` files compile (`py_compile`) | Wired y/n | ✅ PASS |
+| P1.7 | `ralph setup` checks gh auth, git remote, python, agent, labels, dirs | E2E | ✅ PASS |
+| P1.8 | `engine.py` can fetch ticket via `gh issue list` (mocked or real) | E2E | ⬜ TODO |
+| P1.9 | `engine.py` can transition labels via `gh issue edit` (mocked or real) | E2E | ⬜ TODO |
+| P1.10 | `validate.py --tier=targeted` runs pytest + lint on modified files | E2E | ⬜ TODO |
+| P1.11 | Daemon PID-file singleton prevents duplicate runs | Wired y/n | ⬜ TODO |
+| P1.12 | Checkpoint save → crash → recover flow works | E2E | ⬜ TODO |
+| P1.13 | Agent invocation (pi --print) succeeds with assembled prompt | E2E | ⬜ TODO |
+| P1.14 | No empty/stub prompt files in scaffold (PROMPT.md, PROGRESS.md, AGENTS.md, config.toml populated) | Stub check | ✅ PASS |
+| P1.15 | `scripts/install.sh` checks for `gh` (not `bd`) as prerequisite | Dead code | ✅ PASS |
+
+**Phase 1 Joint Review:** Human + agent verify: scaffold a fresh project, run `ralph setup`, confirm all checks pass, confirm `ralph daemon` starts and idles (no real tickets).
+
+### 15.2 Phase 2 Validation
+
+| # | Check | Type | Expected |
+|---|-------|------|----------|
+| P2.1 | `design.md`, `build.md`, `verify.md` prompt stubs have content (>0 bytes) | Stub check | ✅ PASS |
+| P2.2 | `test.md`, `implement.md`, `feature.md`, `bugfix.md`, `docs.md` are empty stubs (deferred to Phase 3 / human) | Stub check | ✅ PASS |
+| P2.3 | `engine.py` has `run_design_stage()`, `run_build_stage()`, `run_verify_stage()` | Wired y/n | ✅ PASS |
+| P2.4 | Checkpoint JSON includes `stage` field | Wired y/n | ✅ PASS |
+| P2.5 | Crash during DESIGN resumes at DESIGN on restart | E2E | ⬜ TODO |
+| P2.6 | Crash during BUILD resumes at BUILD on restart | E2E | ⬜ TODO |
+| P2.7 | Crash during VERIFY resumes at VERIFY on restart | E2E | ⬜ TODO |
+| P2.8 | Label flow: ready → design → build → verify → review (full run) | E2E | ⬜ TODO |
+| P2.9 | Label flow: design → blocked (stage failure) | E2E | ⬜ TODO |
+| P2.10 | Stage commits have format `[ralph] <stage>: #<issue>` | Wired y/n | ⬜ TODO |
+| P2.11 | `commit_stage()` handles "nothing to commit" gracefully | Wired y/n | ✅ PASS |
+| P2.12 | DESIGN prompt instructs "do NOT write code" | Wired y/n | ✅ PASS |
+| P2.13 | BUILD prompt references design spec from PROGRESS.md | Wired y/n | ✅ PASS |
+| P2.14 | VERIFY prompt includes git diff + 5-axis review | Wired y/n | ✅ PASS |
+| P2.15 | No dead code: old `assemble_prompt()` function removed, only `assemble_stage_prompt()` exists | Dead code | ✅ PASS |
+| P2.16 | No beads/dolt references in any stage prompt | Dead code | ✅ PASS |
+
+**Phase 2 Joint Review:** Human + agent verify: create a GitHub issue with `status:ready`, run `ralph daemon`, watch it progress through all 3 stages on the Kanban board. Interrupt with Ctrl+C during BUILD stage, restart, confirm resume at BUILD.
+
+### 15.3 Phase 3 Validation
+
+| # | Check | Type | Expected |
+|---|-------|------|----------|
+| P3.1 | `test.md` prompt stub filled with QA Engineer persona (>0 bytes) | Stub check | ⬜ TODO |
+| P3.2 | `implement.md` prompt stub filled with Developer persona (>0 bytes) | Stub check | ⬜ TODO |
+| P3.3 | `run_build_stage()` spawns TEST sub-agent in Mode A (fresh `pi --print`) | Wired y/n | ⬜ TODO |
+| P3.4 | `run_build_stage()` spawns IMPLEMENT sub-agent in Mode B (context inherit) | Wired y/n | ⬜ TODO |
+| P3.5 | `run_verify_stage()` spawns VERIFY sub-agent in Mode A (fresh `pi --print`) | Wired y/n | ⬜ TODO |
+| P3.6 | TEST sub-agent sees design spec ONLY, not implementation code | E2E | ⬜ TODO |
+| P3.7 | IMPLEMENT sub-agent sees design spec + test files + codebase | E2E | ⬜ TODO |
+| P3.8 | VERIFY sub-agent sees issue + spec + git diff only (fresh session) | E2E | ⬜ TODO |
+| P3.9 | TEST writes failing tests (before implementation exists) | E2E | ⬜ TODO |
+| P3.10 | IMPLEMENT writes minimal code to make TESTs pass | E2E | ⬜ TODO |
+| P3.11 | VERIFY does 5-axis review on the git diff | E2E | ⬜ TODO |
+| P3.12 | No dead code: `run_build_stage()` no longer invokes a single agent inline | Dead code | ⬜ TODO |
+| P3.13 | No dead code: `run_verify_stage()` no longer invokes a single agent inline | Dead code | ⬜ TODO |
+| P3.14 | `ralph setup` validates `pi-subagent` extension is installed | Wired y/n | ⬜ TODO |
+| P3.15 | Full end-to-end: issue created → DESIGN → TEST writes tests → IMPLEMENT writes code → VERIFY reviews → status:review | E2E | ⬜ TODO |
+
+**Phase 3 Joint Review:** Human + agent verify: full end-to-end run with a real GitHub issue. Confirm TEST sub-agent writes tests without seeing code. Confirm IMPLEMENT sub-agent makes tests pass. Confirm VERIFY sub-agent does independent review. Run `ralph status` and `ralph report` mid-run to verify observability.
+
+### 15.4 Validation Types Explained
+
+| Type | Meaning | How to Check |
+|------|---------|-------------|
+| **Wired y/n** | Binary pass/fail — a single command or grep confirms the fact | `grep`, `test -f`, `python3 -c "import py_compile"` |
+| **Stub check** | Verify files are either properly populated OR intentionally empty | `test -s <file>` (non-empty) or `test ! -s <file>` (empty stub) |
+| **Dead code** | Verify removed concepts/functions are truly gone | `grep -r "<term>" --include="*.py" --include="*.sh" --include="*.md"` returns nothing |
+| **E2E** | End-to-end execution path — requires a real or mocked environment | Run the actual command sequence, verify output/labels |
+
+### 15.5 Running Validation
+
+```bash
+# Automated wired checks (run from ralph repo root)
+cd ~/.ralph  # or wherever Ralph is installed
+
+# Phase 1 dead code check
+! grep -r "beads\|dolt\|\.beads" --include="*.py" --include="*.sh" --include="*.md" core/ bin/ scripts/
+
+# Phase 1 stub check
+python3 -c "
+from pathlib import Path
+import sys
+p = Path('core')
+for f in sorted(p.glob('*.py')):
+    py_compile.compile(str(f), doraise=True)
+    print(f'OK: {f}')
+"
+
+# Phase 2 prompt stub check (run in a scaffolded project)
+for f in docs/agent/prompts/design.md docs/agent/prompts/build.md docs/agent/prompts/verify.md; do
+    test -s "$f" && echo "PASS: $f populated" || echo "FAIL: $f empty"
+done
+
+# E2E tests require a GitHub repo with proper labels and a status:ready issue
+# See individual phase validation tables above for E2E test procedures
+```
 
 ---
 
