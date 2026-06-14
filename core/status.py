@@ -56,7 +56,7 @@ def main() -> int:
             data = json.loads(CHECKPOINT_FILE.read_text())
             print(f"  Issue:       #{data.get('issue', '?')}")
             print(f"  Started:     {data.get('started_at', '?')}")
-            pre_sha = data.get("pre_commit_sha", "")[:8]
+            pre_sha = data.get("pre_stage_sha", "")[:8]
             print(f"  Pre-commit:  {pre_sha}")
         except Exception:
             print("  (corrupt checkpoint file)")

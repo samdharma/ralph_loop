@@ -17,7 +17,7 @@ Every machine that runs Ralph needs these installed:
 | **gh** (GitHub CLI) | 2.0+ | `brew install gh` / `apt install gh` / `winget install gh` | Issue read/write, label management |
 | **python3** | 3.10+ | `brew install python` / `apt install python3` | Core orchestrator language. All Ralph engine code is Python. |
 | **pi** or **kimi** | latest | `npm install -g pi-coding-agent` or `npm install -g kimi-cli` | AI agent for code generation |
-| **pi-subagent** (pi extension) | latest | `pi extension install @mjakl/pi-subagent` | Sub-agent support for Mode A/B isolation (Phase 3) |
+| **pi-subagent** (pi extension) | latest | `pi extension install @mjakl/pi-subagent` | Optional alternative for Mode B context sharing. Ralph v3 uses native `pi --continue --session` for Mode B; this extension is not required. |
 
 **Implementation language:** All Ralph v3 engine code is **Python 3.10+**. No bash beyond the CLI entry point (`bin/ralph`) and the install script. The v2 mistake of 1000+ lines of bash is not repeated.
 
@@ -377,9 +377,11 @@ flowchart TD
     PAUSE --> SYNC
 ```
 
+> **Note:** In the current implementation `ralph daemon` runs in the **foreground**. Background operation requires running it with a process manager or shell backgrounding (`ralph daemon &`). The CLI help text will be updated once true daemonization is implemented.
+
 ### Signal Handling & Crash Recovery
 
-- **SIGINT/SIGTERM:** Clear active checkpoint, mark current issue as `status:blocked` with note "interrupted", exit cleanly.
+- **SIGINT/SIGTERM:** Graceful shutdown is implemented — the daemon stops the loop and exits cleanly. Marking the active issue as `status:blocked` with note "interrupted" is not yet implemented; the issue is left in its current stage and will resume from checkpoint on restart.
 - **Crash during stage:** On restart, check for any issue marked `status:design|status:build|status:verify`. Re-enter pipeline at the appropriate stage. Git worktree check determines partial progress.
 - **Power loss:** Same as crash. Checkpoint file tracks active issue + active stage + pre-stage commit SHA.
 
@@ -427,7 +429,7 @@ ralph setup must:
   6. Exit 0 if all checks pass
 ```
 
-| `ralph daemon` | Start background build loop | `ralph daemon` |
+| `ralph daemon` | Start build loop (currently foreground; background with `&` or process manager) | `ralph daemon` |
 | `ralph status` | Project health dashboard | `ralph status` |
 | `ralph validate` | Run validation gate | `ralph validate` |
 | `ralph report` | Generate daily/weekly report | `ralph report` |
@@ -522,7 +524,7 @@ The orchestrator is the pipeline engine. It is NOT a bash wrapper around an all-
 | **Ticket selection** | `gh issue list --label status:ready` → pick lowest issue number |
 | **Claiming** | `gh issue edit` — add `status:design`, remove `status:ready` |
 | **Stage dispatch** | Invoke parent agent or sub-agent with stage-specific persona prompt |
-| **State tracking** | Checkpoint file: `{ issue, stage, pre_commit_sha, started_at }` |
+| **State tracking** | Checkpoint file: `{ issue, stage, pre_stage_sha, started_at }` |
 | **Stage commits** | `git add -A && git commit -m "[ralph] <stage>: #<issue>"` after each stage |
 | **Label transitions** | `gh issue edit` at every stage boundary |
 | **Crash recovery** | On restart, find any issue with `status:design|status:build|status:verify`, resume at that stage |
@@ -566,7 +568,7 @@ flowchart TD
 |---|---|---|
 | **Context** | Fresh agent session. No conversation history. No codebase knowledge. | Full parent context. All prior conversation, codebase familiarity. |
 | **What it receives** | Only what the orchestrator explicitly injects: issue body, design spec, git diff, prompt file. | Everything the parent agent saw plus the orchestrator's stage instructions. |
-| **Implementation** | `pi --print "<assembled prompt>"` — a brand-new invocation with no prior session. | `pi --continue` or sub-agent API that passes parent context. For pi: extension `@mjakl/pi-subagent` with context=inherit. |
+| **Implementation** | `pi --print "<assembled prompt>"` — a brand-new invocation with no prior session. | DESIGN saves session via `pi --print --session <file>`; IMPLEMENT resumes it via `pi --continue --session <file> --print`. For `kimi`, context inheritance is not yet implemented; it falls back to `kimi --print` with the continuation prompt. |
 | **Use for** | TEST, VERIFY — independence is the point | IMPLEMENT — needs to see spec + codebase |
 | **Anti-pattern** | Using Mode A for IMPLEMENT (agent codes blind, can't reference conventions or existing code) | Using Mode B for TEST (agent sees implementation details, writes biased tests) |
 
@@ -742,12 +744,13 @@ The agent is instructed to: understand the issue, implement code, write tests, r
 ## 13. Acceptance Criteria (Full System)
 
 1. `ralph init` scaffolds a project with zero beads references.
-2. `ralph daemon` starts a background loop that:
+2. `ralph daemon` starts the build loop that:
    - Fetches the lowest-numbered `status:ready` issue via `gh`
    - Runs the 3-stage pipeline (DESIGN → BUILD → VERIFY)
    - Updates issue labels at each stage transition
    - On success: marks issue `status:review` for human review
    - On failure: marks issue `status:blocked` with notes
+   - (Currently runs in the foreground; true background daemonization is pending)
 3. The GitHub Kanban board reflects issue status in real time.
 4. Crash during any stage recovers cleanly on restart (resumes from incomplete stage).
 5. `ralph status` shows: daemon PID, active issue, active stage, recent metrics.
@@ -842,7 +845,11 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 - [ ] `ralph setup` needs testing against a real GitHub repo with proper labels
 - [ ] The `--auto-close` flag mentioned in Section 5 is not yet implemented
 - [ ] TEST_MAP.yaml auto-generation from project structure would be useful
-- [ ] `install.sh` still references `core/*.sh` for backwards compat — those are v2 artifacts
+- [ ] Remove v2 artifact `core/ralph_validate.sh` and update `install.sh` to stop referencing `core/*.sh`
+- [ ] `ralph daemon` currently runs in the foreground; implement true daemonization or update all CLI/docs text to say foreground
+- [ ] `SIGINT`/`SIGTERM` should mark the active issue `status:blocked` with note "interrupted" and clear the checkpoint
+- [ ] `kimi` Mode B context inheritance is not implemented; it falls back to `kimi --print`
+- [ ] Crash recovery should re-apply the correct `status:<stage>` label after rollback
 
 ---
 
@@ -916,7 +923,7 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
 | P3.11 | VERIFY does 5-axis review on the git diff | E2E | ⬜ TODO |
 | P3.12 | No dead code: `run_build_stage()` no longer invokes a single agent inline | Dead code | ✅ PASS |
 | P3.13 | No dead code: `run_verify_stage()` no longer invokes a single agent inline | Dead code | ✅ PASS |
-| P3.14 | `ralph setup` validates `pi-subagent` extension is installed | Wired y/n | ✅ PASS |
+| P3.14 | `ralph setup` checks for `pi-subagent` extension (engine uses native `pi --continue`, so extension is optional) | Wired y/n | ✅ PASS |
 | P3.15 | Full end-to-end: issue created → DESIGN → TEST writes tests → IMPLEMENT writes code → VERIFY reviews → status:review | E2E | ⬜ TODO |
 
 **Phase 3 Joint Review:** Human + agent verify: full end-to-end run with a real GitHub issue. Confirm TEST sub-agent writes tests without seeing code. Confirm IMPLEMENT sub-agent makes tests pass. Confirm VERIFY sub-agent does independent review. Run `ralph status` and `ralph report` mid-run to verify observability.
@@ -960,4 +967,4 @@ done
 
 ---
 
-*Last updated: 2026-06-14. Phase 1 + 2 + 3 complete.*
+*Last updated: 2026-06-14. Phase 1 + 2 + 3 structurally complete; E2E validation and known limitations documented in §14 Open Items.*
