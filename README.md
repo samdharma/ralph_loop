@@ -20,8 +20,10 @@ graph LR
 ## Quick Install
 
 ```bash
-# One-line install (macOS / Linux)
-curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
+# Install from a clone (macOS / Linux)
+gh repo clone samdharma/Ralph_loop ~/.ralph
+cd ~/.ralph && git checkout ralph-v3
+bash scripts/install.sh
 source ~/.zshrc
 ralph version   # → ralph v3.0.0
 ```
@@ -29,6 +31,11 @@ ralph version   # → ralph v3.0.0
 Requires: **git**, **gh** (GitHub CLI), **python 3.10+**, and **pi** or **kimi**.
 The installer checks all prerequisites and shows install instructions for any
 that are missing.
+
+> **Note:** The repository is currently private, so the `curl | bash` one-liner
+> from `raw.githubusercontent.com` returns 404. The clone-based install above
+> works because it uses your authenticated `gh` session. If you make the repo
+> public later, you can switch back to the curl one-liner.
 
 ## Quick Start
 

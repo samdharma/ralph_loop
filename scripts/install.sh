@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Ralph v3 — One-Line Installer
+# Ralph v3 — Installer
 #
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
-#
-# Or from a local clone:
+# Usage (clone-based, works for public or private repos):
+#   gh repo clone samdharma/Ralph_loop ~/.ralph
+#   cd ~/.ralph && git checkout ralph-v3
 #   bash scripts/install.sh
+#
+# If the repository is public, you can also run remotely with:
+#   curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
 #
 # Installs ralph CLI to /usr/local/bin (or ~/.local/bin) and sets RALPH_HOME.
 # Validates all prerequisites before installation.
@@ -117,13 +119,14 @@ else
 fi
 
 # Check GitHub connectivity (optional, for clone + push)
-if command -v git &>/dev/null; then
-    if git ls-remote https://github.com/samdharma/Ralph_loop.git HEAD &>/dev/null 2>&1; then
-        pass "GitHub connectivity: OK"
-    else
-        warn "GitHub connectivity: cannot reach github.com (check network)"
-        WARNINGS+=("GitHub connectivity — required for clone and push")
-    fi
+# Prefer `gh api` so private repos with authenticated gh report OK.
+if command -v gh &>/dev/null && gh api repos/samdharma/Ralph_loop --jq .name &>/dev/null; then
+    pass "GitHub connectivity: OK (authenticated via gh)"
+elif command -v git &>/dev/null && git ls-remote https://github.com/samdharma/Ralph_loop.git HEAD &>/dev/null 2>&1; then
+    pass "GitHub connectivity: OK"
+else
+    warn "GitHub connectivity: cannot reach github.com (check network / gh auth)"
+    WARNINGS+=("GitHub connectivity — required for clone and push")
 fi
 
 echo ""
@@ -166,13 +169,23 @@ fi
 # Ensure RALPH_HOME exists with the ralph source
 if [[ ! -f "${RALPH_HOME}/bin/ralph" ]]; then
     info "Cloning Ralph repository..."
-    git clone https://github.com/samdharma/Ralph_loop.git "${RALPH_HOME}" 2>/dev/null || {
-        echo -e "${RED}ERROR: Could not clone from GitHub.${NC}"
-        echo "  Check your network connection and GitHub access."
-        echo "  If you have a local copy, set RALPH_HOME:"
-        echo "    export RALPH_HOME=/path/to/ralph"
-        exit 1
-    }
+    if command -v gh &>/dev/null; then
+        gh repo clone samdharma/Ralph_loop "${RALPH_HOME}" &>/dev/null || {
+            echo -e "${RED}ERROR: Could not clone from GitHub.${NC}"
+            echo "  Check your network connection and GitHub access."
+            echo "  If you have a local copy, set RALPH_HOME:"
+            echo "    export RALPH_HOME=/path/to/ralph"
+            exit 1
+        }
+    else
+        git clone https://github.com/samdharma/Ralph_loop.git "${RALPH_HOME}" 2>/dev/null || {
+            echo -e "${RED}ERROR: Could not clone from GitHub.${NC}"
+            echo "  Check your network connection and GitHub access."
+            echo "  If you have a local copy, set RALPH_HOME:"
+            echo "    export RALPH_HOME=/path/to/ralph"
+            exit 1
+        }
+    fi
     # Checkout the ralph-v3 branch
     git -C "${RALPH_HOME}" checkout ralph-v3 2>/dev/null || true
     pass "Cloned Ralph v3 to ${RALPH_HOME}"
