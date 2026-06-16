@@ -30,8 +30,10 @@ RALPH_HOME="${RALPH_HOME:-$HOME/.ralph}"
 RALPH_VERSION="3.0.0"
 
 # Determine the source directory (where this script lives)
-if [[ -f "${BASH_SOURCE[0]}" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# When run via `curl ... | bash`, BASH_SOURCE may be unset.
+SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
+if [[ -n "${SCRIPT_SOURCE}" && -f "${SCRIPT_SOURCE}" ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_SOURCE}")" && pwd)"
     REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 else
     REPO_DIR=""
