@@ -35,9 +35,7 @@ gh issue list --repo samdharma/my-project --limit 1  # smoke test
 ### 0.3 Ralph Global Install (One-Time Per Machine)
 
 ```bash
-gh repo clone samdharma/Ralph_loop ~/.ralph
-cd ~/.ralph && git checkout ralph-v3
-bash ~/.ralph/scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
 source ~/.zshrc   # or ~/.bashrc
 ralph version     # verify: ralph v3.0.0
 ```

@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# Ralph v3 — Installer
+# Ralph v3 — One-Line Installer
 #
-# Usage (clone-based, works for public or private repos):
-#   gh repo clone samdharma/Ralph_loop ~/.ralph
-#   cd ~/.ralph && git checkout ralph-v3
-#   bash scripts/install.sh
-#
-# If the repository is public, you can also run remotely with:
+# Usage:
 #   curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
+#
+# Or from a local clone:
+#   bash scripts/install.sh
 #
 # Installs ralph CLI to /usr/local/bin (or ~/.local/bin) and sets RALPH_HOME.
 # Validates all prerequisites before installation.

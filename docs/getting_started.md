@@ -78,26 +78,24 @@ flowchart TB
 | **python3** | 3.10+ | `brew install python` / `apt install python3` | Core orchestrator |
 | **pi** or **kimi** | latest | `npm install -g pi-coding-agent` | AI coding agent |
 
-### Install from Clone
+### One-Line Install
 
 ```bash
-gh repo clone samdharma/Ralph_loop ~/.ralph
-cd ~/.ralph && git checkout ralph-v3
-bash scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
 source ~/.zshrc   # or ~/.bashrc
 ralph version     # verify: ralph v3.0.0
 ```
 
 The installer:
 1. Checks all prerequisites (git, gh, python, agent)
-2. Uses the cloned Ralph source (or clones it to `~/.ralph/` if you ran the script remotely)
+2. Clones Ralph to `~/.ralph/` (or uses an existing local clone)
 3. Symlinks `ralph` into `/usr/local/bin/` (or `~/.local/bin/`)
 4. Sets `RALPH_HOME` in your shell profile
 5. Shows install instructions for any missing tools
 
-> **Note:** Because `samdharma/Ralph_loop` is currently a private repository, the
-> `curl | bash` one-liner from `raw.githubusercontent.com` returns 404. The
-> clone-based install uses your authenticated `gh` session and works today.
+> **Clone-based alternative:** If you prefer not to pipe from the network, you can
+> `gh repo clone samdharma/Ralph_loop ~/.ralph`, checkout `ralph-v3`, and run
+> `bash scripts/install.sh`.
 
 ### Authenticate GitHub CLI
 
@@ -447,9 +445,7 @@ Generates a daily/weekly summary from metrics + issue history.
 
 ```bash
 # One-time install
-gh repo clone samdharma/Ralph_loop ~/.ralph
-cd ~/.ralph && git checkout ralph-v3
-bash scripts/install.sh
+curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
 source ~/.zshrc
 
 # Authenticate GitHub
