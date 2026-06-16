@@ -169,22 +169,18 @@ fi
 # Ensure RALPH_HOME exists with the ralph source
 if [[ ! -f "${RALPH_HOME}/bin/ralph" ]]; then
     info "Cloning Ralph repository..."
-    if command -v gh &>/dev/null; then
-        gh repo clone samdharma/Ralph_loop "${RALPH_HOME}" &>/dev/null || {
-            echo -e "${RED}ERROR: Could not clone from GitHub.${NC}"
-            echo "  Check your network connection and GitHub access."
-            echo "  If you have a local copy, set RALPH_HOME:"
-            echo "    export RALPH_HOME=/path/to/ralph"
-            exit 1
-        }
+    # Try anonymous git clone first (works for public repos without gh auth).
+    # Fall back to gh repo clone for private forks/repos where gh is authenticated.
+    if git clone https://github.com/samdharma/Ralph_loop.git "${RALPH_HOME}" &>/dev/null; then
+        : # success
+    elif command -v gh &>/dev/null && gh repo clone samdharma/Ralph_loop "${RALPH_HOME}" &>/dev/null; then
+        : # success via gh
     else
-        git clone https://github.com/samdharma/Ralph_loop.git "${RALPH_HOME}" 2>/dev/null || {
-            echo -e "${RED}ERROR: Could not clone from GitHub.${NC}"
-            echo "  Check your network connection and GitHub access."
-            echo "  If you have a local copy, set RALPH_HOME:"
-            echo "    export RALPH_HOME=/path/to/ralph"
-            exit 1
-        }
+        echo -e "${RED}ERROR: Could not clone from GitHub.${NC}"
+        echo "  Check your network connection and GitHub access."
+        echo "  If you have a local copy, set RALPH_HOME:"
+        echo "    export RALPH_HOME=/path/to/ralph"
+        exit 1
     fi
     # Checkout the ralph-v3 branch
     git -C "${RALPH_HOME}" checkout ralph-v3 2>/dev/null || true
