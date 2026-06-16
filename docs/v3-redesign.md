@@ -79,7 +79,19 @@ ga label create "priority:3" --color F9D0C4 --repo owner/repo
 
 ### Kanban Board (GitHub Projects)
 
-Create a GitHub Project with the **Kanban** template. Columns map to status labels:
+Create a GitHub Project with the **Kanban** template. Board columns are driven by
+the Project's **Status** field, which is independent of issue labels. To keep the
+board in sync, enable it during `ralph init` (or set `ticket.project` in
+`.ralph/config.toml`):
+
+```toml
+[ticket]
+project = 1
+```
+
+`ralph init` prompts for the project number and writes this value. In
+non-interactive mode use `--github-project N`. Default column mapping (customize
+via `[project].status_map`):
 
 | Column | Maps To Label |
 |--------|---------------|
@@ -90,9 +102,12 @@ Create a GitHub Project with the **Kanban** template. Columns map to status labe
 | **In Verify** | `status:verify` |
 | **Review** | `status:review` |
 | **Blocked** | `status:blocked` |
-| **Done** | Closed |
+| **Done** | closed (`--auto-close`) |
 
-Ralph moves issues between columns automatically by updating labels. The human watches the board — no CLI tailing.
+Ralph mirrors every label transition to the Project Status field via the GitHub
+GraphQL API. The human watches the board — no CLI tailing. Board sync is
+best-effort and fail-soft: a missing `project` scope on the GitHub token will
+warn but never block the pipeline.
 
 ### Issue Template (Optional)
 
@@ -147,7 +162,7 @@ Ralph v2 was a "decoupling" effort that produced more coupling:
 
 1. **Remove beads entirely.** Tickets live in GitHub Issues. Code lives in git. No local DB.
 2. **Clean core first, then enhance.** Define minimal, well-bounded interfaces before adding sub-agents.
-3. **Observable by default.** Ticket status is a GitHub label visible on the Kanban board. Every state transition is a label change.
+3. **Observable by default.** Ticket status is a GitHub label; when a project is configured, Ralph mirrors it to the Kanban board's Status field. Every state transition updates both.
 4. **GitHub is source of truth.** One remote, many local repos. Push/pull is the sync mechanism.
 5. **Simplify the pipeline.** 3 stages with sub-agents, not 4 stages with flag-hacks.
 
@@ -246,7 +261,7 @@ gh issue edit $NUMBER --add-label "status:verify" --remove-label "status:build"
 gh issue edit $NUMBER --add-label "status:review" --remove-label "status:verify"
 ```
 
-Every state transition is observable on the GitHub Projects Kanban board in real time.
+Every state transition is observable on the GitHub Projects Kanban board in real time when `ticket.project` is configured.
 
 ### Ticket Selection Order
 
@@ -523,7 +538,7 @@ The orchestrator is the pipeline engine. It is NOT a bash wrapper around an all-
 | **Claiming** | `gh issue edit` — add `status:design`, remove `status:ready` |
 | **Stage dispatch** | Invoke parent agent or sub-agent with stage-specific persona prompt |
 | **State tracking** | Checkpoint file: `{ issue, stage, pre_stage_sha, started_at }` |
-| **Stage commits** | `git add -A && git commit -m "[ralph] <stage>: #<issue>"` after each stage |
+| **Stage commits** | `git add -A && git commit -m "[ralph] <stage>: #<issue>" && git push -u origin <branch>` after each stage |
 | **Label transitions** | `gh issue edit` at every stage boundary |
 | **Crash recovery** | On restart, find any issue with `status:design|status:build|status:verify`, resume at that stage |
 | **Handoff** | After VERIFY passes → mark `status:review`. After VERIFY fails → mark `status:blocked`. |

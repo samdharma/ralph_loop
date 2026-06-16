@@ -210,6 +210,9 @@ ls ralph-init-test/config/ralph_preflight.sh && echo "preflight.sh ✓"
 ls ralph-init-test/AGENTS.md && echo "AGENTS.md ✓"
 [ -s ralph-init-test/docs/agent/prompts/design.md ] && echo "design.md non-empty ✓"
 
+echo "=== Config ==="
+grep -q "^# project = 1" ralph-init-test/.ralph/config.toml && echo "project sync disabled by default ✓"
+
 echo "=== Git repo ==="
 [ -d ralph-init-test/.git ] && echo ".git exists ✓"
 cd ralph-init-test && git log --oneline -1
@@ -219,6 +222,7 @@ cd ralph-init-test && git log --oneline -1
 |----------|---------------|
 | 6+ files created | All `ls` checks show ✓ |
 | design.md is non-empty (not a stub) | `[ -s ... ]` passes |
+| `ticket.project` is commented out in --yes mode | grep shows `# project = 1` |
 | Git repo initialized | `.git/` exists |
 | One commit: "ralph init" | `git log` shows it |
 
@@ -272,6 +276,38 @@ gh label list --repo "$TEMP_REPO" | grep "status:"
 | 17+ labels on the repo | `gh label list \| wc -l` ≥ 17 |
 | All 6 status labels present | grep shows all 6 |
 | Output mentions "labels created" | Log output from ralph init |
+
+---
+
+### T2.4 — GitHub Project board sync config
+
+```bash
+cd /tmp
+rm -rf ralph-project-sync-test
+
+# Non-interactive: enable sync with a project number
+ralph init ralph-project-sync-test --yes --github-project 5
+
+# Verify
+if grep -q "^project = 5" ralph-project-sync-test/.ralph/config.toml; then
+    echo "ticket.project = 5 written ✓"
+else
+    echo "FAIL: ticket.project not written"
+fi
+
+# Default (--yes without flag) should leave it commented
+cd /tmp/ralph-init-test
+if grep -q "^# project = 1" .ralph/config.toml; then
+    echo "ticket.project commented by default ✓"
+else
+    echo "FAIL: ticket.project should be commented"
+fi
+```
+
+| Expected | How to verify |
+|----------|---------------|
+| `--github-project 5` writes `project = 5` | grep finds uncommented line |
+| Default `--yes` leaves `project` commented | grep finds `# project = 1` |
 
 ---
 
@@ -518,14 +554,19 @@ python3 -m pytest tests/ -v 2>&1 | tail -20
 echo "=== Git log ==="
 git log --oneline -5
 
-# 5. Checkpoint cleared
+# 5. Remote has the stage commits
+echo "=== Remote log ==="
+git fetch origin
+git log --oneline origin/$(git rev-parse --abbrev-ref HEAD) -5
+
+# 6. Checkpoint cleared
 [ ! -f .ralph/checkpoint.json ] && echo "Checkpoint cleared ✓" || echo "Checkpoint STILL EXISTS ✗"
 
-# 6. Pipeline metrics logged
+# 7. Pipeline metrics logged
 echo "=== Recent metrics ==="
 tail -5 logs/ralph_metrics.jsonl 2>/dev/null
 
-# 7. Stop daemon
+# 8. Stop daemon
 kill $DAEMON 2>/dev/null
 wait $DAEMON 2>/dev/null
 rm -f /tmp/ralph_daemon_*.pid
@@ -538,6 +579,7 @@ rm -f /tmp/ralph_daemon_*.pid
 | `get_timestamp()` returns ISO 8601 string | Inspect file or run `python3 -c "from src.my_project.timestamp import get_timestamp; print(get_timestamp())"` |
 | Tests pass | pytest exit code 0 |
 | Git log has `[ralph] design:` and `[ralph] build:` commits | Two stage commits visible |
+| Remote branch has `[ralph] design:` and `[ralph] build:` commits | `git log origin/<branch>` shows them |
 | Checkpoint is cleared | File does not exist |
 | Metrics show pipeline events | At least 3 events in metrics |
 
@@ -892,7 +934,7 @@ gh repo delete "your-username/ralph-no-label-test" --yes 2>/dev/null
 # Keep "$TEST_REPO" for future validation runs
 
 # Clean local temp dirs
-rm -rf /tmp/ralph-init-test /tmp/ralph-existing-test /tmp/ralph-label-test /tmp/ralph-no-label-test /tmp/ralph-setup-test
+rm -rf /tmp/ralph-init-test /tmp/ralph-existing-test /tmp/ralph-label-test /tmp/ralph-no-label-test /tmp/ralph-project-sync-test /tmp/ralph-setup-test
 ```
 
 ---
@@ -918,6 +960,7 @@ Suite 2: Project Init
   [ ] T2.1  New project          ________
   [ ] T2.2  Existing directory   ________
   [ ] T2.3  Label creation       ________
+  [ ] T2.4  Project sync config  ________
   [ ] T2.5  Prompt stubs         ________
 
 Suite 3: Setup
@@ -946,7 +989,7 @@ Suite 8: CLI & Edge Cases
   [ ] T8.5  ralph validate       ________
 
 ─────────────────────────────────────
-TOTAL:  ___ / 21  passed
+TOTAL:  ___ / 22  passed
 ─────────────────────────────────────
 ```
 

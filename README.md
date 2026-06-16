@@ -2,10 +2,14 @@
 
 > AI-agent-powered continuous build loop. GitHub Issues as tickets, GitHub Labels as
 > status, GitHub Kanban as dashboard. No databases. No beads. Just git and gh.
+>
+> Run `ralph init` and enable GitHub Project board sync, or set `ticket.project`
+> in `.ralph/config.toml`, and Ralph will mirror every status label to the
+> Project board column automatically.
 
 Ralph reads your ticket queue from GitHub Issues, feeds tickets to an AI coding agent
 (pi or kimi) through a 3-stage pipeline (DESIGN → BUILD → VERIFY), validates the
-output, and commits — all in a continuous loop. You write the tickets; Ralph builds
+output, and commits and pushes — all in a continuous loop. You write the tickets; Ralph builds
 the code.
 
 ```mermaid
@@ -13,7 +17,7 @@ graph LR
     A[GitHub Issues<br/>status:ready] --> B[Pre-flight]
     B --> C[Agent<br/>pi/kimi]
     C --> D[Validate<br/>pytest + lint]
-    D --> E[Commit<br/>git]
+    D --> E[Commit + Push<br/>git]
     E -->|next ticket| A
 ```
 
@@ -37,8 +41,9 @@ that are missing.
 ## Quick Start
 
 ```bash
-# 1. Create a new project (with GitHub labels)
+# 1. Create a new project (with GitHub labels and optional board sync)
 ralph init my-project --create-labels
+#    When asked, provide your GitHub project number to enable Kanban sync.
 
 # 2. Or init an existing cloned repo
 git clone https://github.com/you/your-repo.git

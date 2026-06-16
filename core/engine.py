@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+from project_sync import sync_status, sync_closed
+
 
 # ─────────────────────────────────────────────────────────
 # Configuration
@@ -107,6 +109,26 @@ def fetch_ready_ticket() -> Optional[dict]:
     return None
 
 
+def sync_ready_board():
+    """
+    Ensure all open status:ready issues are in the Ready board column.
+    This fixes the common case where an issue was added to the project in the
+    default Backlog column even though it already has the status:ready label.
+    """
+    try:
+        result = gh("issue", "list",
+                    "--label", "status:ready",
+                    "--state", "open",
+                    "--json", "number",
+                    "--limit", "50")
+        issues = json.loads(result.stdout)
+        for issue in issues:
+            sync_status(issue["number"], "status:ready")
+    except Exception as e:
+        # Fail-soft: board sync must never break the pipeline.
+        print(f"[ralph] WARNING: could not sync ready tickets: {e}")
+
+
 def _dependencies_met(issue: dict) -> bool:
     """Check if all 'Depends on: #N' references in the body are closed."""
     body = issue.get("body") or ""
@@ -156,6 +178,8 @@ def transition_label(issue_num: int, add: str, remove: Optional[str] = None,
             if remove:
                 action += f" / -{remove}"
             print(f"[ralph] #{issue_num} labels: {action}")
+            # Mirror the new label to the GitHub Project board column.
+            sync_status(issue_num, add)
             return
         except subprocess.CalledProcessError as e:
             last_error = e
@@ -210,7 +234,14 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
         transition_label(issue_num, "status:blocked", "status:design")
         log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="design")
         return False
-    commit_stage(issue_num, "design")
+    try:
+        commit_stage(issue_num, "design")
+    except subprocess.CalledProcessError:
+        clear_checkpoint()
+        _cleanup_session(session_file)
+        transition_label(issue_num, "status:blocked", "status:design")
+        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="design", reason="push_failed")
+        return False
     transition_label(issue_num, "status:build", "status:design")
 
     # ── STAGE 2: BUILD ──
@@ -221,7 +252,14 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
         transition_label(issue_num, "status:blocked", "status:build")
         log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="build")
         return False
-    commit_stage(issue_num, "build")
+    try:
+        commit_stage(issue_num, "build")
+    except subprocess.CalledProcessError:
+        clear_checkpoint()
+        _cleanup_session(session_file)
+        transition_label(issue_num, "status:blocked", "status:build")
+        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="build", reason="push_failed")
+        return False
     transition_label(issue_num, "status:verify", "status:build")
 
     # ── STAGE 3: VERIFY ──
@@ -233,6 +271,7 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     if verify_pass:
         print(f"\n[ralph] #{issue_num} PASSED — handing off for review")
         if auto_close:
+            sync_closed(issue_num)
             gh("issue", "close", str(issue_num))
             print(f"[ralph] #{issue_num} auto-closed")
             log_metrics("pipeline_complete", issue=str(issue_num), result="closed")
@@ -521,15 +560,41 @@ def assemble_stage_prompt(issue: dict, stage_prompt_file: str) -> str:
 
 
 def commit_stage(issue_num: int, stage: str):
-    """Commit all changes after a pipeline stage completes."""
+    """Commit all changes after a pipeline stage completes and push to origin."""
     msg = f"[ralph] {stage}: #{issue_num}"
+    committed = False
     try:
         git("add", "-A")
         git("commit", "-m", msg)
         print(f"[ralph] Committed: {msg}")
+        committed = True
     except subprocess.CalledProcessError:
         # No changes to commit (e.g., DESIGN stage may not change files)
         print(f"[ralph] Nothing to commit for {stage}")
+
+    if committed:
+        branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+        _push_with_retry(branch)
+
+
+def _push_with_retry(branch: str, retries: int = 3, backoff: float = 2.0):
+    """Push current branch to origin with retries. Raises on final failure."""
+    for attempt in range(1, retries + 1):
+        try:
+            git("push", "-u", "origin", branch)
+            print(f"[ralph] Pushed to origin/{branch}")
+            return
+        except subprocess.CalledProcessError as e:
+            if attempt < retries:
+                wait = backoff ** attempt
+                print(f"[ralph] Push failed (attempt {attempt}/{retries}), "
+                      f"retrying in {wait:.0f}s...")
+                _check_interrupt()
+                time.sleep(wait)
+            else:
+                print(f"[ralph] ERROR: Push to origin/{branch} failed after "
+                      f"{retries} attempts: {e}")
+                raise
 
 
 def _parse_reference_docs(body: str) -> list[str]:
@@ -788,7 +853,14 @@ def run_loop(auto_close: bool = False):
                         clear_checkpoint()
                         recovered = None
                         continue
-                    commit_stage(issue_num, "build")
+                    try:
+                        commit_stage(issue_num, "build")
+                    except subprocess.CalledProcessError:
+                        clear_checkpoint()
+                        transition_label(issue_num, "status:blocked", "status:build")
+                        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="build", reason="push_failed")
+                        recovered = None
+                        continue
                     transition_label(issue_num, "status:verify", "status:build")
                     # Fall through to VERIFY
                     resume_stage = "verify"
@@ -799,6 +871,7 @@ def run_loop(auto_close: bool = False):
                     clear_checkpoint()
                     if verify_pass:
                         if auto_close:
+                            sync_closed(issue_num)
                             gh("issue", "close", str(issue_num))
                             print(f"[ralph] #{issue_num} auto-closed")
                             log_metrics("pipeline_complete", issue=str(issue_num), result="closed")
@@ -819,6 +892,9 @@ def run_loop(auto_close: bool = False):
 
                 recovered = None
                 continue
+
+            # ── Ensure ready tickets are visible on the board ──
+            sync_ready_board()
 
             # ── Fetch next ready ticket ──
             issue = fetch_ready_ticket()

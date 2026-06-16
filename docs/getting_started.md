@@ -2,7 +2,7 @@
 
 > **Ralph** is an AI-agent-powered automated build system. You write GitHub Issues.
 > Ralph picks them up, feeds them to an AI coding agent through a 3-stage pipeline, validates
-> the output, and commits the results. All status is visible on a GitHub Kanban board in
+> the output, and commits and pushes the results. All status is visible on a GitHub Kanban board in
 > real time.
 
 ---
@@ -145,18 +145,51 @@ gh label create "type:exit"    --color FBCA04 --repo $REPO
 
 ### Kanban Board
 
-Create a GitHub Project with the **Kanban** template. Map columns to labels:
+Create a GitHub Project with the **Kanban** template. The board columns are
+independent of issue labels, so Ralph must be told which project to sync to.
 
-| Column | Label |
-|--------|-------|
-| Backlog | No `status:*` label |
-| **Ready** | `status:ready` |
-| **In Design** | `status:design` |
-| **In Build** | `status:build` |
-| **In Verify** | `status:verify` |
-| **Review** | `status:review` |
-| **Blocked** | `status:blocked` |
-| Done | Closed |
+The easiest way is to enable sync during `ralph init`:
+
+```
+Enable GitHub Project board sync? [y/N]: y
+GitHub project number: 1
+```
+
+This writes `ticket.project` into `.ralph/config.toml`. You can also edit the
+file manually:
+
+```toml
+[ticket]
+repo = "owner/repo"
+project = 1
+```
+
+Make sure the Project's **Status** field options match the default mapping
+(customize `[project].status_map` if they differ):
+
+| Ralph label | Default board column |
+|-------------|----------------------|
+| `status:ready` | Ready |
+| `status:design` | In Progress |
+| `status:build` | In Progress |
+| `status:verify` | In Progress |
+| `status:review` | Review |
+| `status:blocked` | Blocked |
+| closed (`--auto-close`) | Done |
+
+```toml
+[project]
+status_field = "Status"
+
+[project.status_map]
+"status:ready"   = "Ready"
+"status:design"  = "In Progress"
+"status:build"   = "In Progress"
+"status:verify"  = "In Progress"
+"status:review"  = "Review"
+"status:blocked" = "Blocked"
+"closed"         = "Done"
+```
 
 ```mermaid
 flowchart LR
@@ -170,8 +203,13 @@ flowchart LR
     Blocked -->|"Human re-queues"| Ready
 ```
 
-Ralph moves issues between columns automatically by updating labels. You watch
-the board — no CLI tailing.
+Ralph moves issues between columns automatically by mirroring every label
+transition to the Project's Status field. You watch the board — no CLI tailing.
+
+> **Token scope:** Updating the Project Status field requires a GitHub token
+> with `project` scope. If `gh auth login` was only granted `repo`, board sync
+> will warn but will not block the build pipeline. Re-authenticate with
+> `gh auth login --scopes repo,project` if you want the board to update.
 
 ---
 
@@ -188,10 +226,14 @@ The wizard asks:
 GitHub repo (owner/name) [samdharma/my-project]:
 AI agent [pi]:
 Default test tier [targeted]:
+Enable GitHub Project board sync? [y/N]:
+GitHub project number: 1
 ```
 
 All have sensible defaults auto-detected from your environment. The `--create-labels`
-flag creates all 17 Ralph labels on your GitHub repo.
+flag creates all 17 Ralph labels on your GitHub repo. Board sync is optional —
+say `N` (or leave `ticket.project` commented) to disable it; labels will still
+update, but Kanban cards will not move automatically.
 
 After init, Ralph automatically runs `git init && git add -A && git commit -m "ralph init"`.
 
@@ -214,6 +256,12 @@ Use `--yes` to skip all prompts and use auto-detected defaults:
 ralph init . --yes --create-labels
 ```
 
+To enable board sync non-interactively, add `--github-project`:
+
+```bash
+ralph init . --yes --create-labels --github-project 5
+```
+
 ### Verify Setup
 
 ```bash
@@ -226,6 +274,7 @@ Checks:
 - ✅ Python 3.10+
 - ✅ AI agent available (pi or kimi)
 - ✅ Required labels present on GitHub
+- ✅ GitHub Project board sync configured (if enabled)
 - ✅ Local directories (logs/, .ralph/) created
 
 ---
@@ -405,8 +454,10 @@ The gate also runs linters (`black`, `isort`, `flake8`, `mypy`) on modified Pyth
 
 ### Kanban Board
 
-The primary dashboard. Every pipeline transition updates an issue label, moving the
-card between columns in real time.
+The primary dashboard. When `ticket.project` is configured, every pipeline
+transition updates both the issue label and the Project Status field, moving the
+card between columns in real time. If the project is not configured, labels still
+update but the board column will not change.
 
 ### CLI Status
 
@@ -526,6 +577,8 @@ stateDiagram-v2
 | `RALPH_PROJECT_DIR` | `pwd` | Project root |
 | `RALPH_AGENT` | auto-detect | Force agent: `pi` or `kimi` |
 | `RALPH_PYTHON_CMD` | `python3` | Python executable |
+| `RALPH_GITHUB_PROJECT` | (from config) | Override `ticket.project` board sync |
+| `RALPH_PROJECT_SYNC` | (from config) | Set to `0` to disable board sync; `1` to force enable |
 | `RALPH_ALLOW_E2E` | (unset) | Set to `1` to allow e2e tests in loop |
 
 ---
