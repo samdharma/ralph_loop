@@ -9,6 +9,7 @@ Usage (via CLI):
     ralph daemon
 """
 
+import hashlib
 import json
 import os
 import signal
@@ -19,8 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from project_sync import sync_status, sync_closed, _get_config
-
+from project_sync import _get_config, sync_closed, sync_status
 
 # ─────────────────────────────────────────────────────────
 # Configuration
@@ -41,11 +41,22 @@ PREFLIGHT_SCRIPT = PROJECT_ROOT / "config" / "ralph_preflight.sh"
 # Shell helpers
 # ─────────────────────────────────────────────────────────
 
-def run(cmd: list[str], check: bool = True, capture: bool = True,
-        timeout: Optional[int] = None) -> subprocess.CompletedProcess:
+
+def run(
+    cmd: list[str],
+    check: bool = True,
+    capture: bool = True,
+    timeout: Optional[int] = None,
+) -> subprocess.CompletedProcess:
     """Run a shell command, return CompletedProcess."""
-    result = subprocess.run(cmd, capture_output=capture, text=True,
-                            check=check, timeout=timeout, cwd=PROJECT_ROOT)
+    result = subprocess.run(
+        cmd,
+        capture_output=capture,
+        text=True,
+        check=check,
+        timeout=timeout,
+        cwd=PROJECT_ROOT,
+    )
     _check_interrupt()
     return result
 
@@ -74,6 +85,7 @@ def git(*args: str) -> subprocess.CompletedProcess:
 # Metrics logging
 # ─────────────────────────────────────────────────────────
 
+
 def log_metrics(event: str, **kwargs):
     """Append a structured metrics event to ralph_metrics.jsonl."""
     entry = {
@@ -90,6 +102,7 @@ def log_metrics(event: str, **kwargs):
 # Item 2: Ticket Fetcher
 # ─────────────────────────────────────────────────────────
 
+
 def fetch_ready_ticket() -> Optional[dict]:
     """
     Fetch the open status:ready issue with the smallest number.
@@ -97,11 +110,18 @@ def fetch_ready_ticket() -> Optional[dict]:
     Returns issue dict {number, title, body} or None.
     """
     # Get ready issues sorted by number
-    result = gh("issue", "list",
-                "--label", "status:ready",
-                "--state", "open",
-                "--json", "number,title,body",
-                "--limit", "20")
+    result = gh(
+        "issue",
+        "list",
+        "--label",
+        "status:ready",
+        "--state",
+        "open",
+        "--json",
+        "number,title,body",
+        "--limit",
+        "20",
+    )
 
     issues = json.loads(result.stdout)
     if not issues:
@@ -126,11 +146,18 @@ def sync_ready_board():
     default Backlog column even though it already has the status:ready label.
     """
     try:
-        result = gh("issue", "list",
-                    "--label", "status:ready",
-                    "--state", "open",
-                    "--json", "number",
-                    "--limit", "50")
+        result = gh(
+            "issue",
+            "list",
+            "--label",
+            "status:ready",
+            "--state",
+            "open",
+            "--json",
+            "number",
+            "--limit",
+            "50",
+        )
         issues = json.loads(result.stdout)
         for issue in issues:
             sync_status(issue["number"], "status:ready")
@@ -145,12 +172,14 @@ def _dependencies_met(issue: dict) -> bool:
     deps = _parse_depends_on(body)
     for dep_num in deps:
         try:
-            result = gh("issue", "view", str(dep_num),
-                        "--json", "state",
-                        "--jq", ".state")
+            result = gh(
+                "issue", "view", str(dep_num), "--json", "state", "--jq", ".state"
+            )
             state = result.stdout.strip()
             if state != "CLOSED":
-                print(f"[ralph] #{issue['number']} depends on #{dep_num} (still {state})")
+                print(
+                    f"[ralph] #{issue['number']} depends on #{dep_num} (still {state})"
+                )
                 return False
         except subprocess.CalledProcessError:
             print(f"[ralph] #{issue['number']} depends on #{dep_num} (not found)")
@@ -161,6 +190,7 @@ def _dependencies_met(issue: dict) -> bool:
 def _parse_depends_on(body: str) -> list[int]:
     """Extract issue numbers from 'Depends on: #42' patterns in the body."""
     import re
+
     deps = []
     for line in body.splitlines():
         match = re.search(r"Depends\s+on:\s*#(\d+)", line, re.IGNORECASE)
@@ -173,8 +203,14 @@ def _parse_depends_on(body: str) -> list[int]:
 # Item 4: Label Management
 # ─────────────────────────────────────────────────────────
 
-def transition_label(issue_num: int, add: str, remove: Optional[str] = None,
-                     retries: int = 3, backoff: float = 2.0):
+
+def transition_label(
+    issue_num: int,
+    add: str,
+    remove: Optional[str] = None,
+    retries: int = 3,
+    backoff: float = 2.0,
+):
     """Update issue labels via `gh issue edit`. Retries on transient failures."""
     cmd = ["issue", "edit", str(issue_num), "--add-label", add]
     if remove:
@@ -194,9 +230,11 @@ def transition_label(issue_num: int, add: str, remove: Optional[str] = None,
         except subprocess.CalledProcessError as e:
             last_error = e
             if attempt < retries:
-                wait = backoff ** attempt
-                print(f"[ralph] Label transition failed (attempt {attempt}/{retries}), "
-                      f"retrying in {wait:.0f}s...")
+                wait = backoff**attempt
+                print(
+                    f"[ralph] Label transition failed (attempt {attempt}/{retries}), "
+                    f"retrying in {wait:.0f}s..."
+                )
                 _check_interrupt()
                 time.sleep(wait)
     # All retries exhausted
@@ -206,6 +244,7 @@ def transition_label(issue_num: int, add: str, remove: Optional[str] = None,
 # ─────────────────────────────────────────────────────────
 # Item 3: Single-Stage Pipeline
 # ─────────────────────────────────────────────────────────
+
 
 def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     """
@@ -227,7 +266,9 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     print(f"{'='*50}\n")
 
     log_metrics("pipeline_start", issue=str(issue_num))
-    gh_comment(issue_num, f"⏳ Ralph pipeline started for #{issue_num}: {issue['title']}")
+    gh_comment(
+        issue_num, f"⏳ Ralph pipeline started for #{issue_num}: {issue['title']}"
+    )
 
     # ── Pre-flight check ──
     if PREFLIGHT_SCRIPT.exists():
@@ -242,19 +283,27 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     save_checkpoint(issue_num, "design")
     if not run_design_stage(issue):
         clear_checkpoint()
-        _cleanup_session(session_file)
+        _cleanup_issue_artifacts(issue_num)
         gh_comment(issue_num, "❌ DESIGN stage failed. Blocking issue.")
         transition_label(issue_num, "status:blocked", "status:design")
-        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="design")
+        log_metrics(
+            "pipeline_complete", issue=str(issue_num), result="blocked", stage="design"
+        )
         return False
     try:
         commit_stage(issue_num, "design")
     except subprocess.CalledProcessError:
         clear_checkpoint()
-        _cleanup_session(session_file)
+        _cleanup_issue_artifacts(issue_num)
         gh_comment(issue_num, "💥 DESIGN commit/push failed. Blocking issue.")
         transition_label(issue_num, "status:blocked", "status:design")
-        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="design", reason="push_failed")
+        log_metrics(
+            "pipeline_complete",
+            issue=str(issue_num),
+            result="blocked",
+            stage="design",
+            reason="push_failed",
+        )
         return False
     gh_comment(issue_num, "✅ DESIGN stage completed and committed.")
     transition_label(issue_num, "status:build", "status:design")
@@ -263,19 +312,27 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     save_checkpoint(issue_num, "build")
     if not run_build_stage(issue):
         clear_checkpoint()
-        _cleanup_session(session_file)
+        _cleanup_issue_artifacts(issue_num)
         gh_comment(issue_num, "❌ BUILD stage failed. Blocking issue.")
         transition_label(issue_num, "status:blocked", "status:build")
-        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="build")
+        log_metrics(
+            "pipeline_complete", issue=str(issue_num), result="blocked", stage="build"
+        )
         return False
     try:
         commit_stage(issue_num, "build")
     except subprocess.CalledProcessError:
         clear_checkpoint()
-        _cleanup_session(session_file)
+        _cleanup_issue_artifacts(issue_num)
         gh_comment(issue_num, "💥 BUILD commit/push failed. Blocking issue.")
         transition_label(issue_num, "status:blocked", "status:build")
-        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="build", reason="push_failed")
+        log_metrics(
+            "pipeline_complete",
+            issue=str(issue_num),
+            result="blocked",
+            stage="build",
+            reason="push_failed",
+        )
         return False
     gh_comment(issue_num, "✅ BUILD stage completed and committed.")
     transition_label(issue_num, "status:verify", "status:build")
@@ -284,7 +341,7 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     save_checkpoint(issue_num, "verify")
     verify_pass = run_verify_stage(issue)
     clear_checkpoint()
-    _cleanup_session(session_file)
+    _cleanup_issue_artifacts(issue_num)
 
     if verify_pass:
         print(f"\n[ralph] #{issue_num} PASSED — handing off for review")
@@ -302,7 +359,9 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
         print(f"\n[ralph] #{issue_num} FAILED VERIFY — marking blocked")
         gh_comment(issue_num, "❌ VERIFY stage failed. Blocking issue.")
         transition_label(issue_num, "status:blocked", "status:verify")
-        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="verify")
+        log_metrics(
+            "pipeline_complete", issue=str(issue_num), result="blocked", stage="verify"
+        )
 
     return verify_pass
 
@@ -310,6 +369,7 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
 # ─────────────────────────────────────────────────────────
 # Stage runners
 # ─────────────────────────────────────────────────────────
+
 
 def run_design_stage(issue: dict) -> bool:
     """STAGE 1: Architect persona — reads issue + codebase, writes design spec.
@@ -355,15 +415,37 @@ def run_build_stage(issue: dict) -> bool:
     if not _run_implement_subagent(issue):
         return False
 
-    # ── Validation gate ──
+    # ── Validation gate (only tests written by the independent QA session) ──
     print(f"\n[ralph] Running validation gate...")
     core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
-    val_result = run(
-        [sys.executable, os.path.join(core_dir, "validate.py"),
-         "--tier", "targeted"],
-        check=False, capture=False
-    )
-    success = (val_result.returncode == 0)
+    qa_tests = _load_test_tracking(issue_num)
+    if qa_tests:
+        print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
+        val_result = run(
+            [
+                sys.executable,
+                os.path.join(core_dir, "validate.py"),
+                "--tier",
+                "targeted",
+                "--pytest-paths",
+            ]
+            + qa_tests,
+            check=False,
+            capture=False,
+        )
+    else:
+        print("[ralph] No QA-written tests detected; falling back to targeted tier")
+        val_result = run(
+            [
+                sys.executable,
+                os.path.join(core_dir, "validate.py"),
+                "--tier",
+                "targeted",
+            ],
+            check=False,
+            capture=False,
+        )
+    success = val_result.returncode == 0
     if success:
         gh_comment(issue_num, "✅ BUILD validation gate passed.")
     else:
@@ -382,11 +464,16 @@ def run_verify_stage(issue: dict) -> bool:
     issue_num = issue["number"]
     print(f"\n[ralph] STAGE 3/3: VERIFY for #{issue_num}")
     gh_comment(issue_num, "🔍 VERIFY stage started (independent review).")
-    log_metrics("stage_start", issue=str(issue_num), stage="verify",
-                subagent="verify", mode="A")
+    log_metrics(
+        "stage_start", issue=str(issue_num), stage="verify", subagent="verify", mode="A"
+    )
 
     # Get the git diff for the reviewer to inspect
-    pre_sha = git("rev-parse", "HEAD~1").stdout.strip() if _has_commits() else git("rev-parse", "HEAD").stdout.strip()
+    pre_sha = (
+        git("rev-parse", "HEAD~1").stdout.strip()
+        if _has_commits()
+        else git("rev-parse", "HEAD").stdout.strip()
+    )
     diff = git("diff", pre_sha, "HEAD").stdout if _has_commits() else ""
 
     # Mode A: assemble prompt with minimal context (no codebase reference)
@@ -403,19 +490,46 @@ def run_verify_stage(issue: dict) -> bool:
         gh_comment(issue_num, "✅ VERIFY review sub-agent completed.")
     else:
         gh_comment(issue_num, "❌ VERIFY review sub-agent failed.")
-    log_metrics("subagent_complete", issue=str(issue_num), subagent="verify",
-                mode="A", result="success" if success else "failure")
+    log_metrics(
+        "subagent_complete",
+        issue=str(issue_num),
+        subagent="verify",
+        mode="A",
+        result="success" if success else "failure",
+    )
 
-    # Run validation gate after review
+    # Run validation gate after review (only tests written by the independent QA session)
     if success:
         print(f"\n[ralph] Running validation gate...")
         core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
-        val_result = run(
-            [sys.executable, os.path.join(core_dir, "validate.py"),
-             "--tier", "targeted"],
-            check=False, capture=False
-        )
-        success = (val_result.returncode == 0)
+        qa_tests = _load_test_tracking(issue_num)
+        if qa_tests:
+            print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
+            val_result = run(
+                [
+                    sys.executable,
+                    os.path.join(core_dir, "validate.py"),
+                    "--tier",
+                    "targeted",
+                    "--pytest-paths",
+                ]
+                + qa_tests,
+                check=False,
+                capture=False,
+            )
+        else:
+            print("[ralph] No QA-written tests detected; falling back to targeted tier")
+            val_result = run(
+                [
+                    sys.executable,
+                    os.path.join(core_dir, "validate.py"),
+                    "--tier",
+                    "targeted",
+                ],
+                check=False,
+                capture=False,
+            )
+        success = val_result.returncode == 0
         if success:
             gh_comment(issue_num, "✅ VERIFY validation gate passed.")
         else:
@@ -429,26 +543,40 @@ def run_verify_stage(issue: dict) -> bool:
 # Sub-Agent Methods (Phase 3)
 # ─────────────────────────────────────────────────────────
 
+
 def _run_test_subagent(issue: dict) -> bool:
     """
     TEST sub-agent — Mode A (isolated, fresh session).
     Sees design spec ONLY. Writes tests that SHOULD FAIL.
     No implementation code visibility.
+    Snapshots tests/ before and after so VERIFY can run only these QA-written tests.
     """
     issue_num = issue["number"]
     print(f"\n  [ralph] BUILD / TEST sub-agent for #{issue_num} (Mode A — isolated)")
     gh_comment(issue_num, "🧪 TEST sub-agent started (isolated).")
     log_metrics("subagent_start", issue=str(issue_num), subagent="test", mode="A")
 
+    before_tests = _snapshot_tests_dir()
     prompt = _assemble_subagent_prompt(issue, "test.md", mode="A")
     success = invoke_agent(prompt, issue_num)
+    after_tests = _snapshot_tests_dir()
+    new_tests = _detect_new_tests(before_tests, after_tests)
+    _save_test_tracking(issue_num, new_tests)
+    if new_tests:
+        print(f"  [ralph] TEST stage created/modified tests: {new_tests}")
+        gh_comment(issue_num, f"🧪 TEST stage produced tests: {', '.join(new_tests)}")
 
     if success:
         gh_comment(issue_num, "✅ TEST sub-agent completed.")
     else:
         gh_comment(issue_num, "❌ TEST sub-agent failed.")
-    log_metrics("subagent_complete", issue=str(issue_num), subagent="test",
-                mode="A", result="success" if success else "failure")
+    log_metrics(
+        "subagent_complete",
+        issue=str(issue_num),
+        subagent="test",
+        mode="A",
+        result="success" if success else "failure",
+    )
     return success
 
 
@@ -459,28 +587,95 @@ def _run_implement_subagent(issue: dict) -> bool:
     Finds test files on disk and implements code to make them pass.
     """
     issue_num = issue["number"]
-    print(f"\n  [ralph] BUILD / IMPLEMENT sub-agent for #{issue_num} (Mode B — inherits DESIGN context)")
+    print(
+        f"\n  [ralph] BUILD / IMPLEMENT sub-agent for #{issue_num} (Mode B — inherits DESIGN context)"
+    )
     gh_comment(issue_num, "🛠️ IMPLEMENT sub-agent started (continuing DESIGN context).")
     log_metrics("subagent_start", issue=str(issue_num), subagent="implement", mode="B")
 
     session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
     prompt = _assemble_subagent_prompt(issue, "implement.md", mode="B")
-    success = invoke_agent(prompt, issue_num, session_file=session_file, continue_session=True)
+    success = invoke_agent(
+        prompt, issue_num, session_file=session_file, continue_session=True
+    )
 
     if success:
         gh_comment(issue_num, "✅ IMPLEMENT sub-agent completed.")
     else:
         gh_comment(issue_num, "❌ IMPLEMENT sub-agent failed.")
-    log_metrics("subagent_complete", issue=str(issue_num), subagent="implement",
-                mode="B", result="success" if success else "failure")
+    log_metrics(
+        "subagent_complete",
+        issue=str(issue_num),
+        subagent="implement",
+        mode="B",
+        result="success" if success else "failure",
+    )
     return success
 
 
-def _cleanup_session(session_file: Path):
-    """Remove the session file after pipeline completes (success or failure)."""
+def _file_hash(path: Path) -> str:
+    """Return SHA-256 hash of a file's contents."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _snapshot_tests_dir() -> dict[str, str]:
+    """Return {relative_path: content_hash} for all files under tests/."""
+    tests_dir = PROJECT_ROOT / "tests"
+    snapshot: dict[str, str] = {}
+    if tests_dir.exists():
+        for p in tests_dir.rglob("*"):
+            if p.is_file():
+                snapshot[str(p.relative_to(PROJECT_ROOT))] = _file_hash(p)
+    return snapshot
+
+
+def _detect_new_tests(before: dict[str, str], after: dict[str, str]) -> list[str]:
+    """Return paths that are new or modified between two test snapshots."""
+    return sorted(
+        path
+        for path, digest in after.items()
+        if path not in before or before[path] != digest
+    )
+
+
+def _test_tracking_file(issue_num: int) -> Path:
+    return PROJECT_ROOT / ".ralph" / f"issue-{issue_num}-tests.json"
+
+
+def _save_test_tracking(issue_num: int, test_paths: list[str]):
+    """Persist the list of test files created during the TEST stage."""
+    path = _test_tracking_file(issue_num)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"tests": test_paths}, indent=2))
+
+
+def _load_test_tracking(issue_num: int) -> list[str]:
+    """Load the list of test files created during the TEST stage."""
+    path = _test_tracking_file(issue_num)
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data.get("tests", [])
+    except Exception:
+        return []
+
+
+def _cleanup_issue_artifacts(issue_num: int):
+    """Remove session and per-issue test-tracking files after pipeline completes."""
+    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
     if session_file.exists():
         session_file.unlink()
         print(f"[ralph] Cleaned up session: {session_file.name}")
+
+    tracking_file = _test_tracking_file(issue_num)
+    if tracking_file.exists():
+        tracking_file.unlink()
+        print(f"[ralph] Cleaned up test tracking: {tracking_file.name}")
 
 
 def _has_commits() -> bool:
@@ -502,15 +697,44 @@ def _has_unpushed_commits(branch: str) -> bool:
         return False
 
 
+def _fetch_issue_comments(issue_num: int, limit: int = 2) -> str:
+    """Fetch the last N comments from the GitHub issue. Returns formatted markdown."""
+    try:
+        result = gh(
+            "issue", "view", str(issue_num), "--json", "comments", "--jq", ".comments"
+        )
+        comments = json.loads(result.stdout)
+        if not isinstance(comments, list):
+            return ""
+        comments.sort(key=lambda c: c.get("createdAt", "") or "")
+        selected = comments[-limit:] if len(comments) >= limit else comments
+        if not selected:
+            return ""
+        lines = [f"\n\n## Recent Issue Comments (last {len(selected)})"]
+        for idx, c in enumerate(selected, 1):
+            author = c.get("author", {}).get("login", "unknown")
+            created = c.get("createdAt", "")
+            body = c.get("body", "") or ""
+            lines.append(f"\n### Comment {idx} by @{author} ({created})\n\n{body}")
+        lines.append(
+            "\n*If these comments do not provide enough clarity, read additional "
+            "comments before proceeding.*"
+        )
+        return "\n".join(lines)
+    except Exception as e:
+        print(f"[ralph] WARNING: could not fetch comments for #{issue_num}: {e}")
+        return ""
+
+
 def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) -> str:
     """
     Build a prompt for a sub-agent invocation.
 
-    Mode A (Isolated): issue body + design spec + stage persona ONLY.
+    Mode A (Isolated): issue body + design spec + stage persona + recent comments.
       No codebase context, no reference docs. Fresh pi --print session.
       Used for TEST and VERIFY sub-agents — genuine independent perspective.
 
-    Mode B (Context inherit): issue body + reference docs + stage persona.
+    Mode B (Context inherit): issue body + reference docs + stage persona + recent comments.
       Session context is inherited via pi --continue.
       Design spec is already in the session — no need to re-inject.
       Used for IMPLEMENT sub-agent — builds on DESIGN's codebase knowledge.
@@ -528,7 +752,11 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
     body = issue.get("body") or "(No description)"
 
     # Build prompt sections
-    section_label = "Sub-Agent Instructions" if mode == "A" else "Sub-Agent Instructions (Mode B — continuing DESIGN session)"
+    section_label = (
+        "Sub-Agent Instructions"
+        if mode == "A"
+        else "Sub-Agent Instructions (Mode B — continuing DESIGN session)"
+    )
     prompt = (
         f"{base}\n\n"
         f"---\n\n"
@@ -571,9 +799,11 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
             "**CONTEXT NOTE:** You are a Mode B sub-agent continuing from the DESIGN session. "
             "You inherit full knowledge of the codebase, design decisions, and the issue. "
             "Test files were written by an independent QA sub-agent (Mode A) who never saw the code. "
-            "Find the test files in tests/ and implement minimal code to make them pass."
+            "Find the test files in tests/ and implement minimal code to make them pass. "
+            "Do NOT write new test files or modify existing tests — the QA tests are the verification truth."
         )
 
+    prompt += _fetch_issue_comments(issue["number"], limit=2)
     return prompt
 
 
@@ -599,7 +829,9 @@ def assemble_stage_prompt(issue: dict, stage_prompt_file: str) -> str:
         for ref in ref_docs:
             ref_path = PROJECT_ROOT / ref
             if ref_path.exists():
-                ref_section += f"### {ref}\n\n{ref_path.read_text(encoding='utf-8')}\n\n"
+                ref_section += (
+                    f"### {ref}\n\n{ref_path.read_text(encoding='utf-8')}\n\n"
+                )
             else:
                 ref_section += f"### {ref}\n\n(File not found: {ref})\n\n"
 
@@ -613,6 +845,7 @@ def assemble_stage_prompt(issue: dict, stage_prompt_file: str) -> str:
         f"{body}"
         f"{ref_section}"
     )
+    prompt += _fetch_issue_comments(issue["number"], limit=2)
     return prompt
 
 
@@ -645,20 +878,25 @@ def _push_with_retry(branch: str, retries: int = 3, backoff: float = 2.0):
             return
         except subprocess.CalledProcessError as e:
             if attempt < retries:
-                wait = backoff ** attempt
-                print(f"[ralph] Push failed (attempt {attempt}/{retries}), "
-                      f"retrying in {wait:.0f}s...")
+                wait = backoff**attempt
+                print(
+                    f"[ralph] Push failed (attempt {attempt}/{retries}), "
+                    f"retrying in {wait:.0f}s..."
+                )
                 _check_interrupt()
                 time.sleep(wait)
             else:
-                print(f"[ralph] ERROR: Push to origin/{branch} failed after "
-                      f"{retries} attempts: {e}")
+                print(
+                    f"[ralph] ERROR: Push to origin/{branch} failed after "
+                    f"{retries} attempts: {e}"
+                )
                 raise
 
 
 def _parse_reference_docs(body: str) -> list[str]:
     """Extract 'Reference: path/to/doc.md' from issue body."""
     import re
+
     refs = []
     for line in body.splitlines():
         match = re.search(r"Reference:\s*(\S+)", line, re.IGNORECASE)
@@ -700,35 +938,86 @@ def _resolve_agent_binary() -> str:
     return ""
 
 
-def invoke_agent(prompt: str, issue_num: int, session_file: Optional[Path] = None,
-                 continue_session: bool = False) -> bool:
+def _get_kimi_session_id(project_root: Path) -> Optional[str]:
+    """
+    Find the most recent Kimi session ID for the project working directory.
+
+    Kimi stores a session index at <kimi-home>/session_index.jsonl. Each line
+    maps a workDir to a sessionId. We look for the latest entry whose workDir
+    matches the project root.
+    """
+    try:
+        result = subprocess.run(
+            ["which", "kimi"], capture_output=True, text=True, check=False
+        )
+        if result.returncode != 0:
+            return None
+
+        # Derive Kimi home from the binary location, e.g. ~/.kimi-code/bin/kimi
+        kimi_bin = Path(result.stdout.strip())
+        kimi_home = kimi_bin.parent.parent
+        index_file = kimi_home / "session_index.jsonl"
+        if not index_file.exists():
+            return None
+
+        target = project_root.resolve()
+        session_id = None
+        with open(index_file, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                    entry_workdir = entry.get("workDir")
+                    if entry_workdir and Path(entry_workdir).resolve() == target:
+                        session_id = entry.get("sessionId")
+                except (json.JSONDecodeError, OSError):
+                    continue
+        return session_id
+    except Exception:
+        return None
+
+
+def invoke_agent(
+    prompt: str,
+    issue_num: int,
+    session_file: Optional[Path] = None,
+    continue_session: bool = False,
+) -> bool:
     """
     Invoke the AI agent (pi or kimi) with the assembled prompt.
 
     Args:
         prompt: The assembled prompt text.
         issue_num: GitHub issue number (for logging).
-        session_file: If set, save/use this session file (pi only — kimi manages sessions internally).
-        continue_session: If True, use --continue to inherit prior session context (Mode B).
-            pi: uses --continue --session <file> for explicit session inheritance.
-            kimi: uses --continue to pick up the most recent session for the working directory.
-                  NOTE: kimi --continue picks up the most recently saved session. If TEST
-                  sub-agent ran between DESIGN and IMPLEMENT, kimi may continue TEST's
-                  session instead of DESIGN's. For reliable Mode B, use pi.
+        session_file: If set, save/use this session identifier.
+            pi: path to a session file created/continued by pi.
+            kimi: path to a text file containing the Kimi session UUID.
+        continue_session: If True, inherit prior session context (Mode B).
+            pi: uses --continue --session <file>.
+            kimi: reads the stored session UUID from session_file and passes
+                  --session <id> to resume DESIGN context explicitly.
 
     Returns True if agent exits successfully.
     """
     # Detect agent binary
     agent_bin = _resolve_agent_binary()
     if not agent_bin:
-        print("[ralph] ERROR: No AI agent found (pi or kimi). "
-              "Set [agent].binary in .ralph/config.toml or set RALPH_AGENT.")
+        print(
+            "[ralph] ERROR: No AI agent found (pi or kimi). "
+            "Set [agent].binary in .ralph/config.toml or set RALPH_AGENT."
+        )
         return False
 
     mode_str = " (continue)" if continue_session else ""
     print(f"[ralph] Invoking {agent_bin} for #{issue_num}{mode_str}...")
-    log_metrics("agent_invoke", issue=str(issue_num), agent=agent_bin,
-                continue_session=continue_session)
+    log_metrics(
+        "agent_invoke",
+        issue=str(issue_num),
+        agent=agent_bin,
+        continue_session=continue_session,
+    )
 
     try:
         if agent_bin == "pi":
@@ -741,17 +1030,51 @@ def invoke_agent(prompt: str, issue_num: int, session_file: Optional[Path] = Non
             result = run(cmd, check=False, capture=False, timeout=None)
             _check_interrupt()
         elif agent_bin == "kimi":
-            # kimi Mode B: use --continue (best-effort — see docstring caveat)
+            # kimi uses --prompt for non-interactive prompt mode (pi uses --print).
+            # --prompt mode already runs under the auto permission policy, so no -y/--yolo
+            # flag is needed (and kimi 0.16+ rejects combining --prompt with --yolo).
+            # Mode B must resume the DESIGN session explicitly. kimi --continue would
+            # resume the most recent session for the working directory, which after TEST
+            # is the TEST session, not DESIGN. We save the DESIGN session UUID after
+            # DESIGN completes and pass it via --session for IMPLEMENT.
             if continue_session:
-                if session_file:
-                    print("[ralph] NOTE: kimi manages sessions internally; --session file ignored.")
-                print("[ralph] WARNING: kimi --continue picks up the most recent session. "
-                      "If TEST sub-agent ran, IMPLEMENT may not inherit DESIGN context. "
-                      "Use pi for reliable Mode B.")
-                cmd = [agent_bin, "--print", "--continue", prompt]
+                if not session_file:
+                    print(
+                        "[ralph] ERROR: kimi Mode B requires a session_file to resume DESIGN context."
+                    )
+                    return False
+                if not session_file.exists():
+                    print(
+                        f"[ralph] ERROR: No saved Kimi session to continue for #{issue_num}."
+                    )
+                    return False
+                design_session_id = session_file.read_text(encoding="utf-8").strip()
+                if not design_session_id:
+                    print(
+                        f"[ralph] ERROR: Saved Kimi session ID is empty for #{issue_num}."
+                    )
+                    return False
+                print(
+                    f"[ralph] Resuming Kimi session {design_session_id} for #{issue_num}..."
+                )
+                cmd = [agent_bin, "--prompt", prompt, "--session", design_session_id]
             else:
-                cmd = [agent_bin, "--print", prompt]
+                cmd = [agent_bin, "--prompt", prompt]
             result = run(cmd, check=False, capture=False, timeout=None)
+            _check_interrupt()
+            # After a successful kimi invocation that should establish context (DESIGN),
+            # capture the session UUID so Mode B can resume it explicitly.
+            if result.returncode == 0 and session_file and not continue_session:
+                session_id = _get_kimi_session_id(PROJECT_ROOT)
+                if session_id:
+                    session_file.parent.mkdir(parents=True, exist_ok=True)
+                    session_file.write_text(session_id, encoding="utf-8")
+                    print(f"[ralph] Saved Kimi session {session_id} for #{issue_num}")
+                else:
+                    print(
+                        f"[ralph] WARNING: Could not determine Kimi session ID for #{issue_num}. "
+                        "Mode B continuation may fail."
+                    )
         else:
             print(f"[ralph] ERROR: Unknown agent '{agent_bin}'")
             return False
@@ -768,6 +1091,7 @@ def invoke_agent(prompt: str, issue_num: int, session_file: Optional[Path] = Non
 # ─────────────────────────────────────────────────────────
 # Item 7: Checkpoint & Crash Recovery
 # ─────────────────────────────────────────────────────────
+
 
 def save_checkpoint(issue_num: int, stage: str):
     """Save checkpoint for crash recovery with stage info."""
@@ -810,8 +1134,7 @@ def recover_from_crash() -> Optional[dict]:
             git("reset", "--hard", pre_sha)
 
         # Fetch the issue body so we can resume
-        result = gh("issue", "view", str(issue_num),
-                    "--json", "number,title,body")
+        result = gh("issue", "view", str(issue_num), "--json", "number,title,body")
         issue = json.loads(result.stdout)
 
         # Item 3: Re-apply the correct status:<stage> label after rollback.
@@ -822,7 +1145,14 @@ def recover_from_crash() -> Optional[dict]:
         }
         target_label = stage_label_map.get(stage, "status:design")
         # Remove any stale status labels, then add the correct one
-        for lbl in ["status:design", "status:build", "status:verify", "status:ready", "status:review", "status:blocked"]:
+        for lbl in [
+            "status:design",
+            "status:build",
+            "status:verify",
+            "status:ready",
+            "status:review",
+            "status:blocked",
+        ]:
             if lbl != target_label:
                 try:
                     gh("issue", "edit", str(issue_num), "--remove-label", lbl)
@@ -833,7 +1163,9 @@ def recover_from_crash() -> Optional[dict]:
         except subprocess.CalledProcessError as e:
             print(f"[ralph] Warning: could not apply label {target_label}: {e}")
 
-        print(f"[ralph] Resuming #{issue_num} at stage: {stage} (label: {target_label})")
+        print(
+            f"[ralph] Resuming #{issue_num} at stage: {stage} (label: {target_label})"
+        )
         log_metrics("crash_recovery", issue=str(issue_num), stage=stage)
 
         return {"issue": issue, "resume_stage": stage}
@@ -854,6 +1186,7 @@ _in_cleanup = False
 
 class RalphInterrupted(BaseException):
     """Raised when the daemon receives SIGINT/SIGTERM during a stage."""
+
     pass
 
 
@@ -933,11 +1266,15 @@ def run_loop(auto_close: bool = False):
                 print(f"[ralph] Resuming #{issue_num} from stage: {resume_stage}")
 
                 if resume_stage == "build":
-                    gh_comment(issue_num, "🔄 Ralph resuming BUILD stage after crash recovery.")
+                    gh_comment(
+                        issue_num, "🔄 Ralph resuming BUILD stage after crash recovery."
+                    )
                     save_checkpoint(issue_num, "build")
                     success = run_build_stage(issue)
                     if not success:
-                        gh_comment(issue_num, "❌ Resumed BUILD stage failed. Blocking issue.")
+                        gh_comment(
+                            issue_num, "❌ Resumed BUILD stage failed. Blocking issue."
+                        )
                         transition_label(issue_num, "status:blocked", "status:build")
                         clear_checkpoint()
                         recovered = None
@@ -946,36 +1283,70 @@ def run_loop(auto_close: bool = False):
                         commit_stage(issue_num, "build")
                     except subprocess.CalledProcessError:
                         clear_checkpoint()
-                        gh_comment(issue_num, "💥 Resumed BUILD commit/push failed. Blocking issue.")
+                        gh_comment(
+                            issue_num,
+                            "💥 Resumed BUILD commit/push failed. Blocking issue.",
+                        )
                         transition_label(issue_num, "status:blocked", "status:build")
-                        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="build", reason="push_failed")
+                        log_metrics(
+                            "pipeline_complete",
+                            issue=str(issue_num),
+                            result="blocked",
+                            stage="build",
+                            reason="push_failed",
+                        )
                         recovered = None
                         continue
-                    gh_comment(issue_num, "✅ Resumed BUILD stage completed and committed.")
+                    gh_comment(
+                        issue_num, "✅ Resumed BUILD stage completed and committed."
+                    )
                     transition_label(issue_num, "status:verify", "status:build")
                     # Fall through to VERIFY
                     resume_stage = "verify"
 
                 if resume_stage == "verify":
-                    gh_comment(issue_num, "🔄 Ralph resuming VERIFY stage after crash recovery.")
+                    gh_comment(
+                        issue_num,
+                        "🔄 Ralph resuming VERIFY stage after crash recovery.",
+                    )
                     save_checkpoint(issue_num, "verify")
                     verify_pass = run_verify_stage(issue)
                     clear_checkpoint()
                     if verify_pass:
                         if auto_close:
                             sync_closed(issue_num)
-                            gh_comment(issue_num, "✅ Resumed VERIFY passed. Auto-closing issue.")
+                            gh_comment(
+                                issue_num,
+                                "✅ Resumed VERIFY passed. Auto-closing issue.",
+                            )
                             gh("issue", "close", str(issue_num))
                             print(f"[ralph] #{issue_num} auto-closed")
-                            log_metrics("pipeline_complete", issue=str(issue_num), result="closed")
+                            log_metrics(
+                                "pipeline_complete",
+                                issue=str(issue_num),
+                                result="closed",
+                            )
                         else:
-                            gh_comment(issue_num, "✅ Resumed VERIFY passed. Handing off for human review.")
-                            transition_label(issue_num, "status:review", "status:verify")
-                            log_metrics("pipeline_complete", issue=str(issue_num), result="review")
+                            gh_comment(
+                                issue_num,
+                                "✅ Resumed VERIFY passed. Handing off for human review.",
+                            )
+                            transition_label(
+                                issue_num, "status:review", "status:verify"
+                            )
+                            log_metrics(
+                                "pipeline_complete",
+                                issue=str(issue_num),
+                                result="review",
+                            )
                     else:
-                        gh_comment(issue_num, "❌ Resumed VERIFY stage failed. Blocking issue.")
+                        gh_comment(
+                            issue_num, "❌ Resumed VERIFY stage failed. Blocking issue."
+                        )
                         transition_label(issue_num, "status:blocked", "status:verify")
-                        log_metrics("pipeline_complete", issue=str(issue_num), result="blocked")
+                        log_metrics(
+                            "pipeline_complete", issue=str(issue_num), result="blocked"
+                        )
                     recovered = None
                     continue
 
@@ -1005,7 +1376,9 @@ def run_loop(auto_close: bool = False):
             # ── Claim & Pipeline ──
             issue_num = issue["number"]
             transition_label(issue_num, "status:design", "status:ready")
-            gh_comment(issue_num, f"⏳ Ralph claimed issue #{issue_num} and started DESIGN.")
+            gh_comment(
+                issue_num, f"⏳ Ralph claimed issue #{issue_num} and started DESIGN."
+            )
             run_pipeline(issue, auto_close=auto_close)
 
             # Brief pause between issues
@@ -1036,12 +1409,16 @@ def run_loop(auto_close: bool = False):
                 }
                 remove_label = stage_label_map.get(stage, "status:design")
                 # Add note that the issue was interrupted
-                gh_comment(issue_num,
-                           "⏸️ Ralph daemon interrupted (SIGINT/SIGTERM). Issue was in "
-                           f"{stage} stage. Re-queue the issue (set status:ready) to retry.")
+                gh_comment(
+                    issue_num,
+                    "⏸️ Ralph daemon interrupted (SIGINT/SIGTERM). Issue was in "
+                    f"{stage} stage. Re-queue the issue (set status:ready) to retry.",
+                )
                 transition_label(issue_num, "status:blocked", remove_label)
                 clear_checkpoint()
-                print(f"[ralph] Marked #{issue_num} as status:blocked (interrupted, was: {stage})")
+                print(
+                    f"[ralph] Marked #{issue_num} as status:blocked (interrupted, was: {stage})"
+                )
             except Exception as e:
                 print(f"[ralph] Error marking interrupted issue: {e}")
                 clear_checkpoint()
@@ -1057,11 +1434,20 @@ def run_loop(auto_close: bool = False):
 
 if __name__ == "__main__":
     import argparse
+
     parser = argparse.ArgumentParser(description="Ralph v3 Daemon")
     parser.add_argument(
         "--auto-close",
         action="store_true",
         help="Close issues on success instead of marking status:review",
     )
+    parser.add_argument(
+        "--agent",
+        choices=["pi", "kimi"],
+        default=None,
+        help="AI agent to use (overrides RALPH_AGENT and config)",
+    )
     args = parser.parse_args()
+    if args.agent:
+        os.environ["RALPH_AGENT"] = args.agent
     run_loop(auto_close=args.auto_close)

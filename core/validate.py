@@ -24,7 +24,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 # ─────────────────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────────────────
@@ -33,7 +32,40 @@ PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 VENV_PATH = Path(os.environ.get("RALPH_VENV_PATH", PROJECT_ROOT / ".venv"))
 TEST_DIR = os.environ.get("RALPH_TEST_DIR", "tests")
 ALLOW_E2E = os.environ.get("RALPH_ALLOW_E2E", "0") == "1"
-DEFAULT_LINT_TOOLS = os.environ.get("RALPH_LINT_TOOLS", "black isort flake8 mypy").split()
+CONFIG_FILE = PROJECT_ROOT / ".ralph" / "config.toml"
+
+
+def _load_config() -> dict:
+    """Best-effort load of .ralph/config.toml."""
+    if not CONFIG_FILE.exists():
+        return {}
+    try:
+        import tomllib  # type: ignore
+
+        with open(CONFIG_FILE, "rb") as f:
+            return tomllib.load(f)
+    except Exception:
+        pass
+    try:
+        import tomli  # type: ignore
+
+        with open(CONFIG_FILE, "rb") as f:
+            return tomli.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+_CONFIG = _load_config()
+_DEFAULT_LINT_TOOLS_FROM_CONFIG = _CONFIG.get("validate", {}).get("lint_tools", [])
+DEFAULT_LINT_TOOLS = (
+    os.environ.get("RALPH_LINT_TOOLS", "").split()
+    or _DEFAULT_LINT_TOOLS_FROM_CONFIG
+    or ["black", "isort", "flake8", "mypy"]
+)
+DEFAULT_TIER = os.environ.get("RALPH_DEFAULT_TIER", "") or _CONFIG.get(
+    "validate", {}
+).get("default_tier", "targeted")
 
 # Detect Python
 PYTHON_CMD = os.environ.get("RALPH_PYTHON_CMD", "")
@@ -49,8 +81,7 @@ if not PYTHON_CMD:
         PYTHON_CMD = "python3"
 
 # Detect core directory
-CORE_DIR = os.environ.get("RALPH_CORE_DIR",
-                          str(Path(__file__).parent.resolve()))
+CORE_DIR = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent.resolve()))
 
 DETECT_SCRIPT = os.path.join(CORE_DIR, "detect_affected_tests.py")
 
@@ -62,9 +93,25 @@ PYTEST_ADOPTS = ["-o", "addopts=--tb=short --strict-markers"]
 # Helpers
 # ─────────────────────────────────────────────────────────
 
-def run(cmd: list[str], check: bool = False) -> subprocess.CompletedProcess:
-    """Run a command, return CompletedProcess."""
-    return subprocess.run(cmd, capture_output=True, text=True, cwd=PROJECT_ROOT)
+
+def run(
+    cmd: list[str], check: bool = False, env: dict[str, str] | None = None
+) -> subprocess.CompletedProcess:
+    """Run a command, return CompletedProcess.
+
+    If the command fails and check is False, emit stdout/stderr so the
+    operator can see why the gate failed.
+    """
+    run_env = {**os.environ, **(env or {})}
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, cwd=PROJECT_ROOT, env=run_env
+    )
+    if result.returncode != 0 and not check:
+        if result.stdout:
+            print(result.stdout, end="")
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr)
+    return result
 
 
 def get_modified_py_files() -> list[str]:
@@ -85,35 +132,66 @@ def get_modified_py_files() -> list[str]:
     return sorted(modified)
 
 
-def run_pytest(tier: str) -> int:
-    """Run pytest for the given tier. Returns exit code."""
+def detect_collisions(paths: list[str]) -> dict[str, list[str]]:
+    """
+    Detect pytest module-name collisions.
+
+    Pytest imports test modules by basename. If two explicit file paths share
+    the same basename (e.g. tests/unit/test_cli.py and
+    tests/integration/test_cli.py), the second collection fails with an
+    import-file mismatch. Return a mapping of colliding basenames to paths.
+    """
+    from collections import defaultdict
+
+    by_basename: dict[str, list[str]] = defaultdict(list)
+    for p in paths:
+        by_basename[Path(p).name].append(p)
+    return {name: ps for name, ps in by_basename.items() if len(ps) > 1}
+
+
+def run_pytest_invocation(cmd: list[str], env: dict[str, str] | None = None) -> int:
+    """Run a single pytest invocation. Returns exit code."""
+    print(f"[ralph] pytest invocation: {' '.join(cmd)}")
+    result = run(cmd, check=False, env=env)
+    return result.returncode
+
+
+def run_pytest_split_by_directory(
+    base: list[str],
+    paths: list[str],
+    suffix: list[str],
+    env: dict[str, str] | None = None,
+) -> int:
+    """
+    Split pytest paths by parent directory and run one invocation per directory.
+    Returns the worst (highest) exit code across all invocations.
+    """
+    from collections import defaultdict
+
+    by_dir: dict[str, list[str]] = defaultdict(list)
+    for p in paths:
+        by_dir[str(Path(p).parent)].append(p)
+
+    max_exit = 0
+    for dir_path in sorted(by_dir):
+        dir_paths = sorted(by_dir[dir_path])
+        cmd = base + dir_paths + suffix
+        exit_code = run_pytest_invocation(cmd, env=env)
+        if exit_code > max_exit:
+            max_exit = exit_code
+    return max_exit
+
+
+def run_pytest(tier: str, pytest_paths: list[str] | None = None) -> int:
+    """Run pytest for the given tier or on explicit paths. Returns exit code."""
     base = [PYTHON_CMD, "-m", "pytest"] + PYTEST_ADOPTS
 
-    tier_map = {
-        "smoke": [
-            f"{TEST_DIR}/unit/", "-x", "-q",
-            "-m", "unit",
-        ],
-        "targeted": [
-            # Populated dynamically below
-        ],
-        "integration": [
-            f"{TEST_DIR}/integration/", "-q",
-            "-m", "integration",
-        ],
-        "full": [
-            f"{TEST_DIR}/", "-q",
-            "-m", "not e2e and not performance and not broker_live",
-        ],
-        "e2e": [
-            f"{TEST_DIR}/e2e/", "-v",
-        ],
-        "performance": [
-            f"{TEST_DIR}/performance/", "-v",
-        ],
-    }
-
-    if tier == "targeted":
+    if pytest_paths:
+        paths = pytest_paths
+        suffix = ["-q", "-m", "not e2e and not performance and not broker_live"]
+        env = {"RALPH_NO_RECURSIVE_PYTEST": "1"}
+        print(f"[ralph] Running specified tests: {paths}")
+    elif tier == "targeted":
         # Use detect_affected_tests.py
         if os.path.exists(DETECT_SCRIPT):
             result = run([PYTHON_CMD, DETECT_SCRIPT], check=False)
@@ -125,18 +203,62 @@ def run_pytest(tier: str) -> int:
             print("[ralph] No affected tests detected. Skipping pytest.")
             return 0
 
-        cmd = base + affected.split() + [
-            "-q", "-m", "not e2e and not performance",
-        ]
+        paths = affected.split()
+        suffix = ["-q", "-m", "not e2e and not performance"]
+        env = {"RALPH_NO_RECURSIVE_PYTEST": "1"}
     elif tier == "targetted":
         # Handle common typo
         return run_pytest("targeted")
     else:
+        tier_map = {
+            "smoke": [
+                f"{TEST_DIR}/unit/",
+                "-x",
+                "-q",
+                "-m",
+                "unit",
+            ],
+            "integration": [
+                f"{TEST_DIR}/integration/",
+                "-q",
+                "-m",
+                "integration",
+            ],
+            "full": [
+                f"{TEST_DIR}/",
+                "-q",
+                "-m",
+                "not e2e and not performance and not broker_live",
+            ],
+            "e2e": [
+                f"{TEST_DIR}/e2e/",
+                "-v",
+            ],
+            "performance": [
+                f"{TEST_DIR}/performance/",
+                "-v",
+            ],
+        }
         cmd = base + tier_map.get(tier, [])
+        print()
+        # Prevent target-project tests that spawn pytest from recursing forever.
+        result = run(cmd, check=False, env={"RALPH_NO_RECURSIVE_PYTEST": "1"})
+        return result.returncode
 
-    print()
-    result = run(cmd, check=False)
-    return result.returncode
+    # Check for module basename collisions and split by directory if needed.
+    collisions = detect_collisions(paths)
+    if collisions:
+        print("[ralph] WARNING: detected test module basename collisions:")
+        for name, colliding_paths in sorted(collisions.items()):
+            print(f"  - {name}: {', '.join(colliding_paths)}")
+        print(
+            "[ralph] Splitting pytest into separate invocations per directory "
+            "to avoid import conflicts."
+        )
+        return run_pytest_split_by_directory(base, paths, suffix, env=env)
+
+    cmd = base + paths + suffix
+    return run_pytest_invocation(cmd, env=env)
 
 
 def run_lint(tool: str, files: list[str]) -> bool:
@@ -156,7 +278,11 @@ def run_lint(tool: str, files: list[str]) -> bool:
         for f in files:
             if f.endswith(".py"):
                 if f.endswith("__init__.py"):
-                    mod = f.replace("src/", "").replace("/", ".").replace(".__init__.py", "")
+                    mod = (
+                        f.replace("src/", "")
+                        .replace("/", ".")
+                        .replace(".__init__.py", "")
+                    )
                 else:
                     mod = f.replace("src/", "").replace("/", ".").replace(".py", "")
                 if mod:
@@ -179,11 +305,15 @@ def run_lint(tool: str, files: list[str]) -> bool:
 # Main validation gate
 # ─────────────────────────────────────────────────────────
 
-def validate(tier: str = "targeted") -> int:
+
+def validate(tier: str = DEFAULT_TIER, pytest_paths: list[str] | None = None) -> int:
     """
     Run the full validation gate.
     Returns 0 on pass, 1 on failure.
     """
+    # Normalize empty list to None
+    if not pytest_paths:
+        pytest_paths = None
     # ── Policy enforcement ──
     if tier in ("e2e", "performance") and not ALLOW_E2E:
         print(f"[ralph] ERROR: {tier} tier is blocked in the Ralph loop.")
@@ -211,7 +341,7 @@ def validate(tier: str = "targeted") -> int:
     label = f"[{step}/{total_steps}]"
     print(f"\n[{step}/{total_steps}] Running {tier.upper()} tests...")
 
-    pytest_exit = run_pytest(tier)
+    pytest_exit = run_pytest(tier, pytest_paths=pytest_paths)
 
     if pytest_exit == 0:
         print(f"\n{label} pytest {tier} PASSED")
@@ -230,7 +360,7 @@ def validate(tier: str = "targeted") -> int:
         print("\n[ralph] No modified/untracked Python files detected.")
         print("[ralph] Skipping lint/formatter checks.")
     else:
-        print(f"\n[ralph] Modified/untracked Python files detected:")
+        print("\n[ralph] Modified/untracked Python files detected:")
         for f in modified_files:
             print(f"  {f}")
         print()
@@ -263,20 +393,25 @@ def validate(tier: str = "targeted") -> int:
 # CLI
 # ─────────────────────────────────────────────────────────
 
+
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Ralph v3 Validation Gate"
-    )
+    parser = argparse.ArgumentParser(description="Ralph v3 Validation Gate")
     parser.add_argument(
         "--tier",
         default="targeted",
         choices=["smoke", "targeted", "integration", "full", "e2e", "performance"],
         help="Test tier (default: targeted)",
     )
+    parser.add_argument(
+        "--pytest-paths",
+        nargs="*",
+        default=None,
+        help="Run pytest on these specific test paths only",
+    )
     args = parser.parse_args()
 
     # Also support --tier=value from the old bash CLI style
-    return validate(args.tier)
+    return validate(args.tier, pytest_paths=args.pytest_paths)
 
 
 if __name__ == "__main__":

@@ -16,7 +16,6 @@ import sys
 from pathlib import Path
 from typing import Optional
 
-
 # ─────────────────────────────────────────────────────────
 # Template content — all inline so init.py is self-contained
 # ─────────────────────────────────────────────────────────
@@ -76,16 +75,20 @@ Your job is to complete the issue described below.
 ## Rules
 
 1. **Understand first.** Read the issue body thoroughly. Identify what needs to change.
-2. **Research the codebase.** Use grep, find, and file reads to understand existing code
+2. **Read recent comments.** The last 2 issue comments are included below. They may contain
+   clarifications, context from previous work, or decisions made earlier. Read them carefully.
+   If they do not provide enough clarity, read additional comments before proceeding.
+3. **Research the codebase.** Use grep, find, and file reads to understand existing code
    conventions, patterns, and architecture before writing any code.
-3. **Write minimal, correct code.** Only change what the issue requires. Follow existing
+4. **Write minimal, correct code.** Only change what the issue requires. Follow existing
    patterns. Do not over-engineer.
-4. **Write tests.** Every functional change must have corresponding tests. Write unit
-   tests for internal logic. Write integration tests where appropriate.
-5. **Validate.** Run `ralph validate --tier=targeted` when done. Tests MUST pass.
-6. **Do NOT commit or push.** Ralph handles all git commits and pushes at stage boundaries.
+5. **Write tests only when your stage role requires it.** The TEST stage writes tests
+   from the spec. The IMPLEMENT stage does NOT write tests — it makes existing tests pass.
+   Follow your stage-specific instructions above this general rule.
+6. **Validate.** Run `ralph validate --tier=targeted` when done. Tests MUST pass.
+7. **Do NOT commit or push.** Ralph handles all git commits and pushes at stage boundaries.
    Leave changes in the working tree / index for Ralph to commit.
-7. **Do NOT touch GitHub labels or issues.** The orchestrator handles all label transitions.
+8. **Do NOT touch GitHub labels or issues.** The orchestrator handles all label transitions.
    Only write code, tests, and documentation.
 
 ## The Issue
@@ -164,6 +167,13 @@ TEST_MAP_YAML = """\
 #   default_tests:
 #     - "tests/unit/"
 #
+# Naming convention:
+#   Pytest imports test modules by basename. To avoid import collisions, every
+#   test file across tests/unit/, tests/integration/, tests/e2e/, etc. must have
+#   a unique basename. Prefer suffixes for non-unit tests, e.g.:
+#     tests/unit/test_cli.py
+#     tests/integration/test_cli_integration.py
+#
 # When no source files match, default_tests are run.
 
 mappings: []
@@ -211,11 +221,13 @@ code or tests.
 ## Process
 
 1. **Read the issue** thoroughly. Identify what needs to change.
-2. **Research the codebase.** Understand existing patterns, file layout,
+2. **Read the last 2 issue comments** included below. They may contain clarifications
+   or context from earlier discussion. If they are insufficient, read additional comments.
+3. **Research the codebase.** Understand existing patterns, file layout,
    dependencies, and coupling surfaces.
-3. **Surface assumptions.** What are you assuming? What needs clarification?
-4. **Define success criteria.** What does "done" look like?
-5. **Produce a design spec** in `docs/agent/PROGRESS.md`.
+4. **Surface assumptions.** What are you assuming? What needs clarification?
+5. **Define success criteria.** What does "done" look like?
+6. **Produce a design spec** in `docs/agent/PROGRESS.md`.
 
 ## Design Spec Format
 
@@ -259,11 +271,12 @@ write tests that validate them.
 ## Process
 
 1. **Read the design spec** in `docs/agent/PROGRESS.md`.
-2. **Read the issue** to understand the goal.
-3. **Write tests first.** Write unit tests and integration tests that
+2. **Read the last 2 issue comments** included below. Read more comments if needed.
+3. **Read the issue** to understand the goal.
+4. **Write tests first.** Write unit tests and integration tests that
    validate the acceptance criteria from the design spec.
-4. **Implement the code.** Write minimal, clean code to make tests pass.
-5. **Run validation.** `ralph validate --tier=targeted` must pass.
+5. **Implement the code.** Write minimal, clean code to make tests pass.
+6. **Run validation.** `ralph validate --tier=targeted` must pass.
 
 ## Rules
 - Follow existing code conventions and patterns.
@@ -287,16 +300,18 @@ This isolation is deliberate — it prevents you from "marking your own homework
 ## Process
 
 1. **Read the original issue** — what was requested?
-2. **Read the design spec** (provided below) — what was planned?
-3. **Review the git diff** (provided below) — what was actually changed?
-4. **Do a 5-axis review:**
+2. **Read the last 2 issue comments** included below — they may contain clarifications
+   or context from earlier discussion. Read more comments if needed.
+3. **Read the design spec** (provided below) — what was planned?
+4. **Review the git diff** (provided below) — what was actually changed?
+5. **Do a 5-axis review:**
    - **Correctness:** Does it do what the issue asked?
    - **Simplicity:** Is the solution minimal? No over-engineering?
    - **Tests:** Do tests exist and cover the acceptance criteria?
    - **Security:** Any new attack surfaces or data leaks?
    - **Maintainability:** Is the code clear, documented, following conventions?
-5. **Run the validation gate:** `ralph validate --tier=targeted`
-6. **Report pass/fail** per acceptance criterion.
+6. **Run the validation gate:** `ralph validate --tier=targeted`
+7. **Report pass/fail** per acceptance criterion.
 
 ## Output Format
 
@@ -320,6 +335,10 @@ This isolation is deliberate — it prevents you from "marking your own homework
 ## Rules
 - Be critical. Flag issues even if small.
 - If any acceptance criterion fails, overall is FAIL.
+- **Tests must come from the earlier independent QA session.** Treat any tests
+  added later with suspicion — the implementation agent is not allowed to write
+  new tests or change test expectations. Only tests developed in the TEST stage
+  should be used as the verification truth.
 - Do NOT modify code — this is review only.
 - Do NOT modify GitHub labels or issues.
 - Do NOT read the codebase — your review is based on the diff provided.
@@ -339,14 +358,16 @@ implementation exists yet.
 ## Process
 
 1. **Read the original issue** — what is being built or fixed?
-2. **Read the design spec** (provided below) — what was designed?
-3. **Identify every acceptance criterion** in the design spec.
-4. **Write tests** that validate each acceptance criterion.
+2. **Read the last 2 issue comments** included below — they may contain clarifications
+   or constraints from earlier discussion. Read more comments if needed.
+3. **Read the design spec** (provided below) — what was designed?
+4. **Identify every acceptance criterion** in the design spec.
+5. **Write tests** that validate each acceptance criterion.
    - Map each criterion to at least one test.
    - Write unit tests for internal logic boundaries.
    - Write integration tests where the design spec crosses module boundaries.
    - Edge cases: null/empty inputs, boundary values, error paths.
-5. **Tests SHOULD FAIL** — there is no implementation yet. That is expected.
+6. **Tests SHOULD FAIL** — there is no implementation yet. That is expected.
    If a test accidentally passes, it's too weak. Make it meaningfully test the spec.
 
 ## Test Placement
@@ -374,30 +395,30 @@ An independent QA sub-agent (Mode A, isolated) has already written tests.
 The QA agent never saw the codebase — tests were written purely from spec.
 They should be genuinely failing right now because no implementation exists.
 
-Your job: find the test files, write minimal implementation code to make
-them pass, plus unit tests for internal logic the QA may have missed.
+Your job: find the test files written by QA and write minimal implementation
+code to make them pass. Do NOT add new tests.
 
 ## Process
 
-1. **You already know the codebase** from the DESIGN session. Use that knowledge.
-2. **Find the test files** — they are in tests/ directory, written by QA.
-   Read them to understand what they expect.
-3. **Implement the code.** Write minimal, clean code to make tests pass:
+1. **Read the last 2 issue comments** included below — they may contain clarifications
+   or decisions from earlier discussion. Read more comments if needed.
+2. **You already know the codebase** from the DESIGN session. Use that knowledge.
+3. **Find the test files** — they are in tests/ directory, written by an independent QA
+   sub-agent who never saw the codebase. Read them to understand what they expect.
+4. **Implement the code.** Write minimal, clean code to make the existing QA tests pass:
    - Follow existing code conventions exactly.
    - Only change what the design spec requires (you have it in session memory).
    - Do NOT modify test files (except for import/compilation fixes).
-   - The tests are the truth — your code must satisfy them.
-4. **Write unit tests for internal logic** that QA tests don't cover:
-   - Private helper functions
-   - Internal state transitions
-   - Error handling branches
+   - The QA tests are the truth — your code must satisfy them.
 5. **Run tests:** execute the test suite with pytest. All tests must pass.
 6. **Run validation:** `ralph validate --tier=targeted` must pass.
 
 ## Rules
 - Follow existing code conventions and patterns.
 - Only change what the design spec requires — no scope creep.
+- Do NOT write new test files or add new test cases.
 - Do NOT modify test files except for import/compilation fixes.
+- The tests written by the independent QA session are the verification truth.
 - Tests MUST pass before you consider work done.
 - Do NOT modify GitHub labels or issues.
 - Commit working slices as you go.
@@ -408,6 +429,7 @@ them pass, plus unit tests for internal logic the QA may have missed.
 # Scaffold logic
 # ─────────────────────────────────────────────────────────
 
+
 def write_file(path: Path, content: str, executable: bool = False):
     """Write content to a file, creating parent directories as needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -416,9 +438,13 @@ def write_file(path: Path, content: str, executable: bool = False):
         path.chmod(0o755)
 
 
-def scaffold(project_dir: Path, repo: str = "owner/repo",
-              agent: str = "pi", tier: str = "targeted",
-              project_number: Optional[int] = None):
+def scaffold(
+    project_dir: Path,
+    repo: str = "owner/repo",
+    agent: str = "pi",
+    tier: str = "targeted",
+    project_number: Optional[int] = None,
+):
     """Generate the full Ralph v3 project scaffold."""
 
     print(f"Scaffolding Ralph v3 project at: {project_dir}")
@@ -448,16 +474,19 @@ def scaffold(project_dir: Path, repo: str = "owner/repo",
 
     # ── .ralph/ ──────────────────────────────────────────
     project_line = f"project = {project_number}" if project_number else "# project = 1"
-    write_file(project_dir / ".ralph" / "config.toml",
-               CONFIG_TOML.replace("{repo}", repo)
-                          .replace("{agent}", agent)
-                          .replace("{tier}", tier)
-                          .replace("{project_line}", project_line))
+    write_file(
+        project_dir / ".ralph" / "config.toml",
+        CONFIG_TOML.replace("{repo}", repo)
+        .replace("{agent}", agent)
+        .replace("{tier}", tier)
+        .replace("{project_line}", project_line),
+    )
     print("  ✓  .ralph/config.toml")
 
     # ── config/ ──────────────────────────────────────────
-    write_file(project_dir / "config" / "ralph_preflight.sh",
-               RALPH_PREFLIGHT, executable=True)
+    write_file(
+        project_dir / "config" / "ralph_preflight.sh", RALPH_PREFLIGHT, executable=True
+    )
     print("  ✓  config/ralph_preflight.sh")
 
     write_file(project_dir / "config" / "TEST_MAP.yaml", TEST_MAP_YAML)
@@ -518,12 +547,14 @@ def scaffold(project_dir: Path, repo: str = "owner/repo",
 # Detection helpers
 # ─────────────────────────────────────────────────────────
 
+
 def _detect_project_name(project_dir: Path) -> str:
     """Infer a project name from the directory name."""
     name = project_dir.resolve().name
     # Sanitize: lowercase, replace spaces/special chars with hyphens
     import re
-    name = re.sub(r'[^a-zA-Z0-9_-]', '-', name).strip('-')
+
+    name = re.sub(r"[^a-zA-Z0-9_-]", "-", name).strip("-")
     return name or "my-project"
 
 
@@ -531,7 +562,7 @@ def _extract_repo_from_url(url: str) -> str | None:
     """Extract owner/repo from a git remote URL."""
     for prefix in ["https://github.com/", "git@github.com:"]:
         if url.startswith(prefix):
-            path = url[len(prefix):]
+            path = url[len(prefix) :]
             if path.endswith(".git"):
                 path = path[:-4]
             return path
@@ -543,7 +574,9 @@ def _detect_repo(project_dir: Path) -> str:
     try:
         result = subprocess.run(
             ["git", "remote", "get-url", "origin"],
-            capture_output=True, text=True, cwd=project_dir
+            capture_output=True,
+            text=True,
+            cwd=project_dir,
         )
         if result.returncode == 0:
             repo = _extract_repo_from_url(result.stdout.strip())
@@ -594,13 +627,17 @@ def _confirm(prompt: str, default: bool = True, yes: bool = False) -> bool:
 def _init_git(project_dir: Path):
     """Initialize a git repository and commit the scaffold."""
     try:
-        subprocess.run(["git", "init"], cwd=project_dir,
-                       capture_output=True, check=True)
-        subprocess.run(["git", "add", "-A"], cwd=project_dir,
-                       capture_output=True, check=True)
+        subprocess.run(
+            ["git", "init"], cwd=project_dir, capture_output=True, check=True
+        )
+        subprocess.run(
+            ["git", "add", "-A"], cwd=project_dir, capture_output=True, check=True
+        )
         subprocess.run(
             ["git", "commit", "-m", "ralph init"],
-            cwd=project_dir, capture_output=True, check=True
+            cwd=project_dir,
+            capture_output=True,
+            check=True,
         )
         print("  ✓  git init && git commit 'ralph init'")
     except subprocess.CalledProcessError as e:
@@ -642,11 +679,13 @@ def _create_labels(repo: str) -> tuple[int, int]:
     """Create all Ralph labels on the GitHub repo.
     Returns (created, skipped) counts."""
     import json
+
     # Get existing labels
     try:
         result = subprocess.run(
             ["gh", "label", "list", "--repo", repo, "--json", "name"],
-            capture_output=True, text=True
+            capture_output=True,
+            text=True,
         )
         existing = {l["name"] for l in json.loads(result.stdout)}
     except Exception:
@@ -660,11 +699,20 @@ def _create_labels(repo: str) -> tuple[int, int]:
             continue
         try:
             subprocess.run(
-                ["gh", "label", "create", name,
-                 "--color", color,
-                 "--description", desc,
-                 "--repo", repo],
-                capture_output=True, check=True
+                [
+                    "gh",
+                    "label",
+                    "create",
+                    name,
+                    "--color",
+                    color,
+                    "--description",
+                    desc,
+                    "--repo",
+                    repo,
+                ],
+                capture_output=True,
+                check=True,
             )
             created += 1
             print(f"  ✓  {name}")
@@ -677,6 +725,7 @@ def _create_labels(repo: str) -> tuple[int, int]:
 # ─────────────────────────────────────────────────────────
 # CLI entry point
 # ─────────────────────────────────────────────────────────
+
 
 def main() -> int:
     import argparse
@@ -691,25 +740,45 @@ Examples:
   ralph init . --yes          Init current directory with all defaults
   ralph init . --yes --create-labels   Also create GitHub labels
   ralph init . --yes --github-project 5   Enable board sync for project #5
-        """)
+        """,
+    )
     parser.add_argument(
-        "name", nargs="?", default=None,
-        help="Project name or path (default: current directory)")
+        "name",
+        nargs="?",
+        default=None,
+        help="Project name or path (default: current directory)",
+    )
     parser.add_argument(
-        "--yes", "-y", "--no-input", action="store_true",
-        help="Non-interactive: use all defaults, skip prompts")
+        "--yes",
+        "-y",
+        "--no-input",
+        action="store_true",
+        help="Non-interactive: use all defaults, skip prompts",
+    )
     parser.add_argument(
-        "--create-labels", action="store_true",
-        help="Create Ralph labels on the GitHub repo")
+        "--create-labels",
+        action="store_true",
+        help="Create Ralph labels on the GitHub repo",
+    )
     parser.add_argument(
-        "--agent", choices=["pi", "kimi"], default=None,
-        help="AI agent to use (default: auto-detected)")
+        "--agent",
+        choices=["pi", "kimi"],
+        default=None,
+        help="AI agent to use (default: auto-detected)",
+    )
     parser.add_argument(
-        "--tier", choices=["smoke", "targeted", "integration", "full"],
-        default=None, help="Default test tier (default: targeted)")
+        "--tier",
+        choices=["smoke", "targeted", "integration", "full"],
+        default=None,
+        help="Default test tier (default: targeted)",
+    )
     parser.add_argument(
-        "--github-project", type=int, default=None, metavar="N",
-        help="Enable GitHub Project board sync for project number N")
+        "--github-project",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Enable GitHub Project board sync for project number N",
+    )
 
     args = parser.parse_args()
 
@@ -731,8 +800,11 @@ Examples:
         # Allow non-empty dirs in interactive mode (warn but proceed)
         contents = list(project_dir.iterdir())
         # Filter out .git and .ralph (already initialized)
-        non_ralph = [c for c in contents
-                     if c.name not in (".git", ".ralph", ".gitignore", "AGENTS.md")]
+        non_ralph = [
+            c
+            for c in contents
+            if c.name not in (".git", ".ralph", ".gitignore", "AGENTS.md")
+        ]
         if non_ralph and not args.yes:
             print(f"Directory '{project_dir}' is not empty ({len(non_ralph)} items).")
             print("Ralph will add its files alongside existing content.")
@@ -755,8 +827,7 @@ Examples:
         # Guess from directory name + gh auth user
         try:
             user_result = subprocess.run(
-                ["gh", "api", "user", "--jq", ".login"],
-                capture_output=True, text=True
+                ["gh", "api", "user", "--jq", ".login"], capture_output=True, text=True
             )
             if user_result.returncode == 0:
                 user = user_result.stdout.strip()
@@ -818,8 +889,7 @@ Examples:
         print()
 
     # ── Scaffold ──
-    scaffold(project_dir, repo, agent=agent, tier=tier,
-             project_number=project_number)
+    scaffold(project_dir, repo, agent=agent, tier=tier, project_number=project_number)
 
     # ── Git init (if not already a repo) ──
     if not (project_dir / ".git").exists():

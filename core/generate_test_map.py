@@ -11,6 +11,14 @@ Conventions detected:
     src/my_project/sub/module.py      → tests/unit/test_sub_module.py
     src/my_project/module.py          → tests/integration/test_module_integration.py
 
+Naming rule:
+    Every test file across tests/unit/, tests/integration/, tests/e2e/, etc.
+    must have a unique basename, because pytest imports modules by basename.
+    Integration/e2e candidates therefore use a distinct `_integration` suffix.
+    If you create tests/integration/test_module.py while tests/unit/test_module.py
+    already exists, `ralph validate --tier=targeted` will split pytest invocations
+    per directory, but renaming the integration file is preferred.
+
 Also maps __init__.py files and handles common suffixes (_test, _spec, etc.)
 
 Usage:

@@ -332,7 +332,7 @@ flowchart TD
 |------|-------|----------------|
 | **Architect / Systems Analyst** | DESIGN (Parent) | "You are a systems architect. Read the issue, research the codebase, surface assumptions, define success criteria. Produce a design spec in PROGRESS.md. Do NOT write implementation code or tests." |
 | **QA Engineer** | TEST (Sub, Mode A) | "You are a QA engineer reviewing a design spec. Write functional and system tests from the spec ONLY. Do not see or reference any implementation code. Every acceptance criterion must map to at least one test. Tests SHOULD FAIL — there is no implementation yet." |
-| **Developer** | IMPLEMENT (Sub, Mode B) | "You are a developer building to spec. The design spec and tests exist. Write minimal code to make the tests pass. Write unit tests for internal logic. Do not modify existing tests (except compilation fixes). Commit each working slice." |
+| **Developer** | IMPLEMENT (Sub, Mode B) | "You are a developer building to spec. The design spec and tests exist. Write minimal code to make the tests pass. Do NOT write new tests. Do not modify existing tests (except compilation fixes). Commit each working slice." |
 | **Independent Reviewer** | VERIFY (Sub, Mode A) | "You are an independent reviewer. You see: the original issue, the design spec, and the git diff. Do a 5-axis review (correctness, simplicity, tests, security, maintainability). Run the validation gate. Report pass/fail per acceptance criterion." |
 
 ### Stage Transition Protocol
@@ -548,7 +548,7 @@ The orchestrator is the pipeline engine. It is NOT a bash wrapper around an all-
 | Stage | Agent | Mode | Input | Output |
 |-------|-------|------|-------|--------|
 | **DESIGN** | Parent agent | B (full context) | Issue body + codebase + BUILD_*.md reference docs | Design spec in PROGRESS.md |
-| **BUILD** | 2 sub-agents | TEST: Mode A (isolated), IMPLEMENT: Mode B (sequential) | Design spec | Tests that fail + code that passes + unit tests |
+| **BUILD** | 2 sub-agents | TEST: Mode A (isolated), IMPLEMENT: Mode B (sequential) | Design spec | Tests that fail + code that passes them (no new tests added by IMPLEMENT) |
 | **VERIFY** | Sub-agent | A (isolated) | Issue + design spec + git diff | Pass/fail report + acceptance criteria checklist |
 
 ### Sub-Agent Invocation Model
@@ -562,7 +562,7 @@ flowchart TD
 
     subgraph BUILD_PHASE["BUILD Stage"]
         TEST["<b>TEST Sub-Agent</b><br/>Mode A (Isolated)<br/><br/>Fresh session<br/>Sees: spec only<br/>Writes: test files"]
-        IMPL["<b>IMPLEMENT Sub-Agent</b><br/>Mode B (Sequential)<br/><br/>Inherits parent context<br/>Sees: spec + codebase + tests<br/>Writes: code + unit tests"]
+        IMPL["<b>IMPLEMENT Sub-Agent</b><br/>Mode B (Sequential)<br/><br/>Inherits parent context<br/>Sees: spec + codebase + tests<br/>Writes: code to make QA tests pass (no new tests)"]
     end
 
     TEST --> MERGE["Code + tests<br/>committed"]
