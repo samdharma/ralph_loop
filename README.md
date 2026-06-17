@@ -57,6 +57,10 @@ ralph setup
 ralph daemon
 ```
 
+Ralph uses the AI agent configured in `.ralph/config.toml` (`[agent].binary`),
+falls back to auto-detecting `pi` or `kimi` on your `PATH`, and lets you
+override either with the `RALPH_AGENT` environment variable.
+
 ## How It Works
 
 ```mermaid
@@ -73,6 +77,20 @@ flowchart TB
         BL --> S
     end
 ```
+
+Ralph pushes commits to the current branch at the end of DESIGN and BUILD, so by
+the time an issue reaches `status:review` the code is already in the remote
+repository. The `status:review` label is a handoff for human inspection.
+
+The happy-path state machine in `core/engine.py:219-286`:
+
+| Step           | Label transition               | Board column        |
+|----------------|--------------------------------|---------------------|
+| Claim ticket   | `status:ready` → `status:design`   | Ready → In Progress |
+| Design success | `status:design` → `status:build`   | In Progress         |
+| Build success  | `status:build` → `status:verify`   | In Progress         |
+| Verify pass    | `status:verify` → `status:review`  | Review              |
+| Verify fail    | `status:verify` → `status:blocked` | Blocked             |
 
 ## Project Layout
 

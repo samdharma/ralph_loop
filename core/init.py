@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 # ─────────────────────────────────────────────────────────
@@ -34,6 +35,25 @@ binary = "{agent}"
 [ticket]
 # GitHub repo (owner/repo) — auto-detected from git remote
 repo = "{repo}"
+# GitHub project number for Kanban board sync (optional).
+# Set this to mirror every status label transition to the Project's "Status"
+# field, so cards move between Kanban columns automatically.
+# Leave commented to disable board sync (labels still update).
+{project_line}
+
+[project]
+# Name of the single-select field that drives board columns.
+status_field = "Status"
+
+# Map Ralph status labels to board column names.
+[project.status_map]
+"status:ready"   = "Ready"
+"status:design"  = "In Progress"
+"status:build"   = "In Progress"
+"status:verify"  = "In Progress"
+"status:review"  = "Review"
+"status:blocked" = "Blocked"
+"closed"         = "Done"
 
 [validate]
 # Default test tier for the loop
@@ -63,7 +83,8 @@ Your job is to complete the issue described below.
 4. **Write tests.** Every functional change must have corresponding tests. Write unit
    tests for internal logic. Write integration tests where appropriate.
 5. **Validate.** Run `ralph validate --tier=targeted` when done. Tests MUST pass.
-6. **Commit.** Commit your changes with a descriptive message referencing the issue number.
+6. **Do NOT commit or push.** Ralph handles all git commits and pushes at stage boundaries.
+   Leave changes in the working tree / index for Ralph to commit.
 7. **Do NOT touch GitHub labels or issues.** The orchestrator handles all label transitions.
    Only write code, tests, and documentation.
 
@@ -396,7 +417,8 @@ def write_file(path: Path, content: str, executable: bool = False):
 
 
 def scaffold(project_dir: Path, repo: str = "owner/repo",
-              agent: str = "pi", tier: str = "targeted"):
+              agent: str = "pi", tier: str = "targeted",
+              project_number: Optional[int] = None):
     """Generate the full Ralph v3 project scaffold."""
 
     print(f"Scaffolding Ralph v3 project at: {project_dir}")
@@ -425,10 +447,12 @@ def scaffold(project_dir: Path, repo: str = "owner/repo",
     print("  ✓  .gitignore")
 
     # ── .ralph/ ──────────────────────────────────────────
+    project_line = f"project = {project_number}" if project_number else "# project = 1"
     write_file(project_dir / ".ralph" / "config.toml",
                CONFIG_TOML.replace("{repo}", repo)
                           .replace("{agent}", agent)
-                          .replace("{tier}", tier))
+                          .replace("{tier}", tier)
+                          .replace("{project_line}", project_line))
     print("  ✓  .ralph/config.toml")
 
     # ── config/ ──────────────────────────────────────────
@@ -666,6 +690,7 @@ Examples:
   ralph init my-project       Create and init a new directory (interactive)
   ralph init . --yes          Init current directory with all defaults
   ralph init . --yes --create-labels   Also create GitHub labels
+  ralph init . --yes --github-project 5   Enable board sync for project #5
         """)
     parser.add_argument(
         "name", nargs="?", default=None,
@@ -682,6 +707,9 @@ Examples:
     parser.add_argument(
         "--tier", choices=["smoke", "targeted", "integration", "full"],
         default=None, help="Default test tier (default: targeted)")
+    parser.add_argument(
+        "--github-project", type=int, default=None, metavar="N",
+        help="Enable GitHub Project board sync for project number N")
 
     args = parser.parse_args()
 
@@ -746,6 +774,26 @@ Examples:
     tier = args.tier or "targeted"
     tier = _prompt("Default test tier", tier, yes=args.yes)
 
+    # ── GitHub Project board sync ──
+    project_number = None
+    if args.github_project is not None:
+        project_number = args.github_project
+    elif not args.yes:
+        if _confirm("Enable GitHub Project board sync?", default=False):
+            while True:
+                answer = _prompt("GitHub project number", "", yes=False).strip()
+                if not answer:
+                    project_number = None
+                    break
+                try:
+                    project_number = int(answer)
+                    if project_number <= 0:
+                        print("Project number must be positive.")
+                        continue
+                    break
+                except ValueError:
+                    print("Please enter a valid integer project number.")
+
     print()
 
     # ── GitHub labels ──
@@ -770,7 +818,8 @@ Examples:
         print()
 
     # ── Scaffold ──
-    scaffold(project_dir, repo, agent=agent, tier=tier)
+    scaffold(project_dir, repo, agent=agent, tier=tier,
+             project_number=project_number)
 
     # ── Git init (if not already a repo) ──
     if not (project_dir / ".git").exists():

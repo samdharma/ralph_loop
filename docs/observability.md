@@ -157,8 +157,10 @@ Create a GitHub Project with these columns mapped to labels:
 | Review | `status:review` |
 | Blocked | `status:blocked` |
 
-Ralph updates the labels automatically, so cards move between columns in real
-time.
+Ralph updates the labels automatically. To also move cards between columns,
+configure `ticket.project` during `ralph init` (or manually in
+`.ralph/config.toml`) so Ralph can mirror each label to the Project Status field.
+Without `ticket.project`, labels update but the Kanban column does not.
 
 ---
 

@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from project_sync import sync_status, sync_closed
+from project_sync import sync_status, sync_closed, _get_config
 
 
 # ─────────────────────────────────────────────────────────
@@ -53,6 +53,16 @@ def run(cmd: list[str], check: bool = True, capture: bool = True,
 def gh(*args: str) -> subprocess.CompletedProcess:
     """Run `gh` command. Raises on failure."""
     return run(["gh", *args])
+
+
+def gh_comment(issue_num: int, body: str) -> bool:
+    """Post a comment on the GitHub issue. Fail-soft."""
+    try:
+        gh("issue", "comment", str(issue_num), "--body", body)
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"[ralph] WARNING: could not comment on #{issue_num}: {e}")
+        return False
 
 
 def git(*args: str) -> subprocess.CompletedProcess:
@@ -217,12 +227,14 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     print(f"{'='*50}\n")
 
     log_metrics("pipeline_start", issue=str(issue_num))
+    gh_comment(issue_num, f"⏳ Ralph pipeline started for #{issue_num}: {issue['title']}")
 
     # ── Pre-flight check ──
     if PREFLIGHT_SCRIPT.exists():
         result = run(["bash", str(PREFLIGHT_SCRIPT)], check=False)
         if result.returncode != 0:
             print(f"[ralph] Pre-flight FAILED for #{issue_num}")
+            gh_comment(issue_num, "🚦 Pre-flight checks failed. Blocking issue.")
             transition_label(issue_num, "status:blocked", "status:design")
             return False
 
@@ -231,6 +243,7 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     if not run_design_stage(issue):
         clear_checkpoint()
         _cleanup_session(session_file)
+        gh_comment(issue_num, "❌ DESIGN stage failed. Blocking issue.")
         transition_label(issue_num, "status:blocked", "status:design")
         log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="design")
         return False
@@ -239,9 +252,11 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     except subprocess.CalledProcessError:
         clear_checkpoint()
         _cleanup_session(session_file)
+        gh_comment(issue_num, "💥 DESIGN commit/push failed. Blocking issue.")
         transition_label(issue_num, "status:blocked", "status:design")
         log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="design", reason="push_failed")
         return False
+    gh_comment(issue_num, "✅ DESIGN stage completed and committed.")
     transition_label(issue_num, "status:build", "status:design")
 
     # ── STAGE 2: BUILD ──
@@ -249,6 +264,7 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     if not run_build_stage(issue):
         clear_checkpoint()
         _cleanup_session(session_file)
+        gh_comment(issue_num, "❌ BUILD stage failed. Blocking issue.")
         transition_label(issue_num, "status:blocked", "status:build")
         log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="build")
         return False
@@ -257,9 +273,11 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     except subprocess.CalledProcessError:
         clear_checkpoint()
         _cleanup_session(session_file)
+        gh_comment(issue_num, "💥 BUILD commit/push failed. Blocking issue.")
         transition_label(issue_num, "status:blocked", "status:build")
         log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="build", reason="push_failed")
         return False
+    gh_comment(issue_num, "✅ BUILD stage completed and committed.")
     transition_label(issue_num, "status:verify", "status:build")
 
     # ── STAGE 3: VERIFY ──
@@ -272,14 +290,17 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
         print(f"\n[ralph] #{issue_num} PASSED — handing off for review")
         if auto_close:
             sync_closed(issue_num)
+            gh_comment(issue_num, "✅ VERIFY passed. Auto-closing issue.")
             gh("issue", "close", str(issue_num))
             print(f"[ralph] #{issue_num} auto-closed")
             log_metrics("pipeline_complete", issue=str(issue_num), result="closed")
         else:
+            gh_comment(issue_num, "✅ VERIFY passed. Handing off for human review.")
             transition_label(issue_num, "status:review", "status:verify")
             log_metrics("pipeline_complete", issue=str(issue_num), result="review")
     else:
         print(f"\n[ralph] #{issue_num} FAILED VERIFY — marking blocked")
+        gh_comment(issue_num, "❌ VERIFY stage failed. Blocking issue.")
         transition_label(issue_num, "status:blocked", "status:verify")
         log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="verify")
 
@@ -295,6 +316,7 @@ def run_design_stage(issue: dict) -> bool:
     Saves session file for Mode B sub-agent context inheritance."""
     issue_num = issue["number"]
     print(f"\n[ralph] STAGE 1/3: DESIGN for #{issue_num}")
+    gh_comment(issue_num, "🎨 DESIGN stage started.")
     log_metrics("stage_start", issue=str(issue_num), stage="design")
 
     session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
@@ -314,6 +336,7 @@ def run_build_stage(issue: dict) -> bool:
     """
     issue_num = issue["number"]
     print(f"\n[ralph] STAGE 2/3: BUILD for #{issue_num}")
+    gh_comment(issue_num, "🔨 BUILD stage started.")
     log_metrics("stage_start", issue=str(issue_num), stage="build")
 
     # Run pre-flight before build
@@ -321,6 +344,7 @@ def run_build_stage(issue: dict) -> bool:
         result = run(["bash", str(PREFLIGHT_SCRIPT)], check=False)
         if result.returncode != 0:
             print(f"[ralph] Pre-flight FAILED for #{issue_num}")
+            gh_comment(issue_num, "🚦 BUILD pre-flight checks failed. Blocking issue.")
             return False
 
     # ── Step 2a: TEST sub-agent (Mode A — isolated) ──
@@ -340,6 +364,10 @@ def run_build_stage(issue: dict) -> bool:
         check=False, capture=False
     )
     success = (val_result.returncode == 0)
+    if success:
+        gh_comment(issue_num, "✅ BUILD validation gate passed.")
+    else:
+        gh_comment(issue_num, "❌ BUILD validation gate failed.")
 
     log_metrics("stage_complete", issue=str(issue_num), stage="build")
     return success
@@ -353,6 +381,7 @@ def run_verify_stage(issue: dict) -> bool:
     """
     issue_num = issue["number"]
     print(f"\n[ralph] STAGE 3/3: VERIFY for #{issue_num}")
+    gh_comment(issue_num, "🔍 VERIFY stage started (independent review).")
     log_metrics("stage_start", issue=str(issue_num), stage="verify",
                 subagent="verify", mode="A")
 
@@ -370,6 +399,10 @@ def run_verify_stage(issue: dict) -> bool:
             prompt += "\n\n(…diff truncated — review key files from the repo)"
 
     success = invoke_agent(prompt, issue_num)
+    if success:
+        gh_comment(issue_num, "✅ VERIFY review sub-agent completed.")
+    else:
+        gh_comment(issue_num, "❌ VERIFY review sub-agent failed.")
     log_metrics("subagent_complete", issue=str(issue_num), subagent="verify",
                 mode="A", result="success" if success else "failure")
 
@@ -383,6 +416,10 @@ def run_verify_stage(issue: dict) -> bool:
             check=False, capture=False
         )
         success = (val_result.returncode == 0)
+        if success:
+            gh_comment(issue_num, "✅ VERIFY validation gate passed.")
+        else:
+            gh_comment(issue_num, "❌ VERIFY validation gate failed.")
 
     log_metrics("stage_complete", issue=str(issue_num), stage="verify")
     return success
@@ -400,11 +437,16 @@ def _run_test_subagent(issue: dict) -> bool:
     """
     issue_num = issue["number"]
     print(f"\n  [ralph] BUILD / TEST sub-agent for #{issue_num} (Mode A — isolated)")
+    gh_comment(issue_num, "🧪 TEST sub-agent started (isolated).")
     log_metrics("subagent_start", issue=str(issue_num), subagent="test", mode="A")
 
     prompt = _assemble_subagent_prompt(issue, "test.md", mode="A")
     success = invoke_agent(prompt, issue_num)
 
+    if success:
+        gh_comment(issue_num, "✅ TEST sub-agent completed.")
+    else:
+        gh_comment(issue_num, "❌ TEST sub-agent failed.")
     log_metrics("subagent_complete", issue=str(issue_num), subagent="test",
                 mode="A", result="success" if success else "failure")
     return success
@@ -418,12 +460,17 @@ def _run_implement_subagent(issue: dict) -> bool:
     """
     issue_num = issue["number"]
     print(f"\n  [ralph] BUILD / IMPLEMENT sub-agent for #{issue_num} (Mode B — inherits DESIGN context)")
+    gh_comment(issue_num, "🛠️ IMPLEMENT sub-agent started (continuing DESIGN context).")
     log_metrics("subagent_start", issue=str(issue_num), subagent="implement", mode="B")
 
     session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
     prompt = _assemble_subagent_prompt(issue, "implement.md", mode="B")
     success = invoke_agent(prompt, issue_num, session_file=session_file, continue_session=True)
 
+    if success:
+        gh_comment(issue_num, "✅ IMPLEMENT sub-agent completed.")
+    else:
+        gh_comment(issue_num, "❌ IMPLEMENT sub-agent failed.")
     log_metrics("subagent_complete", issue=str(issue_num), subagent="implement",
                 mode="B", result="success" if success else "failure")
     return success
@@ -442,6 +489,16 @@ def _has_commits() -> bool:
         result = git("rev-list", "--count", "HEAD")
         return int(result.stdout.strip()) >= 2
     except Exception:
+        return False
+
+
+def _has_unpushed_commits(branch: str) -> bool:
+    """Return True if the local branch has commits not yet pushed to origin."""
+    try:
+        result = git("rev-list", "--count", f"origin/{branch}..{branch}")
+        return int(result.stdout.strip()) > 0
+    except subprocess.CalledProcessError:
+        # No upstream or origin branch missing — assume nothing to push.
         return False
 
 
@@ -572,9 +629,11 @@ def commit_stage(issue_num: int, stage: str):
         # No changes to commit (e.g., DESIGN stage may not change files)
         print(f"[ralph] Nothing to commit for {stage}")
 
-    if committed:
-        branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+    if _has_unpushed_commits(branch):
         _push_with_retry(branch)
+    elif committed:
+        print(f"[ralph] No unpushed commits on {branch}")
 
 
 def _push_with_retry(branch: str, retries: int = 3, backoff: float = 2.0):
@@ -608,6 +667,39 @@ def _parse_reference_docs(body: str) -> list[str]:
     return refs
 
 
+def _resolve_agent_binary() -> str:
+    """
+    Determine which AI agent binary to invoke.
+
+    Resolution order:
+      1. RALPH_AGENT environment variable.
+      2. [agent].binary in .ralph/config.toml.
+      3. First available binary on PATH: pi, then kimi.
+
+    Returns an empty string if no agent can be resolved.
+    """
+    # 1. Environment override
+    agent_bin = os.environ.get("RALPH_AGENT", "").strip()
+    if agent_bin:
+        return agent_bin
+
+    # 2. Project config
+    try:
+        config = _get_config()
+        configured = config.get("agent", {}).get("binary", "").strip()
+        if configured:
+            return configured
+    except Exception:
+        pass
+
+    # 3. Auto-detect from PATH
+    for candidate in ["pi", "kimi"]:
+        if subprocess.run(["which", candidate], capture_output=True).returncode == 0:
+            return candidate
+
+    return ""
+
+
 def invoke_agent(prompt: str, issue_num: int, session_file: Optional[Path] = None,
                  continue_session: bool = False) -> bool:
     """
@@ -627,15 +719,10 @@ def invoke_agent(prompt: str, issue_num: int, session_file: Optional[Path] = Non
     Returns True if agent exits successfully.
     """
     # Detect agent binary
-    agent_bin = os.environ.get("RALPH_AGENT", "")
+    agent_bin = _resolve_agent_binary()
     if not agent_bin:
-        for candidate in ["pi", "kimi"]:
-            if subprocess.run(["which", candidate], capture_output=True).returncode == 0:
-                agent_bin = candidate
-                break
-
-    if not agent_bin:
-        print("[ralph] ERROR: No AI agent found (pi or kimi). Set RALPH_AGENT.")
+        print("[ralph] ERROR: No AI agent found (pi or kimi). "
+              "Set [agent].binary in .ralph/config.toml or set RALPH_AGENT.")
         return False
 
     mode_str = " (continue)" if continue_session else ""
@@ -846,9 +933,11 @@ def run_loop(auto_close: bool = False):
                 print(f"[ralph] Resuming #{issue_num} from stage: {resume_stage}")
 
                 if resume_stage == "build":
+                    gh_comment(issue_num, "🔄 Ralph resuming BUILD stage after crash recovery.")
                     save_checkpoint(issue_num, "build")
                     success = run_build_stage(issue)
                     if not success:
+                        gh_comment(issue_num, "❌ Resumed BUILD stage failed. Blocking issue.")
                         transition_label(issue_num, "status:blocked", "status:build")
                         clear_checkpoint()
                         recovered = None
@@ -857,28 +946,34 @@ def run_loop(auto_close: bool = False):
                         commit_stage(issue_num, "build")
                     except subprocess.CalledProcessError:
                         clear_checkpoint()
+                        gh_comment(issue_num, "💥 Resumed BUILD commit/push failed. Blocking issue.")
                         transition_label(issue_num, "status:blocked", "status:build")
                         log_metrics("pipeline_complete", issue=str(issue_num), result="blocked", stage="build", reason="push_failed")
                         recovered = None
                         continue
+                    gh_comment(issue_num, "✅ Resumed BUILD stage completed and committed.")
                     transition_label(issue_num, "status:verify", "status:build")
                     # Fall through to VERIFY
                     resume_stage = "verify"
 
                 if resume_stage == "verify":
+                    gh_comment(issue_num, "🔄 Ralph resuming VERIFY stage after crash recovery.")
                     save_checkpoint(issue_num, "verify")
                     verify_pass = run_verify_stage(issue)
                     clear_checkpoint()
                     if verify_pass:
                         if auto_close:
                             sync_closed(issue_num)
+                            gh_comment(issue_num, "✅ Resumed VERIFY passed. Auto-closing issue.")
                             gh("issue", "close", str(issue_num))
                             print(f"[ralph] #{issue_num} auto-closed")
                             log_metrics("pipeline_complete", issue=str(issue_num), result="closed")
                         else:
+                            gh_comment(issue_num, "✅ Resumed VERIFY passed. Handing off for human review.")
                             transition_label(issue_num, "status:review", "status:verify")
                             log_metrics("pipeline_complete", issue=str(issue_num), result="review")
                     else:
+                        gh_comment(issue_num, "❌ Resumed VERIFY stage failed. Blocking issue.")
                         transition_label(issue_num, "status:blocked", "status:verify")
                         log_metrics("pipeline_complete", issue=str(issue_num), result="blocked")
                     recovered = None
@@ -910,6 +1005,7 @@ def run_loop(auto_close: bool = False):
             # ── Claim & Pipeline ──
             issue_num = issue["number"]
             transition_label(issue_num, "status:design", "status:ready")
+            gh_comment(issue_num, f"⏳ Ralph claimed issue #{issue_num} and started DESIGN.")
             run_pipeline(issue, auto_close=auto_close)
 
             # Brief pause between issues
@@ -940,9 +1036,9 @@ def run_loop(auto_close: bool = False):
                 }
                 remove_label = stage_label_map.get(stage, "status:design")
                 # Add note that the issue was interrupted
-                gh("issue", "comment", str(issue_num),
-                   "--body", "⏸️ Ralph daemon interrupted (SIGINT/SIGTERM). Issue was in "
-                   f"{stage} stage. Re-queue the issue (set status:ready) to retry.")
+                gh_comment(issue_num,
+                           "⏸️ Ralph daemon interrupted (SIGINT/SIGTERM). Issue was in "
+                           f"{stage} stage. Re-queue the issue (set status:ready) to retry.")
                 transition_label(issue_num, "status:blocked", remove_label)
                 clear_checkpoint()
                 print(f"[ralph] Marked #{issue_num} as status:blocked (interrupted, was: {stage})")

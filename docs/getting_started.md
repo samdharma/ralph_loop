@@ -575,7 +575,7 @@ stateDiagram-v2
 |----------|---------|---------|
 | `RALPH_HOME` | `~/.ralph` | Ralph install directory |
 | `RALPH_PROJECT_DIR` | `pwd` | Project root |
-| `RALPH_AGENT` | auto-detect | Force agent: `pi` or `kimi` |
+| `RALPH_AGENT` | (from config, then auto-detect) | Override agent: `pi` or `kimi` |
 | `RALPH_PYTHON_CMD` | `python3` | Python executable |
 | `RALPH_GITHUB_PROJECT` | (from config) | Override `ticket.project` board sync |
 | `RALPH_PROJECT_SYNC` | (from config) | Set to `0` to disable board sync; `1` to force enable |
@@ -620,11 +620,22 @@ ralph init . --create-labels
 
 ### Agent not found
 
+Ralph resolves the agent in this order:
+
+1. `RALPH_AGENT` environment variable
+2. `[agent].binary` in `.ralph/config.toml`
+3. First available on `PATH`: `pi`, then `kimi`
+
 ```bash
 # Verify agent is installed
 which pi     # or: which kimi
 
-# Set explicitly
+# Set persistently in the project config
+cat .ralph/config.toml
+# [agent]
+# binary = "kimi"
+
+# Or override temporarily for one run
 export RALPH_AGENT=pi
 ralph daemon
 ```

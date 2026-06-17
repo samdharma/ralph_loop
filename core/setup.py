@@ -14,6 +14,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import project_sync
+
 
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 
@@ -195,6 +197,16 @@ def check_gh_labels():
         return False, str(e)
 
 
+def check_project_sync():
+    """Verify GitHub Project board sync if a project is configured."""
+    if not project_sync.project_enabled():
+        return True, "board sync disabled (set ticket.project in .ralph/config.toml or run 'ralph init' again)"
+    ok, detail = project_sync.check_project_access()
+    if ok:
+        return True, f"board sync enabled — {detail}"
+    return True, f"board sync enabled but {detail} (sync will warn but not block the pipeline)"
+
+
 # ─────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────
@@ -215,6 +227,7 @@ def main() -> int:
     all_pass &= check("pi-subagent extension", check_pi_subagent)
     all_pass &= check("GitHub repo access", check_gh_repo_access)
     all_pass &= check("Required labels", check_gh_labels)
+    check("GitHub Project board sync", check_project_sync)
 
     print()
 
