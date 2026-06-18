@@ -5,7 +5,7 @@ labels: documentation, triage
 ---
 
 <!--
-Template: docs/agent/issue_template/docs_request.md
+Template: docs/issue_template/docs_request.md
 References:
 - docs/getting_started.md
 - docs/observability.md

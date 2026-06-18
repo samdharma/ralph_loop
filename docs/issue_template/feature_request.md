@@ -5,7 +5,7 @@ labels: enhancement, triage
 ---
 
 <!--
-Template: docs/agent/issue_template/feature_request.md
+Template: docs/issue_template/feature_request.md
 References:
 - docs/getting_started.md
 - docs/v3-redesign.md

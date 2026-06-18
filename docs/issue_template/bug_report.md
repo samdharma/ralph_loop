@@ -5,7 +5,7 @@ labels: bug, triage
 ---
 
 <!--
-Template: docs/agent/issue_template/bug_report.md
+Template: docs/issue_template/bug_report.md
 References:
 - docs/getting_started.md
 - docs/observability.md

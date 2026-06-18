@@ -5,7 +5,7 @@ labels: task, triage
 ---
 
 <!--
-Template: docs/agent/issue_template/task.md
+Template: docs/issue_template/task.md
 References:
 - docs/getting_started.md
 - docs/observability.md

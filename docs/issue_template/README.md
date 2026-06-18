@@ -17,10 +17,10 @@ Each template is tailored to a specific workload type. Pick the one that matches
 
 For more detailed descriptions of project concepts, see:
 
-- [`docs/getting_started.md`](../../getting_started.md) — Project overview, setup, and first steps.
-- [`docs/observability.md`](../../observability.md) — Metrics, logging, and debugging guidance.
-- [`docs/system_test.md`](../../system_test.md) — How system tests are organized and run.
-- [`docs/v3-redesign.md`](../../v3-redesign.md) — High-level redesign notes and architecture decisions.
+- [`docs/getting_started.md`](../getting_started.md) — Project overview, setup, and first steps.
+- [`docs/observability.md`](../observability.md) — Metrics, logging, and debugging guidance.
+- [`docs/system_test.md`](../system_test.md) — How system tests are organized and run.
+- [`docs/v3-redesign.md`](../v3-redesign.md) — High-level redesign notes and architecture decisions.
 
 ## Writing a Good Issue
 

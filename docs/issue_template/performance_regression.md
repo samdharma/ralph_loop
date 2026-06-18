@@ -5,7 +5,7 @@ labels: performance, triage
 ---
 
 <!--
-Template: docs/agent/issue_template/performance_regression.md
+Template: docs/issue_template/performance_regression.md
 References:
 - docs/observability.md
 - docs/getting_started.md
