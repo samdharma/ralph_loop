@@ -104,3 +104,5 @@ my-project/
 ## License
 
 MIT
+
+*Last updated: 2026-06-19.*

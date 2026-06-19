@@ -315,3 +315,5 @@ See [Observability](observability.md) for dashboards, metric event types, and ex
 ---
 
 *Next: [Observability](observability.md) for metrics and monitoring, [v3 Redesign](v3-redesign.md) for system architecture.*
+
+*Last updated: 2026-06-19.*

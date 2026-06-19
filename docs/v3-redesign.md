@@ -998,4 +998,4 @@ done
 
 ---
 
-*Last updated: 2026-06-14. Phase 1 + 2 + 3 complete. E2E validated (real-agent + crash-recovery). 14/18 E2E gates passed, 4 deferred. Test repo: samdharma/ralph-e2e-test.*
+*Last updated: 2026-06-19. Retry labels (status:build-retry, status:verify-retry), design-summary issue comments, structured failure reporting added.*

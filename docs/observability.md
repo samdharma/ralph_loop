@@ -117,3 +117,5 @@ ralph report --period=week   # weekly summary
 
 Generates a summary from metrics + GitHub issue history: issues processed,
 pass/fail rates, blocked issues, retries.
+
+*Last updated: 2026-06-19.*
