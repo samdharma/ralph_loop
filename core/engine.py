@@ -139,6 +139,49 @@ def fetch_ready_ticket() -> Optional[dict]:
     return None
 
 
+# Retry labels let humans re-queue a blocked issue without re-running all stages.
+# Ordered smallest scope first — verify-only is faster than build+verify.
+RETRY_LABEL_MAP = {
+    "status:verify-retry": "verify",
+    "status:build-retry": "build",
+}
+
+
+def fetch_retry_issue() -> Optional[tuple[dict, str]]:
+    """
+    Fetch the open retry-labeled issue with the smallest number.
+
+    Checks status:verify-retry first (fastest), then status:build-retry.
+    Returns (issue_dict, resume_stage) or None.
+    """
+    for label, resume_stage in RETRY_LABEL_MAP.items():
+        try:
+            result = gh(
+                "issue",
+                "list",
+                "--label",
+                label,
+                "--state",
+                "open",
+                "--json",
+                "number,title,body",
+                "--limit",
+                "10",
+            )
+            issues = json.loads(result.stdout)
+            if not issues:
+                continue
+            issues.sort(key=lambda i: i["number"])
+            for issue in issues:
+                if _dependencies_met(issue):
+                    return issue, resume_stage
+                else:
+                    print(f"[ralph] Skipping #{issue['number']} — unmet dependencies")
+        except subprocess.CalledProcessError:
+            continue
+    return None
+
+
 def sync_ready_board():
     """
     Ensure all open status:ready issues are in the Ready board column.
@@ -246,7 +289,9 @@ def transition_label(
 # ─────────────────────────────────────────────────────────
 
 
-def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
+def run_pipeline(
+    issue: dict, auto_close: bool = False, resume_stage: Optional[str] = None
+) -> bool:
     """
     Phase 3: 3-stage pipeline with sub-agents.
     DESIGN saves session for Mode B context inheritance.
@@ -257,6 +302,9 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
         issue: The GitHub issue dict.
         auto_close: If True, close the issue on successful VERIFY
                     instead of marking status:review.
+        resume_stage: If "build", skip DESIGN and start at BUILD.
+                      If "verify", skip DESIGN+BUILD and start at VERIFY.
+                      None runs the full pipeline from DESIGN.
     """
     issue_num = issue["number"]
     session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
@@ -265,7 +313,7 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
     print(f"[ralph] Pipeline starting for #{issue_num}: {issue['title']}")
     print(f"{'='*50}\n")
 
-    log_metrics("pipeline_start", issue=str(issue_num))
+    log_metrics("pipeline_start", issue=str(issue_num), resume_stage=resume_stage or "")
     gh_comment(
         issue_num, f"⏳ Ralph pipeline started for #{issue_num}: {issue['title']}"
     )
@@ -280,62 +328,92 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
             return False
 
     # ── STAGE 1: DESIGN ──
-    save_checkpoint(issue_num, "design")
-    if not run_design_stage(issue):
-        clear_checkpoint()
-        _cleanup_issue_artifacts(issue_num)
-        gh_comment(issue_num, "❌ DESIGN stage failed. Blocking issue.")
-        transition_label(issue_num, "status:blocked", "status:design")
-        log_metrics(
-            "pipeline_complete", issue=str(issue_num), result="blocked", stage="design"
+    if resume_stage in ("build", "verify"):
+        gh_comment(
+            issue_num,
+            f"⏭️ Skipping DESIGN — resuming from `{resume_stage}`. "
+            "Using existing `docs/agent/PROGRESS.md`.",
         )
-        return False
-    try:
-        commit_stage(issue_num, "design")
-    except subprocess.CalledProcessError:
-        clear_checkpoint()
-        _cleanup_issue_artifacts(issue_num)
-        gh_comment(issue_num, "💥 DESIGN commit/push failed. Blocking issue.")
-        transition_label(issue_num, "status:blocked", "status:design")
-        log_metrics(
-            "pipeline_complete",
-            issue=str(issue_num),
-            result="blocked",
-            stage="design",
-            reason="push_failed",
-        )
-        return False
-    gh_comment(issue_num, "✅ DESIGN stage completed and committed.")
-    transition_label(issue_num, "status:build", "status:design")
+    else:
+        save_checkpoint(issue_num, "design")
+        if not run_design_stage(issue):
+            clear_checkpoint()
+            _cleanup_issue_artifacts(issue_num)
+            partial_spec = _read_partial_design_spec()
+            detail = _format_stage_failure("DESIGN", partial_spec=partial_spec)
+            gh_comment(issue_num, detail)
+            transition_label(issue_num, "status:blocked", "status:design")
+            log_metrics(
+                "pipeline_complete",
+                issue=str(issue_num),
+                result="blocked",
+                stage="design",
+            )
+            return False
+        try:
+            commit_stage(issue_num, "design")
+        except subprocess.CalledProcessError:
+            clear_checkpoint()
+            _cleanup_issue_artifacts(issue_num)
+            gh_comment(issue_num, "💥 DESIGN commit/push failed. Blocking issue.")
+            transition_label(issue_num, "status:blocked", "status:design")
+            log_metrics(
+                "pipeline_complete",
+                issue=str(issue_num),
+                result="blocked",
+                stage="design",
+                reason="push_failed",
+            )
+            return False
+        gh_comment(issue_num, "✅ DESIGN stage completed and committed.")
+        # Post a permanent design summary to the GitHub issue.
+        design_summary = _summarize_design_spec()
+        if design_summary:
+            gh_comment(issue_num, design_summary)
+        transition_label(issue_num, "status:build", "status:design")
 
     # ── STAGE 2: BUILD ──
-    save_checkpoint(issue_num, "build")
-    if not run_build_stage(issue):
-        clear_checkpoint()
-        _cleanup_issue_artifacts(issue_num)
-        gh_comment(issue_num, "❌ BUILD stage failed. Blocking issue.")
-        transition_label(issue_num, "status:blocked", "status:build")
-        log_metrics(
-            "pipeline_complete", issue=str(issue_num), result="blocked", stage="build"
+    if resume_stage == "verify":
+        gh_comment(
+            issue_num,
+            "⏭️ Skipping BUILD — resuming from `verify`. "
+            "Using existing implementation.",
         )
-        return False
-    try:
-        commit_stage(issue_num, "build")
-    except subprocess.CalledProcessError:
-        clear_checkpoint()
-        _cleanup_issue_artifacts(issue_num)
-        gh_comment(issue_num, "💥 BUILD commit/push failed. Blocking issue.")
-        transition_label(issue_num, "status:blocked", "status:build")
-        log_metrics(
-            "pipeline_complete",
-            issue=str(issue_num),
-            result="blocked",
-            stage="build",
-            reason="push_failed",
-        )
-        return False
-    gh_comment(issue_num, "✅ BUILD stage completed and committed.")
-    transition_label(issue_num, "status:verify", "status:build")
+    else:
+        save_checkpoint(issue_num, "build")
+        if not run_build_stage(issue):
+            clear_checkpoint()
+            _cleanup_issue_artifacts(issue_num)
+            detail = _format_stage_failure(
+                "BUILD",
+                fallback="BUILD stage did not complete. See earlier sub-agent comments for details.",
+            )
+            gh_comment(issue_num, detail)
+            transition_label(issue_num, "status:blocked", "status:build")
+            log_metrics(
+                "pipeline_complete",
+                issue=str(issue_num),
+                result="blocked",
+                stage="build",
+            )
+            return False
+        try:
+            commit_stage(issue_num, "build")
+        except subprocess.CalledProcessError:
+            clear_checkpoint()
+            _cleanup_issue_artifacts(issue_num)
+            gh_comment(issue_num, "💥 BUILD commit/push failed. Blocking issue.")
+            transition_label(issue_num, "status:blocked", "status:build")
+            log_metrics(
+                "pipeline_complete",
+                issue=str(issue_num),
+                result="blocked",
+                stage="build",
+                reason="push_failed",
+            )
+            return False
+        gh_comment(issue_num, "✅ BUILD stage completed and committed.")
+        transition_label(issue_num, "status:verify", "status:build")
 
     # ── STAGE 3: VERIFY ──
     save_checkpoint(issue_num, "verify")
@@ -357,7 +435,11 @@ def run_pipeline(issue: dict, auto_close: bool = False) -> bool:
             log_metrics("pipeline_complete", issue=str(issue_num), result="review")
     else:
         print(f"\n[ralph] #{issue_num} FAILED VERIFY — marking blocked")
-        gh_comment(issue_num, "❌ VERIFY stage failed. Blocking issue.")
+        detail = _format_stage_failure(
+            "VERIFY",
+            fallback="Independent review found issues. See review comment above for details.",
+        )
+        gh_comment(issue_num, detail)
         transition_label(issue_num, "status:blocked", "status:verify")
         log_metrics(
             "pipeline_complete", issue=str(issue_num), result="blocked", stage="verify"
@@ -663,6 +745,116 @@ def _load_test_tracking(issue_num: int) -> list[str]:
         return data.get("tests", [])
     except Exception:
         return []
+
+
+def _summarize_design_spec() -> Optional[str]:
+    """Read PROGRESS.md and return a condensed design summary for an issue comment."""
+    if not PROGRESS_FILE.exists():
+        return None
+    text = PROGRESS_FILE.read_text(encoding="utf-8")
+    lines = text.splitlines()
+
+    title = ""
+    summary_parts: list[str] = []
+    decisions: list[str] = []
+    risks: list[str] = []
+    ac_count = 0
+    section: Optional[str] = None
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("# ") and not title:
+            title = stripped.lstrip("# ").strip()
+            continue
+        if stripped.startswith("## Summary"):
+            section = "summary"
+            continue
+        if stripped.startswith("## Design Decisions"):
+            section = "decisions"
+            continue
+        if stripped.startswith("## Acceptance Criteria"):
+            section = "criteria"
+            continue
+        if stripped.startswith("## Risks"):
+            section = "risks"
+            continue
+        if stripped.startswith("## ") or stripped.startswith("# "):
+            section = None
+            continue
+        if section == "summary" and stripped:
+            summary_parts.append(stripped)
+        if section == "decisions" and stripped and stripped[0] in "0123456789-":
+            decisions.append(stripped)
+        if section == "criteria" and stripped.startswith("- ["):
+            ac_count += 1
+        if section == "risks" and stripped and stripped.startswith("- "):
+            risks.append(stripped)
+
+    if not title:
+        return None
+
+    out = ["## 📐 Design Complete", ""]
+    out.append(f"**{title}**")
+    out.append("")
+    if summary_parts:
+        out.append(f"**Summary:** {' '.join(summary_parts)}")
+        out.append("")
+    out.append("**Files:** See [`docs/agent/PROGRESS.md`](docs/agent/PROGRESS.md)")
+    if decisions:
+        out.append("")
+        out.append("**Key Decisions:**")
+        for d in decisions:
+            out.append(f"- {d}")
+    if risks:
+        out.append("")
+        out.append("**Risks:**")
+        for r in risks:
+            out.append(r)
+    out.append("")
+    out.append(f"**Acceptance Criteria:** {ac_count} criteria defined.")
+    out.append("")
+    out.append("Full design spec committed to `docs/agent/PROGRESS.md`.")
+    return "\n".join(out)
+
+
+def _read_partial_design_spec(max_chars: int = 2000) -> Optional[str]:
+    """Read PROGRESS.md if it exists (including partial/incomplete specs).
+    Returns truncated content or None if the file doesn't exist."""
+    if not PROGRESS_FILE.exists():
+        return None
+    try:
+        text = PROGRESS_FILE.read_text(encoding="utf-8").strip()
+        if not text:
+            return None
+        if len(text) > max_chars:
+            text = (
+                text[:max_chars].rstrip()
+                + "\n\n_(truncated — see file for full content)_"
+            )
+        return text
+    except Exception:
+        return None
+
+
+def _format_stage_failure(
+    stage: str,
+    partial_spec: Optional[str] = None,
+    fallback: str = "Blocking issue.",
+) -> str:
+    """Build a detailed stage-failure comment with pointers to artifacts."""
+    lines = [f"❌ {stage} stage failed.", ""]
+    lines.append(
+        "See [`docs/agent/PROGRESS.md`](docs/agent/PROGRESS.md) for the design spec."
+    )
+    lines.append("Check `.ralph/` for any agent-produced logs or partial artifacts.")
+    if partial_spec:
+        lines.append("")
+        lines.append("## Partial Design Spec")
+        lines.append("")
+        lines.append(partial_spec)
+    lines.append("")
+    lines.append(fallback)
+    return "\n".join(lines)
 
 
 def _cleanup_issue_artifacts(issue_num: int):
@@ -1359,13 +1551,37 @@ def run_loop(auto_close: bool = False):
                 recovered = None
                 continue
 
+            # ── Check retry labels first (smallest scope = fastest) ──
+            retry = fetch_retry_issue()
+            if retry is not None:
+                issue, resume_stage = retry
+                issue_num = issue["number"]
+                if resume_stage == "verify":
+                    transition_label(issue_num, "status:verify", "status:verify-retry")
+                    gh_comment(
+                        issue_num,
+                        f"🔄 Ralph claimed #{issue_num} for VERIFY retry "
+                        "(skipping DESIGN + BUILD).",
+                    )
+                else:
+                    transition_label(issue_num, "status:build", "status:build-retry")
+                    gh_comment(
+                        issue_num,
+                        f"🔄 Ralph claimed #{issue_num} for BUILD retry "
+                        "(skipping DESIGN).",
+                    )
+                run_pipeline(issue, auto_close=auto_close, resume_stage=resume_stage)
+                if not _shutdown_requested:
+                    time.sleep(5)
+                continue
+
             # ── Ensure ready tickets are visible on the board ──
             sync_ready_board()
 
             # ── Fetch next ready ticket ──
             issue = fetch_ready_ticket()
             if issue is None:
-                print("[ralph] No ready tickets. Sleeping...")
+                print("[ralph] No ready or retry tickets. Sleeping...")
                 log_metrics("daemon_idle")
                 for _ in range(60):
                     if _shutdown_requested:
@@ -1409,10 +1625,22 @@ def run_loop(auto_close: bool = False):
                 }
                 remove_label = stage_label_map.get(stage, "status:design")
                 # Add note that the issue was interrupted
+                if stage == "verify":
+                    retry_hint = (
+                        " Set `status:verify-retry` to re-run VERIFY only, "
+                        "or `status:ready` for full pipeline."
+                    )
+                elif stage == "build":
+                    retry_hint = (
+                        " Set `status:build-retry` to re-run BUILD+VERIFY, "
+                        "or `status:ready` for full pipeline."
+                    )
+                else:
+                    retry_hint = " Set `status:ready` to retry the full pipeline."
                 gh_comment(
                     issue_num,
                     "⏸️ Ralph daemon interrupted (SIGINT/SIGTERM). Issue was in "
-                    f"{stage} stage. Re-queue the issue (set status:ready) to retry.",
+                    f"{stage} stage.{retry_hint}",
                 )
                 transition_label(issue_num, "status:blocked", remove_label)
                 clear_checkpoint()
