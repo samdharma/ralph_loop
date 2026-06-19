@@ -383,12 +383,17 @@ def run_pipeline(
         save_checkpoint(issue_num, "build")
         if not run_build_stage(issue):
             clear_checkpoint()
-            _cleanup_issue_artifacts(issue_num)
-            detail = _format_stage_failure(
-                "BUILD",
-                fallback="BUILD stage did not complete. See earlier sub-agent comments for details.",
-            )
-            gh_comment(issue_num, detail)
+            _archive_issue_artifacts(issue_num)
+            # run_build_stage already posted a detailed failure comment.
+            # Post a summary pointer to the archived report.
+            report_file = PROJECT_ROOT / ".ralph" / f"issue-{issue_num}-report.md"
+            if report_file.exists():
+                gh_comment(
+                    issue_num,
+                    f"📋 Full failure report saved to "
+                    f"`.ralph/blocked/issue-{issue_num}/issue-{issue_num}-report.md` "
+                    f"(also visible in `.ralph/issue-{issue_num}-report.md`).",
+                )
             transition_label(issue_num, "status:blocked", "status:build")
             log_metrics(
                 "pipeline_complete",
@@ -435,11 +440,15 @@ def run_pipeline(
             log_metrics("pipeline_complete", issue=str(issue_num), result="review")
     else:
         print(f"\n[ralph] #{issue_num} FAILED VERIFY — marking blocked")
-        detail = _format_stage_failure(
-            "VERIFY",
-            fallback="Independent review found issues. See review comment above for details.",
-        )
-        gh_comment(issue_num, detail)
+        _archive_issue_artifacts(issue_num)
+        # run_verify_stage already posts review result; add a pointer to the report
+        report_file = PROJECT_ROOT / ".ralph" / f"issue-{issue_num}-report.md"
+        if report_file.exists():
+            gh_comment(
+                issue_num,
+                f"📋 Full VERIFY failure report at "
+                f"`.ralph/blocked/issue-{issue_num}/issue-{issue_num}-report.md`.",
+            )
         transition_label(issue_num, "status:blocked", "status:verify")
         log_metrics(
             "pipeline_complete", issue=str(issue_num), result="blocked", stage="verify"
@@ -491,10 +500,26 @@ def run_build_stage(issue: dict) -> bool:
 
     # ── Step 2a: TEST sub-agent (Mode A — isolated) ──
     if not _run_test_subagent(issue):
+        _write_stage_report(
+            issue_num,
+            "BUILD",
+            "TEST sub-agent",
+            "TEST sub-agent (Mode A) failed to write tests.",
+        )
+        _rollback_working_tree()
+        log_metrics("stage_complete", issue=str(issue_num), stage="build")
         return False
 
     # ── Step 2b: IMPLEMENT sub-agent (Mode B — full context) ──
     if not _run_implement_subagent(issue):
+        _write_stage_report(
+            issue_num,
+            "BUILD",
+            "IMPLEMENT sub-agent",
+            "IMPLEMENT sub-agent (Mode B) failed to implement code.",
+        )
+        _rollback_working_tree()
+        log_metrics("stage_complete", issue=str(issue_num), stage="build")
         return False
 
     # ── Validation gate (only tests written by the independent QA session) ──
@@ -513,7 +538,7 @@ def run_build_stage(issue: dict) -> bool:
             ]
             + qa_tests,
             check=False,
-            capture=False,
+            capture=True,
         )
     else:
         print("[ralph] No QA-written tests detected; falling back to targeted tier")
@@ -525,13 +550,37 @@ def run_build_stage(issue: dict) -> bool:
                 "targeted",
             ],
             check=False,
-            capture=False,
+            capture=True,
         )
     success = val_result.returncode == 0
     if success:
         gh_comment(issue_num, "✅ BUILD validation gate passed.")
     else:
         gh_comment(issue_num, "❌ BUILD validation gate failed.")
+        # Capture the full output for the report
+        val_output = (val_result.stdout or "") + "\n" + (val_result.stderr or "")
+        # Echo to terminal so the operator can see it live too
+        if val_result.stdout:
+            print(val_result.stdout, end="")
+        if val_result.stderr:
+            print(val_result.stderr, end="", file=sys.stderr)
+        # Extract the key failure lines for the GitHub comment
+        failure_summary = _extract_failure_summary(
+            val_result.stdout or "", val_result.stderr or ""
+        )
+        _write_stage_report(
+            issue_num,
+            "BUILD",
+            "VALIDATION gate",
+            val_output.strip() or "(no output captured)",
+        )
+        # Post the failure summary immediately so the issue shows what broke
+        detail = _format_stage_failure(
+            "BUILD",
+            report_content=f"**QA tests:** {', '.join(qa_tests) if qa_tests else 'targeted tier'}\n\n{failure_summary}",
+        )
+        gh_comment(issue_num, detail)
+        _rollback_working_tree()
 
     log_metrics("stage_complete", issue=str(issue_num), stage="build")
     return success
@@ -597,7 +646,7 @@ def run_verify_stage(issue: dict) -> bool:
                 ]
                 + qa_tests,
                 check=False,
-                capture=False,
+                capture=True,
             )
         else:
             print("[ralph] No QA-written tests detected; falling back to targeted tier")
@@ -609,13 +658,33 @@ def run_verify_stage(issue: dict) -> bool:
                     "targeted",
                 ],
                 check=False,
-                capture=False,
+                capture=True,
             )
         success = val_result.returncode == 0
         if success:
             gh_comment(issue_num, "✅ VERIFY validation gate passed.")
         else:
             gh_comment(issue_num, "❌ VERIFY validation gate failed.")
+            # Echo output to terminal and capture for report
+            val_output = (val_result.stdout or "") + "\n" + (val_result.stderr or "")
+            if val_result.stdout:
+                print(val_result.stdout, end="")
+            if val_result.stderr:
+                print(val_result.stderr, end="", file=sys.stderr)
+            failure_summary = _extract_failure_summary(
+                val_result.stdout or "", val_result.stderr or ""
+            )
+            _write_stage_report(
+                issue_num,
+                "VERIFY",
+                "VALIDATION gate",
+                val_output.strip() or "(no output captured)",
+            )
+            detail = _format_stage_failure(
+                "VERIFY",
+                report_content=failure_summary,
+            )
+            gh_comment(issue_num, detail)
 
     log_metrics("stage_complete", issue=str(issue_num), stage="verify")
     return success
@@ -646,18 +715,27 @@ def _run_test_subagent(issue: dict) -> bool:
     _save_test_tracking(issue_num, new_tests)
     if new_tests:
         print(f"  [ralph] TEST stage created/modified tests: {new_tests}")
-        gh_comment(issue_num, f"🧪 TEST stage produced tests: {', '.join(new_tests)}")
+        gh_comment(
+            issue_num,
+            f"🧪 TEST stage produced {len(new_tests)} test file(s): "
+            f"{', '.join(new_tests)}",
+        )
 
     if success:
         gh_comment(issue_num, "✅ TEST sub-agent completed.")
     else:
-        gh_comment(issue_num, "❌ TEST sub-agent failed.")
+        gh_comment(
+            issue_num,
+            "❌ TEST sub-agent failed (non-zero exit). "
+            "Check daemon logs for the agent conversation output.",
+        )
     log_metrics(
         "subagent_complete",
         issue=str(issue_num),
         subagent="test",
         mode="A",
         result="success" if success else "failure",
+        test_count=len(new_tests) if new_tests else 0,
     )
     return success
 
@@ -684,7 +762,11 @@ def _run_implement_subagent(issue: dict) -> bool:
     if success:
         gh_comment(issue_num, "✅ IMPLEMENT sub-agent completed.")
     else:
-        gh_comment(issue_num, "❌ IMPLEMENT sub-agent failed.")
+        gh_comment(
+            issue_num,
+            "❌ IMPLEMENT sub-agent failed (non-zero exit). "
+            "Check daemon logs for the agent conversation output.",
+        )
     log_metrics(
         "subagent_complete",
         issue=str(issue_num),
@@ -693,6 +775,96 @@ def _run_implement_subagent(issue: dict) -> bool:
         result="success" if success else "failure",
     )
     return success
+
+
+def _write_stage_report(
+    issue_num: int, stage: str, failed_step: str, output: str
+):
+    """Write a failure report file following the Failure Reporting Contract."""
+    report_path = PROJECT_ROOT / ".ralph" / f"issue-{issue_num}-report.md"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    # Truncate if enormous (GitHub comments already have their own limit)
+    max_output = 50000
+    if len(output) > max_output:
+        output = (
+            output[:max_output].rstrip()
+            + "\n\n_(output truncated for report file)_"
+        )
+    report = (
+        f"# Failure Report: Stage {stage}\n\n"
+        f"## Stage\n"
+        f"{stage} — {failed_step}\n\n"
+        f"## What Was Attempted\n"
+        f"Pipeline ran the {failed_step} step for issue #{issue_num}.\n\n"
+        f"## What Failed\n\n"
+        f"```\n{output}\n```\n\n"
+        f"## Root Cause\n"
+        f"See the output above for the specific test/lint failures.\n\n"
+        f"## What to Check\n"
+        f"- The full report is at `.ralph/issue-{issue_num}-report.md`\n"
+        f"- Design spec: `docs/agent/PROGRESS.md`\n"
+        f"- QA-written tests: `.ralph/issue-{issue_num}-tests.json`\n"
+    )
+    report_path.write_text(report, encoding="utf-8")
+    print(f"[ralph] Failure report written to {report_path}")
+
+
+def _extract_failure_summary(stdout: str, stderr: str) -> str:
+    """Extract the most relevant failure lines from validation output."""
+    combined = (stdout + "\n" + stderr).strip()
+    if not combined:
+        return "(no output captured from validation gate)"
+
+    lines = combined.splitlines()
+    summary_lines: list[str] = []
+
+    # Always include FAILED lines and their surrounding context
+    include_next = 0
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        # Markers that indicate a failure we want to capture
+        is_failure = any(
+            marker in stripped
+            for marker in [
+                "FAILED",
+                "ERROR",
+                "FAIL",
+                "assert",
+                "AssertionError",
+                "E ",  # pytest error context lines
+                "RALPH_GATE_FAILED",
+                "error:",
+            ]
+        )
+        if is_failure or include_next > 0:
+            summary_lines.append(line)
+            include_next = 3 if is_failure else include_next - 1
+
+    if not summary_lines:
+        # Fallback: return last 30 lines
+        summary_lines = lines[-30:]
+
+    result = "\n".join(summary_lines)
+    # Truncate summary for GitHub comment
+    max_summary = 8000
+    if len(result) > max_summary:
+        result = (
+            result[:max_summary].rstrip()
+            + "\n\n_(summary truncated — see `.ralph/issue-*-report.md` for full output)_"
+        )
+    return result
+
+
+def _rollback_working_tree():
+    """Discard all uncommitted changes so stale files don't pollute later stages."""
+    try:
+        # Remove untracked files first
+        run(["git", "clean", "-fd"], check=False, capture=True)
+        # Reset tracked files to HEAD
+        run(["git", "checkout", "--", "."], check=False, capture=True)
+        print("[ralph] Working tree rolled back after BUILD failure.")
+    except Exception as e:
+        print(f"[ralph] WARNING: rollback failed: {e}")
 
 
 def _file_hash(path: Path) -> str:
@@ -839,6 +1011,7 @@ def _read_partial_design_spec(max_chars: int = 2000) -> Optional[str]:
 def _format_stage_failure(
     stage: str,
     partial_spec: Optional[str] = None,
+    report_content: Optional[str] = None,
     fallback: str = "Blocking issue.",
 ) -> str:
     """Build a detailed stage-failure comment with pointers to artifacts."""
@@ -846,19 +1019,40 @@ def _format_stage_failure(
     lines.append(
         "See [`docs/agent/PROGRESS.md`](docs/agent/PROGRESS.md) for the design spec."
     )
-    lines.append("Check `.ralph/` for any agent-produced logs or partial artifacts.")
     if partial_spec:
         lines.append("")
         lines.append("## Partial Design Spec")
         lines.append("")
         lines.append(partial_spec)
-    lines.append("")
-    lines.append(fallback)
+    if report_content:
+        lines.append("")
+        lines.append("## Failure Details")
+        lines.append("")
+        # Truncate to fit GitHub comments (65k char limit)
+        max_detail = 50000
+        if len(report_content) > max_detail:
+            report_content = (
+                report_content[:max_detail].rstrip()
+                + "\n\n_(output truncated — see `.ralph/issue-*-report.md` for full log)_"
+            )
+        lines.append(report_content)
+    else:
+        lines.append("")
+        lines.append(fallback)
     return "\n".join(lines)
 
 
+def _archived_issue_dir(issue_num: int) -> Path:
+    """Return the archive directory for a blocked issue's artifacts."""
+    return PROJECT_ROOT / ".ralph" / "blocked" / f"issue-{issue_num}"
+
+
 def _cleanup_issue_artifacts(issue_num: int):
-    """Remove session and per-issue test-tracking files after pipeline completes."""
+    """Remove session and per-issue test-tracking files after pipeline SUCCEEDS.
+
+    On failure, artifacts are MOVED to .ralph/blocked/issue-N/ instead of
+    being deleted, so a human can inspect the evidence.
+    """
     session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
     if session_file.exists():
         session_file.unlink()
@@ -868,6 +1062,31 @@ def _cleanup_issue_artifacts(issue_num: int):
     if tracking_file.exists():
         tracking_file.unlink()
         print(f"[ralph] Cleaned up test tracking: {tracking_file.name}")
+
+
+def _archive_issue_artifacts(issue_num: int):
+    """Move session and test-tracking files to .ralph/blocked/ for inspection."""
+    archive_dir = _archived_issue_dir(issue_num)
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
+    if session_file.exists():
+        dest = archive_dir / session_file.name
+        session_file.rename(dest)
+        print(f"[ralph] Archived session: {session_file.name} → blocked/")
+
+    tracking_file = _test_tracking_file(issue_num)
+    if tracking_file.exists():
+        dest = archive_dir / tracking_file.name
+        tracking_file.rename(dest)
+        print(f"[ralph] Archived test tracking: {tracking_file.name} → blocked/")
+
+    # Also copy the failure report if it exists
+    report_file = PROJECT_ROOT / ".ralph" / f"issue-{issue_num}-report.md"
+    if report_file.exists():
+        dest = archive_dir / report_file.name
+        report_file.rename(dest)
+        print(f"[ralph] Archived failure report: {report_file.name} → blocked/")
 
 
 def _has_commits() -> bool:
