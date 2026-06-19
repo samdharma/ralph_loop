@@ -1,96 +1,79 @@
 # Ralph v3 — Automated Build System
 
-> AI-agent-powered continuous build loop. GitHub Issues as tickets, GitHub Labels as
-> status, GitHub Kanban as dashboard. No databases. No beads. Just git and gh.
->
-> Run `ralph init` and enable GitHub Project board sync, or set `ticket.project`
-> in `.ralph/config.toml`, and Ralph will mirror every status label to the
-> Project board column automatically.
-
-Ralph reads your ticket queue from GitHub Issues, feeds tickets to an AI coding agent
-(pi or kimi) through a 3-stage pipeline (DESIGN → BUILD → VERIFY), validates the
-output, and commits and pushes — all in a continuous loop. You write the tickets; Ralph builds
-the code.
+> AI-agent-powered continuous build loop. GitHub Issues are tickets, labels are
+> status, the Kanban board is your dashboard. No databases. Just `git` and `gh`.
 
 ```mermaid
-graph LR
-    A[GitHub Issues<br/>status:ready] --> B[Pre-flight]
-    B --> C[Agent<br/>pi/kimi]
-    C --> D[Validate<br/>pytest + lint]
-    D --> E[Commit + Push<br/>git]
-    E -->|next ticket| A
+flowchart LR
+    A[status:ready] --> B[DESIGN<br/>research + spec]
+    B --> C[BUILD<br/>test + code]
+    C --> D[VERIFY<br/>review]
+    D -->|pass| E[status:review]
+    D -->|fail| F[status:blocked]
+    F -.->|retry label| C
+    F -.->|retry label| D
 ```
 
 ## Quick Install
 
 ```bash
-# One-line install (macOS / Linux)
 curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
 source ~/.zshrc
 ralph version   # → ralph v3.0.0
 ```
 
-Requires: **git**, **gh** (GitHub CLI), **python 3.10+**, and **pi** or **kimi**.
-The installer checks all prerequisites and shows install instructions for any
-that are missing.
-
-> **Clone-based alternative:** If you prefer not to pipe from the network, you can
-> `gh repo clone samdharma/Ralph_loop ~/.ralph`, checkout `ralph-v3`, and run
-> `bash scripts/install.sh`.
+Requires: **git**, **gh**, **python 3.10+**, and **pi** or **kimi**.
 
 ## Quick Start
 
 ```bash
-# 1. Create a new project (with GitHub labels and optional board sync)
+# Create a new project
 ralph init my-project --create-labels
-#    When asked, provide your GitHub project number to enable Kanban sync.
 
-# 2. Or init an existing cloned repo
-git clone https://github.com/you/your-repo.git
-cd your-repo
-ralph init --create-labels
+# Or init an existing repo
+cd your-repo && ralph init --create-labels
 
-# 3. Verify everything
+# Verify everything
 ralph setup
 
-# 4. Create a GitHub issue with label status:ready, then:
-ralph daemon
+# Create a GitHub issue with label status:ready, then:
+ralph daemon              # continuous loop
+ralph daemon --issue 42   # single issue
 ```
-
-Ralph uses the AI agent configured in `.ralph/config.toml` (`[agent].binary`),
-falls back to auto-detecting `pi` or `kimi` on your `PATH`, and lets you
-override either with the `RALPH_AGENT` environment variable.
 
 ## How It Works
 
-```mermaid
-flowchart TB
-    subgraph Loop["Daemon Loop"]
-        S[Sync git] --> F[Fetch ready ticket<br/>gh issue list]
-        F --> C[Claim ticket<br/>+status:design -status:ready]
-        C --> D[DESIGN<br/>Architect persona]
-        D --> B[BUILD<br/>TEST + IMPLEMENT sub-agents]
-        B --> V[VERIFY<br/>Independent reviewer]
-        V -->|pass| R[status:review]
-        V -->|fail| BL[status:blocked]
-        R --> S
-        BL --> S
-    end
-```
+Ralph runs a **3-stage pipeline** for each `status:ready` issue:
 
-Ralph pushes commits to the current branch at the end of DESIGN and BUILD, so by
-the time an issue reaches `status:review` the code is already in the remote
-repository. The `status:review` label is a handoff for human inspection.
+| Stage | What happens | Label |
+|-------|-------------|-------|
+| **DESIGN** | Agent researches codebase, writes design spec to `PROGRESS.md`. Posts summary as issue comment. | `status:design` |
+| **BUILD** | Two sub-agents: TEST writes tests from spec (isolated), IMPLEMENT writes code to pass them. | `status:build` |
+| **VERIFY** | Fresh isolated reviewer checks diff against spec + issue. 5-axis review. | `status:verify` |
 
-The happy-path state machine in `core/engine.py:219-286`:
+**On success:** issue → `status:review` (your turn to inspect and close).
+**On failure:** issue → `status:blocked` with a detailed comment pointing to artifacts.
 
-| Step           | Label transition               | Board column        |
-|----------------|--------------------------------|---------------------|
-| Claim ticket   | `status:ready` → `status:design`   | Ready → In Progress |
-| Design success | `status:design` → `status:build`   | In Progress         |
-| Build success  | `status:build` → `status:verify`   | In Progress         |
-| Verify pass    | `status:verify` → `status:review`  | Review              |
-| Verify fail    | `status:verify` → `status:blocked` | Blocked             |
+### Retry After a Failure
+
+Fix the problem, then re-queue with a retry label — no need to re-run earlier stages:
+
+| Label | What it re-runs |
+|-------|----------------|
+| `status:verify-retry` | VERIFY only |
+| `status:build-retry` | BUILD → VERIFY |
+| `status:ready` | Full pipeline (DESIGN → BUILD → VERIFY) |
+
+## Commands
+
+| Command | Purpose |
+|---------|---------|
+| `ralph init [dir]` | Scaffold a Ralph project |
+| `ralph setup` | Check prerequisites (gh auth, labels, deps) |
+| `ralph daemon [--auto-close] [--issue=N]` | Start the build loop |
+| `ralph status` | Show daemon PID, active issue, recent metrics |
+| `ralph validate [--tier=...]` | Run the validation gate (pytest + lint) |
+| `ralph report` | Generate daily/weekly summary |
 
 ## Project Layout
 
@@ -101,36 +84,22 @@ my-project/
 │   ├── ralph_preflight.sh    # Pre-flight guardrails
 │   └── TEST_MAP.yaml         # Source → test mapping
 ├── docs/agent/
-│   ├── PROMPT.md             # Base agent prompt
-│   ├── PROGRESS.md           # Agent progress log
-│   └── prompts/              # Stage-specific persona prompts
+│   ├── PROMPT.md             # Base agent rules
+│   ├── PROGRESS.md           # Design spec (Ralph artifact)
+│   └── prompts/              # Stage personas (design, test, implement, verify)
 ├── src/                      # Application source
 ├── tests/                    # Unit + integration tests
 ├── AGENTS.md                 # Quick reference for agents
 └── .gitignore
 ```
 
-## Commands
-
-| Command | Purpose |
-|---------|---------|
-| `ralph init [dir]` | Scaffold a Ralph project (default: current directory) |
-| `ralph setup` | Check prerequisites (gh auth, labels, deps, create dirs) |
-| `ralph daemon [--auto-close]` | Start the build loop (foreground) |
-| `ralph status` | Show daemon PID, active issue, recent metrics |
-| `ralph validate [--tier=...]` | Run validation gate (pytest + lint) |
-| `ralph report` | Generate daily/weekly summary |
-| `ralph generate-test-map` | Auto-generate TEST_MAP.yaml from project structure |
-| `ralph version` | Show version |
-| `ralph help` | Show help |
-
 ## Documentation
 
 | Document | Topic |
 |----------|-------|
-| [Getting Started](docs/getting_started.md) | Full guide: install, setup, tickets, pipeline, cheat sheet |
-| [v3 Redesign PRD](docs/v3-redesign.md) | System design, phases, build notes, validation gates |
-| [System Validation Test](docs/system_test.md) | Step-by-step test plan (26 tests, 8 suites) |
+| [Getting Started](docs/getting_started.md) | Full guide: install, setup, tickets, pipeline, observability |
+| [Observability](docs/observability.md) | Monitoring: metrics, dashboards, external tools |
+| [v3 Redesign](docs/v3-redesign.md) | System design, phases, build notes (for Ralph developers) |
 
 ## License
 

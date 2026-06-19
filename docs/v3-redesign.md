@@ -231,6 +231,8 @@ All tickets are GitHub Issues. No local database. No sync problems.
 | `status:verify` | In verify stage | Pipeline |
 | `status:review` | Awaiting human review | Pipeline |
 | `status:blocked` | Cannot proceed | Human OR Pipeline |
+| `status:build-retry` | Re-run BUILD+VERIFY (skip DESIGN) | Human |
+| `status:verify-retry` | Re-run VERIFY only (skip DESIGN+BUILD) | Human |
 | `priority:N` | Priority 1, 2, 3 (optional ordering) | Human |
 
 ### How Ralph Queries Tickets
@@ -470,10 +472,7 @@ my-project/
 │           ├── design.md     # DESIGN stage prompt
 │           ├── test.md       # TEST sub-agent prompt
 │           ├── implement.md  # IMPLEMENT sub-agent prompt
-│           ├── verify.md     # VERIFY sub-agent prompt
-│           ├── feature.md    # Feature-specific guidance
-│           ├── bugfix.md     # Bugfix-specific guidance
-│           └── docs.md       # Documentation guidance
+│           └── verify.md     # VERIFY sub-agent prompt
 ├── logs/
 │   ├── ralph_daemon.log      # Daemon output
 │   └── ralph_metrics.jsonl   # Structured metrics
@@ -716,8 +715,8 @@ The agent is instructed to: understand the issue, implement code, write tests, r
 |------|--------|
 | `core/engine.py` | Split `run_pipeline()` into `run_design()`, `run_build()`, `run_verify()` |
 | `templates/prompts/design.md` | New — Architect persona prompt |
-| `templates/prompts/build.md` | New — Developer persona prompt (Phase 2 has no sub-agents yet, so BUILD is one agent) |
 | `templates/prompts/verify.md` | New — Independent reviewer persona prompt |
+| `templates/prompts/build.md` | New — Developer persona prompt (Phase 2 only; removed in Phase 3 in favor of `test.md` + `implement.md`) |
 | `core/init.py` | Generate the 3 prompt files during scaffold |
 
 **Build steps:**
@@ -792,7 +791,7 @@ The agent is instructed to: understand the issue, implement code, write tests, r
 
 1. **No separate `templates/` directory in RALPH_HOME.** All templates are inline strings in `core/init.py`. The scaffold generates them into the project's `docs/agent/` directory. This keeps init.py fully self-contained — no external template files to ship.
 
-2. **Prompt stubs `test.md`, `implement.md` are now filled.** Phase 3 filled them with QA Engineer and Developer persona prompts. Remaining stubs `feature.md`, `bugfix.md`, `docs.md` are for future human customization.
+2. **Stage prompts consolidated.** `design.md`, `test.md`, `implement.md`, and `verify.md` are the active persona prompts. The legacy single-agent `build.md` prompt and the unused `feature.md`, `bugfix.md`, `docs.md` stubs were removed to reduce confusion.
 
 3. **Validation gate runs inside BUILD and VERIFY stages, not just at the end.** The BUILD stage runs `ralph validate --tier=targeted` after the agent finishes implementing. The VERIFY stage also runs it after the review. This double-gate provides defense-in-depth.
 
@@ -839,9 +838,9 @@ Phase 3 implemented the sub-agent architecture with true context inheritance:
    - Fresh `pi --print` session. Sees only: issue + design spec + git diff.
    - Explicit isolation notice: "Do NOT attempt to read implementation code."
 
-4. **`_assemble_subagent_prompt()` manages Mode A vs Mode B:**
-   - Mode A: PROMPT.md base + stage persona + issue body + design spec + isolation notice.
-   - Mode B: PROMPT.md base + stage persona + issue body + reference docs + continuation notice. Design spec NOT re-injected (already in session).
+4. **`_assemble_prompt()` manages Mode A vs Mode B:**
+   - Mode A: PROMPT.md base + stage persona + issue body + design spec + short isolation notice.
+   - Mode B: PROMPT.md base + stage persona + issue body + reference docs + short continuation notice. Design spec NOT re-injected (already in session).
 
 5. **`_cleanup_session()` removes session files** after pipeline completes (success or failure).
 
@@ -988,8 +987,8 @@ for f in sorted(p.glob('*.py')):
     print(f'OK: {f}')
 "
 
-# Phase 2 prompt stub check (run in a scaffolded project)
-for f in docs/agent/prompts/design.md docs/agent/prompts/build.md docs/agent/prompts/verify.md; do
+# Phase 3 prompt stub check (run in a scaffolded project)
+for f in docs/agent/prompts/design.md docs/agent/prompts/test.md docs/agent/prompts/implement.md docs/agent/prompts/verify.md; do
     test -s "$f" && echo "PASS: $f populated" || echo "FAIL: $f empty"
 done
 
