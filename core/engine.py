@@ -526,6 +526,7 @@ def run_build_stage(issue: dict) -> bool:
     print(f"\n[ralph] Running validation gate...")
     core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
     qa_tests = _load_test_tracking(issue_num)
+    qa_tests = [t for t in qa_tests if t.endswith(".py")]  # Defense: skip cache artifacts
     if qa_tests:
         print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
         val_result = run(
@@ -634,6 +635,7 @@ def run_verify_stage(issue: dict) -> bool:
         print(f"\n[ralph] Running validation gate...")
         core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
         qa_tests = _load_test_tracking(issue_num)
+        qa_tests = [t for t in qa_tests if t.endswith(".py")]  # Defense: skip cache artifacts
         if qa_tests:
             print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
             val_result = run(
@@ -877,22 +879,36 @@ def _file_hash(path: Path) -> str:
 
 
 def _snapshot_tests_dir() -> dict[str, str]:
-    """Return {relative_path: content_hash} for all files under tests/."""
+    """Return {relative_path: content_hash} for all .py files under tests/.
+
+    Excludes __pycache__/, .pytest_cache/, and non-.py files so that
+    transient cache artifacts don't leak into the test tracking manifest.
+    """
     tests_dir = PROJECT_ROOT / "tests"
     snapshot: dict[str, str] = {}
     if tests_dir.exists():
         for p in tests_dir.rglob("*"):
-            if p.is_file():
-                snapshot[str(p.relative_to(PROJECT_ROOT))] = _file_hash(p)
+            if not p.is_file():
+                continue
+            # Exclude cache directories and non-.py files
+            if any(part in ("__pycache__", ".pytest_cache") for part in p.parts):
+                continue
+            if p.suffix != ".py":
+                continue
+            snapshot[str(p.relative_to(PROJECT_ROOT))] = _file_hash(p)
     return snapshot
 
 
 def _detect_new_tests(before: dict[str, str], after: dict[str, str]) -> list[str]:
-    """Return paths that are new or modified between two test snapshots."""
+    """Return paths that are new or modified between two test snapshots.
+
+    Only includes .py files; filters out cache artifacts defensively.
+    """
     return sorted(
         path
         for path, digest in after.items()
         if path not in before or before[path] != digest
+        if path.endswith(".py")
     )
 
 
