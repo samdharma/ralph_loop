@@ -88,6 +88,9 @@ DETECT_SCRIPT = os.path.join(CORE_DIR, "detect_affected_tests.py")
 # pytest addopts override
 PYTEST_ADOPTS = ["-o", "addopts=--tb=short --strict-markers"]
 
+# pytest timeout in seconds (0 = no timeout). Override with RALPH_PYTEST_TIMEOUT.
+PYTEST_TIMEOUT = int(os.environ.get("RALPH_PYTEST_TIMEOUT", "300"))
+
 
 # ─────────────────────────────────────────────────────────
 # Helpers
@@ -95,7 +98,10 @@ PYTEST_ADOPTS = ["-o", "addopts=--tb=short --strict-markers"]
 
 
 def run(
-    cmd: list[str], check: bool = False, env: dict[str, str] | None = None
+    cmd: list[str],
+    check: bool = False,
+    env: dict[str, str] | None = None,
+    timeout: int | None = None,
 ) -> subprocess.CompletedProcess:
     """Run a command, return CompletedProcess.
 
@@ -104,7 +110,8 @@ def run(
     """
     run_env = {**os.environ, **(env or {})}
     result = subprocess.run(
-        cmd, capture_output=True, text=True, cwd=PROJECT_ROOT, env=run_env
+        cmd, capture_output=True, text=True, cwd=PROJECT_ROOT, env=run_env,
+        timeout=timeout,
     )
     if result.returncode != 0 and not check:
         if result.stdout:
@@ -118,7 +125,7 @@ def get_modified_py_files() -> list[str]:
     """Return list of modified + untracked .py files."""
     modified = set()
     # Modified tracked files
-    result = run(["git", "diff", "--name-only", "--diff-filter=ACM"])
+    result = run(["git", "diff", "--name-only", "--diff-filter=ACMR"])
     for line in result.stdout.splitlines():
         line = line.strip()
         if line.endswith(".py"):
@@ -150,10 +157,19 @@ def detect_collisions(paths: list[str]) -> dict[str, list[str]]:
 
 
 def run_pytest_invocation(cmd: list[str], env: dict[str, str] | None = None) -> int:
-    """Run a single pytest invocation. Returns exit code."""
+    """Run a single pytest invocation. Returns exit code.
+
+    Returns 124 on timeout (mimics `timeout` command convention) so the
+    caller can distinguish a hung test from a genuine failure.
+    """
     print(f"[ralph] pytest invocation: {' '.join(cmd)}")
-    result = run(cmd, check=False, env=env)
-    return result.returncode
+    timeout = PYTEST_TIMEOUT if PYTEST_TIMEOUT > 0 else None
+    try:
+        result = run(cmd, check=False, env=env, timeout=timeout)
+        return result.returncode
+    except subprocess.TimeoutExpired:
+        print(f"[ralph] pytest timed out after {PYTEST_TIMEOUT}s")
+        return 124
 
 
 def run_pytest_split_by_directory(
@@ -337,6 +353,9 @@ def validate(tier: str = DEFAULT_TIER, pytest_paths: list[str] | None = None) ->
     elif pytest_exit == 5:
         # Exit code 5 = no tests collected (all deselected)
         print(f"\n{label} pytest {tier} PASSED (no tests collected)")
+    elif pytest_exit == 124:
+        print(f"\n{label} pytest {tier} TIMED OUT after {PYTEST_TIMEOUT}s")
+        failed = True
     else:
         print(f"\n{label} pytest {tier} FAILED")
         failed = True

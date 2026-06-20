@@ -26,6 +26,8 @@ Write tests that validate every acceptance criterion in the design spec. Tests s
 ## Constraints
 - Work from the spec ONLY. Do NOT read implementation code.
 - Do NOT write implementation code.
+- Do NOT run pytest — it creates cache artifacts and may fail on missing imports.
+  Use `python -B -m py_compile` for syntax validation only.
 - Do NOT write tests for modules/classes NOT listed in the design spec.
 - Document each test with a brief comment linking it to an acceptance criterion.
 - If you cannot write tests because the spec is ambiguous, write a failure report

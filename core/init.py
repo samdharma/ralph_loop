@@ -327,7 +327,7 @@ Write tests that validate every acceptance criterion in the design spec. Tests s
 4. Include edge cases: null/empty inputs, boundary values, error paths.
 5. **After writing tests, validate they at least parse:**
    ```bash
-   python -m py_compile tests/unit/test_<your_file>.py
+   python -B -m py_compile tests/unit/test_<your_file>.py
    ```
    If the test file has syntax errors, fix them.
 6. **Check your imports.** Every `from X import Y` must map to a module listed in
@@ -341,6 +341,8 @@ Write tests that validate every acceptance criterion in the design spec. Tests s
 ## Constraints
 - Work from the spec ONLY. Do NOT read implementation code.
 - Do NOT write implementation code.
+- Do NOT run pytest — it creates cache artifacts and may fail on missing imports.
+  Use `python -B -m py_compile` for syntax validation only.
 - Do NOT write tests for modules/classes NOT listed in the design spec.
 - Document each test with a brief comment linking it to an acceptance criterion.
 - If you cannot write tests because the spec is ambiguous, write a failure report
