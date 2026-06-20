@@ -1,0 +1,4 @@
+[tool.mypy]
+explicit_package_bases = true
+mypy_path = "core"
+ignore_missing_imports = false
