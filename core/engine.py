@@ -426,6 +426,32 @@ def sync_ready_board():
         print(f"[ralph] WARNING: could not sync ready tickets: {e}")
 
 
+def fetch_issue_by_number(issue_num: int) -> Optional[dict]:
+    """Fetch a specific GitHub issue by number.
+
+    Returns the issue dict {number, title, body, state} or None if:
+    - The issue doesn't exist
+    - The issue is closed
+    - Dependencies are unmet
+    """
+    try:
+        result = gh(
+            "issue", "view", str(issue_num),
+            "--json", "number,title,body,state",
+        )
+        issue = json.loads(result.stdout)
+    except subprocess.CalledProcessError:
+        return None
+
+    if issue.get("state") != "OPEN":
+        return None
+
+    if not _dependencies_met(issue):
+        return None
+
+    return issue
+
+
 def _dependencies_met(issue: dict) -> bool:
     """Check if all 'Depends on: #N' references in the body are closed."""
     body = issue.get("body") or ""
@@ -1995,13 +2021,14 @@ def release_pid_file():
         PID_FILE.unlink()
 
 
-def run_loop(auto_close: bool = False):
+def run_loop(auto_close: bool = False, single_issue: Optional[int] = None):
     """
     The daemon loop. Runs until interrupted.
 
     Args:
         auto_close: If True, close issues on success instead of
                     marking status:review.
+        single_issue: If set, process only this issue number and exit.
     """
     if not acquire_pid_file():
         sys.exit(1)
@@ -2026,6 +2053,30 @@ def run_loop(auto_close: bool = False):
                 git("merge", upstream, "--ff-only")
             except subprocess.CalledProcessError:
                 print("[ralph] Warning: git sync failed — continuing with local state")
+
+            # ── Single-issue mode (--issue=N) ──
+            if single_issue is not None:
+                print(f"[ralph] Single-issue mode: processing only #{single_issue}")
+                issue = fetch_issue_by_number(single_issue)
+                if issue is None:
+                    print(
+                        f"[ralph] Issue #{single_issue} not found, closed, "
+                        "or has unmet dependencies."
+                    )
+                    log_metrics(
+                        "pipeline_complete",
+                        issue=str(single_issue),
+                        result="skipped",
+                        reason="not_found_or_closed",
+                    )
+                    break
+                transition_label(single_issue, "status:design", "status:ready")
+                gh_comment(
+                    single_issue,
+                    f"⏳ Ralph claimed #{single_issue} and started DESIGN (single-issue mode).",
+                )
+                run_pipeline(issue, auto_close=auto_close)
+                break
 
             # ── Handle crash recovery resume ──
             if recovered:
@@ -2283,7 +2334,14 @@ if __name__ == "__main__":
         default=None,
         help="AI agent to use (overrides RALPH_AGENT and config)",
     )
+    parser.add_argument(
+        "--issue",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Process only issue #N and exit",
+    )
     args = parser.parse_args()
     if args.agent:
         os.environ["RALPH_AGENT"] = args.agent
-    run_loop(auto_close=args.auto_close)
+    run_loop(auto_close=args.auto_close, single_issue=args.issue)
