@@ -244,6 +244,94 @@ def test_resolve_existing_test_paths_returns_empty_for_empty_input(tmp_path):
     assert result == []
 
 
+def test_snapshot_file_hashes_returns_hashes_for_existing_files(tmp_path):
+    """_snapshot_file_hashes returns content hashes for files that exist."""
+    fake_project = tmp_path / "project"
+    tests_dir = fake_project / "tests" / "unit"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_a.py").write_text("def test(): pass\n")
+    (tests_dir / "test_b.py").write_text("def test(): assert True\n")
+
+    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+        hashes = engine._snapshot_file_hashes([
+            "tests/unit/test_a.py",
+            "tests/unit/test_b.py",
+            "tests/unit/test_missing.py",
+        ])
+
+    assert len(hashes) == 2
+    assert "tests/unit/test_a.py" in hashes
+    assert "tests/unit/test_b.py" in hashes
+    assert "tests/unit/test_missing.py" not in hashes
+
+
+def test_snapshot_file_hashes_returns_empty_for_all_missing(tmp_path):
+    """_snapshot_file_hashes skips missing files, returns empty dict."""
+    fake_project = tmp_path / "project"
+    fake_project.mkdir(parents=True)
+
+    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+        hashes = engine._snapshot_file_hashes(["tests/nowhere.py"])
+
+    assert hashes == {}
+
+
+def test_detect_tampered_tests_finds_changed_files(tmp_path):
+    """_detect_tampered_tests returns files whose content hash changed."""
+    fake_project = tmp_path / "project"
+    tests_dir = fake_project / "tests" / "unit"
+    tests_dir.mkdir(parents=True)
+
+    test_file = tests_dir / "test_x.py"
+    test_file.write_text("def test(): pass\n")
+
+    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+        before = engine._snapshot_file_hashes(["tests/unit/test_x.py"])
+
+    # Modify the file
+    test_file.write_text("def test(): assert False\n")
+
+    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+        after = engine._snapshot_file_hashes(["tests/unit/test_x.py"])
+        tampered = engine._detect_tampered_tests(before, after)
+
+    assert tampered == ["tests/unit/test_x.py"]
+
+
+def test_detect_tampered_tests_returns_empty_when_unchanged(tmp_path):
+    """_detect_tampered_tests returns empty when files haven't changed."""
+    fake_project = tmp_path / "project"
+    tests_dir = fake_project / "tests" / "unit"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_x.py").write_text("def test(): pass\n")
+
+    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+        before = engine._snapshot_file_hashes(["tests/unit/test_x.py"])
+        after = engine._snapshot_file_hashes(["tests/unit/test_x.py"])
+        tampered = engine._detect_tampered_tests(before, after)
+
+    assert tampered == []
+
+
+def test_detect_tampered_tests_ignores_new_files(tmp_path):
+    """_detect_tampered_tests only reports modified files, not new ones."""
+    fake_project = tmp_path / "project"
+    tests_dir = fake_project / "tests" / "unit"
+    tests_dir.mkdir(parents=True)
+
+    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+        before: dict[str, str] = {}
+    
+    (tests_dir / "test_new.py").write_text("def test(): pass\n")
+
+    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+        after = engine._snapshot_file_hashes(["tests/unit/test_new.py"])
+        tampered = engine._detect_tampered_tests(before, after)
+
+    # New files are NOT tampered (they didn't exist before)
+    assert tampered == []
+
+
 # ─────────────────────────────────────────────────────────
 # Provider rate-limit / quota detection
 # ─────────────────────────────────────────────────────────

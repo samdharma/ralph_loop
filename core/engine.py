@@ -729,6 +729,14 @@ def run_build_stage(issue: dict) -> bool:
         return False
 
     # ── Step 2b: IMPLEMENT sub-agent (Mode B — full context) ──
+    # Snapshot QA test files before IMPLEMENT to detect tampering.
+    qa_test_paths_before = _load_test_tracking(issue_num)
+    qa_test_paths_before = [
+        t for t in qa_test_paths_before if t.endswith(".py") and "__pycache__" not in t
+    ]
+    qa_test_paths_before = _resolve_existing_test_paths(qa_test_paths_before)
+    qa_hashes_before = _snapshot_file_hashes(qa_test_paths_before)
+
     if not _run_implement_subagent(issue):
         _write_stage_report(
             issue_num,
@@ -739,6 +747,21 @@ def run_build_stage(issue: dict) -> bool:
         _rollback_working_tree()
         log_metrics("stage_complete", issue=str(issue_num), stage="build")
         return False
+
+    # Detect if IMPLEMENT agent modified QA-written test files.
+    qa_hashes_after = _snapshot_file_hashes(qa_test_paths_before)
+    tampered_tests = _detect_tampered_tests(qa_hashes_before, qa_hashes_after)
+    if tampered_tests:
+        print(
+            f"[ralph] WARNING: IMPLEMENT sub-agent modified {len(tampered_tests)} "
+            f"QA-written test file(s): {tampered_tests}"
+        )
+        gh_comment(
+            issue_num,
+            f"⚠️ IMPLEMENT sub-agent modified {len(tampered_tests)} QA-written "
+            f"test file(s): {', '.join(tampered_tests)}. "
+            f"Import/compilation fixes are acceptable; logic changes are not.",
+        )
 
     # ── Validation gate (only tests written by the independent QA session) ──
     print("\n[ralph] Running validation gate...")
@@ -1150,6 +1173,33 @@ def _detect_new_tests(before: dict[str, str], after: dict[str, str]) -> list[str
         for path, digest in after.items()
         if path not in before or before[path] != digest
         if path.endswith(".py")
+    )
+
+
+def _snapshot_file_hashes(paths: list[str]) -> dict[str, str]:
+    """Return {relative_path: content_hash} for an explicit list of file paths.
+
+    Paths that don't exist on disk are silently skipped.
+    """
+    snapshot: dict[str, str] = {}
+    for p in paths:
+        full = PROJECT_ROOT / p
+        if full.is_file():
+            snapshot[p] = _file_hash(full)
+    return snapshot
+
+
+def _detect_tampered_tests(
+    before: dict[str, str], after: dict[str, str]
+) -> list[str]:
+    """Return paths whose content hash changed between two snapshots.
+
+    Used to detect if the IMPLEMENT sub-agent modified QA-written test files.
+    """
+    return sorted(
+        path
+        for path, digest in after.items()
+        if path in before and before[path] != digest
     )
 
 
