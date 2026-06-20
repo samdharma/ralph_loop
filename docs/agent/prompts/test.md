@@ -12,7 +12,7 @@ Write tests that validate every acceptance criterion in the design spec. Tests s
 4. Include edge cases: null/empty inputs, boundary values, error paths.
 5. **After writing tests, validate they at least parse:**
    ```bash
-   python -m py_compile tests/unit/test_<your_file>.py
+   python -B -m py_compile tests/unit/test_<your_file>.py
    ```
    If the test file has syntax errors, fix them.
 6. **Check your imports.** Every `from X import Y` must map to a module listed in
