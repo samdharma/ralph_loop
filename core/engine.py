@@ -981,6 +981,26 @@ def _run_implement_subagent(issue: dict) -> bool:
 
     session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
     prompt = _assemble_subagent_prompt(issue, "implement.md", mode="B")
+
+    # Inject the exact list of QA-written test files so the agent knows
+    # precisely which tests it must pass — not just the TEST_MAP-based
+    # set produced by `ralph validate --tier=targeted`.
+    qa_tests = _load_test_tracking(issue_num)
+    qa_tests = [
+        t for t in qa_tests if t.endswith(".py") and "__pycache__" not in t
+    ]
+    qa_tests = _resolve_existing_test_paths(qa_tests)
+    if qa_tests:
+        test_list = "\n".join(f"  - {t}" for t in qa_tests)
+        prompt += (
+            f"\n\n## QA-Written Test Files (must pass)\n\n"
+            f"These test files were written by the independent QA sub-agent. "
+            f"You MUST run these specific tests and ensure they pass:\n\n"
+            f"{test_list}\n\n"
+            f"Run them with:\n"
+            f"  ralph validate --tier=targeted --pytest-paths {' '.join(qa_tests)}\n"
+        )
+
     success = invoke_agent(
         prompt, issue_num, session_file=session_file, continue_session=True
     )
