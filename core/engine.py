@@ -747,6 +747,7 @@ def run_build_stage(issue: dict) -> bool:
     qa_tests = [
         t for t in qa_tests if t.endswith(".py") and "__pycache__" not in t
     ]  # Defense: skip cache artifacts
+    qa_tests = _resolve_existing_test_paths(qa_tests)
     if qa_tests:
         print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
         val_result = run(
@@ -858,6 +859,7 @@ def run_verify_stage(issue: dict) -> bool:
         qa_tests = [
             t for t in qa_tests if t.endswith(".py") and "__pycache__" not in t
         ]  # Defense: skip cache artifacts
+        qa_tests = _resolve_existing_test_paths(qa_tests)
         if qa_tests:
             print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
             val_result = run(
@@ -1161,6 +1163,22 @@ def _load_test_tracking(issue_num: int) -> list[str]:
         return data.get("tests", [])
     except Exception:
         return []
+
+
+def _resolve_existing_test_paths(test_paths: list[str]) -> list[str]:
+    """Filter test_paths to only those that exist on disk under PROJECT_ROOT.
+
+    Logs a warning for any path that is missing so the operator knows a
+    tracked test file has been deleted or renamed.
+    """
+    existing: list[str] = []
+    for p in test_paths:
+        full = PROJECT_ROOT / p
+        if full.is_file():
+            existing.append(p)
+        else:
+            print(f"[ralph] WARNING: tracked test file not found: {p}")
+    return existing
 
 
 def _summarize_design_spec() -> Optional[str]:

@@ -202,6 +202,48 @@ def test_save_test_tracking_handles_empty_list(tmp_path):
     assert data["tests"] == []
 
 
+def test_resolve_existing_test_paths_filters_missing_files(tmp_path):
+    """_resolve_existing_test_paths returns only paths that exist on disk."""
+    fake_project = tmp_path / "project"
+    tests_dir = fake_project / "tests" / "unit"
+    tests_dir.mkdir(parents=True)
+    (tests_dir / "test_real.py").write_text("def test_pass(): pass\n")
+
+    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+        result = engine._resolve_existing_test_paths([
+            "tests/unit/test_real.py",
+            "tests/unit/test_gone.py",
+            "tests/unit/test_also_missing.py",
+        ])
+
+    assert result == ["tests/unit/test_real.py"]
+
+
+def test_resolve_existing_test_paths_returns_empty_for_all_missing(tmp_path):
+    """_resolve_existing_test_paths returns empty list when no paths exist."""
+    fake_project = tmp_path / "project"
+    fake_project.mkdir(parents=True)
+
+    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+        result = engine._resolve_existing_test_paths([
+            "tests/unit/ghost.py",
+            "tests/integration/nope.py",
+        ])
+
+    assert result == []
+
+
+def test_resolve_existing_test_paths_returns_empty_for_empty_input(tmp_path):
+    """_resolve_existing_test_paths handles empty input gracefully."""
+    fake_project = tmp_path / "project"
+    fake_project.mkdir(parents=True)
+
+    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+        result = engine._resolve_existing_test_paths([])
+
+    assert result == []
+
+
 # ─────────────────────────────────────────────────────────
 # Provider rate-limit / quota detection
 # ─────────────────────────────────────────────────────────
