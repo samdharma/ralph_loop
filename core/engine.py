@@ -37,6 +37,205 @@ PROGRESS_FILE = PROJECT_ROOT / "docs" / "agent" / "PROGRESS.md"
 PROMPTS_DIR = PROJECT_ROOT / "docs" / "agent" / "prompts"
 PREFLIGHT_SCRIPT = PROJECT_ROOT / "config" / "ralph_preflight.sh"
 
+# Backoff used when all available agents are rate-limited.
+RATE_LIMIT_BACKOFF_SECONDS = 15 * 60  # 15 minutes
+
+
+# ─────────────────────────────────────────────────────────
+# Provider error handling
+# ─────────────────────────────────────────────────────────
+
+
+class ProviderError(Exception):
+    """Base class for provider-side errors that Ralph should handle specially."""
+
+    pass
+
+
+class ProviderRateLimitError(ProviderError):
+    """429 / rate-limit / overload: backoff and retry later."""
+
+    pass
+
+
+class ProviderQuotaError(ProviderError):
+    """Quota / billing exhausted: try alternate agent or stop."""
+
+    pass
+
+
+# Patterns matched against agent stdout/stderr. Be conservative: normal test
+# failures must NOT match these.
+PROVIDER_RATE_LIMIT_PATTERNS = [
+    r"APIProviderRateLimitError",
+    r"\b429\b",
+    r"rate\s*limit",
+    r"too\s+many\s+requests",
+    r"overloaded",
+]
+
+PROVIDER_QUOTA_PATTERNS = [
+    r"GoUsageLimitError",
+    r"FreeUsageLimitError",
+    r"Monthly usage limit reached",
+    r"available balance",
+    r"insufficient_quota",
+    r"out of budget",
+    r"quota\s*exceeded",
+    r"billing",
+]
+
+
+def _classify_provider_error(output: str) -> Optional[str]:
+    """Classify captured agent output as a provider-side failure.
+
+    Returns:
+        "quota" if a quota/billing limit is detected,
+        "rate_limit" if a rate limit / 429 is detected,
+        None otherwise.
+    """
+    if not output:
+        return None
+    text = output.lower()
+    for pattern in PROVIDER_QUOTA_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return "quota"
+    for pattern in PROVIDER_RATE_LIMIT_PATTERNS:
+        if re.search(pattern, text, re.IGNORECASE):
+            return "rate_limit"
+    return None
+
+
+def _find_alternate_agent(excluded: set[str]) -> Optional[str]:
+    """Return an available agent binary that is not in `excluded`."""
+    for candidate in ("pi", "kimi"):
+        if candidate in excluded:
+            continue
+        if subprocess.run(["which", candidate], capture_output=True).returncode == 0:
+            return candidate
+    return None
+
+
+def _revert_to_ready(issue_num: int):
+    """Move an issue back to status:ready, removing any in-flight stage labels."""
+    for label in [
+        "status:design",
+        "status:build",
+        "status:verify",
+        "status:review",
+        "status:blocked",
+    ]:
+        try:
+            gh("issue", "edit", str(issue_num), "--remove-label", label)
+        except subprocess.CalledProcessError:
+            pass
+    try:
+        gh("issue", "edit", str(issue_num), "--add-label", "status:ready")
+        sync_status(issue_num, "status:ready")
+        print(f"[ralph] #{issue_num} reverted to status:ready (provider issue)")
+    except subprocess.CalledProcessError as e:
+        print(f"[ralph] WARNING: could not revert #{issue_num} to status:ready: {e}")
+
+
+def _create_provider_issue(agent: str, error: ProviderError) -> Optional[str]:
+    """Create a GitHub issue documenting provider exhaustion and stop processing."""
+    title = f"🛑 Ralph provider exhausted: {agent}"
+    body = (
+        f"Ralph stopped processing because `{agent}` reported a provider error:\n\n"
+        f"```\n{str(error)[:2000]}\n```\n\n"
+        f"- Timestamp: {datetime.now(timezone.utc).isoformat()}\n"
+        f"- Action required: Check the provider account / billing / quota, "
+        f"then restart the Ralph daemon.\n"
+    )
+    try:
+        result = gh(
+            "issue",
+            "create",
+            "--title",
+            title,
+            "--body",
+            body,
+            "--label",
+            "type:exit",
+        )
+        url = result.stdout.strip()
+        print(f"[ralph] Created provider issue: {url}")
+        log_metrics("provider_exhausted", agent=agent, issue_url=url)
+        return url
+    except subprocess.CalledProcessError as e:
+        print(f"[ralph] WARNING: could not create provider issue: {e}")
+        log_metrics("provider_exhausted", agent=agent, error=str(e))
+        return None
+
+
+def _sleep_with_interrupt(seconds: int):
+    """Sleep in 1-second chunks so SIGINT/SIGTERM can break out quickly."""
+    for _ in range(seconds):
+        _check_interrupt()
+        if _shutdown_requested:
+            break
+        time.sleep(1)
+
+
+def _handle_provider_error(
+    issue: dict, error: ProviderError, tried_agents: set[str]
+) -> str:
+    """
+    Handle a provider-side error for the current issue.
+
+    Returns:
+        "continue" if the loop should continue (fallback or pause),
+        "break" if the daemon should stop (quota exhausted, no fallback).
+    """
+    issue_num = issue["number"]
+    current_agent = _resolve_agent_binary()
+    if current_agent:
+        tried_agents.add(current_agent)
+    clear_checkpoint()
+
+    alternate = _find_alternate_agent(tried_agents)
+    if alternate:
+        gh_comment(
+            issue_num,
+            f"⏸️ {current_agent or 'agent'} {type(error).__name__} — "
+            f"trying `{alternate}`...",
+        )
+        _revert_to_ready(issue_num)
+        os.environ["RALPH_AGENT"] = alternate
+        print(f"[ralph] Switching agent to {alternate} for #{issue_num}")
+        log_metrics(
+            "agent_fallback",
+            issue=str(issue_num),
+            from_agent=current_agent or "unknown",
+            to_agent=alternate,
+            reason=type(error).__name__,
+        )
+        time.sleep(5)
+        return "continue"
+
+    if isinstance(error, ProviderRateLimitError):
+        gh_comment(
+            issue_num,
+            "⏸️ All available agents rate-limited — pausing pipeline for 15 minutes.",
+        )
+        _revert_to_ready(issue_num)
+        log_metrics(
+            "provider_rate_limit_pause",
+            issue=str(issue_num),
+            agents=sorted(tried_agents),
+        )
+        _sleep_with_interrupt(RATE_LIMIT_BACKOFF_SECONDS)
+        tried_agents.clear()
+        return "continue"
+
+    gh_comment(
+        issue_num,
+        "🛑 Provider quota exhausted — stopping pipeline.",
+    )
+    _revert_to_ready(issue_num)
+    _create_provider_issue(current_agent or "unknown", error)
+    return "break"
+
 
 # ─────────────────────────────────────────────────────────
 # Shell helpers
@@ -138,6 +337,23 @@ def fetch_ready_ticket() -> Optional[dict]:
             print(f"[ralph] Skipping #{issue['number']} — unmet dependencies")
 
     return None
+
+
+def fetch_issue_by_number(number: int) -> Optional[dict]:
+    """Fetch a single open issue by number, or None if closed/missing/deps unmet."""
+    try:
+        result = gh("issue", "view", str(number), "--json", "number,title,body,state")
+        issue = json.loads(result.stdout)
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        return None
+
+    if issue.get("state") != "OPEN":
+        return None
+
+    if not _dependencies_met(issue):
+        return None
+
+    return issue
 
 
 # Retry labels let humans re-queue a blocked issue without re-running all stages.
@@ -282,6 +498,8 @@ def transition_label(
                 _check_interrupt()
                 time.sleep(wait)
     # All retries exhausted
+    if last_error is None:
+        raise RuntimeError("transition_label exhausted retries with no error")
     raise last_error
 
 
@@ -308,7 +526,6 @@ def run_pipeline(
                       None runs the full pipeline from DESIGN.
     """
     issue_num = issue["number"]
-    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
 
     print(f"\n{'='*50}")
     print(f"[ralph] Pipeline starting for #{issue_num}: {issue['title']}")
@@ -524,12 +741,11 @@ def run_build_stage(issue: dict) -> bool:
         return False
 
     # ── Validation gate (only tests written by the independent QA session) ──
-    print(f"\n[ralph] Running validation gate...")
+    print("\n[ralph] Running validation gate...")
     core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
     qa_tests = _load_test_tracking(issue_num)
     qa_tests = [
-        t for t in qa_tests
-        if t.endswith(".py") and "__pycache__" not in t
+        t for t in qa_tests if t.endswith(".py") and "__pycache__" not in t
     ]  # Defense: skip cache artifacts
     if qa_tests:
         print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
@@ -636,12 +852,11 @@ def run_verify_stage(issue: dict) -> bool:
 
     # Run validation gate after review (only tests written by the independent QA session)
     if success:
-        print(f"\n[ralph] Running validation gate...")
+        print("\n[ralph] Running validation gate...")
         core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
         qa_tests = _load_test_tracking(issue_num)
         qa_tests = [
-            t for t in qa_tests
-            if t.endswith(".py") and "__pycache__" not in t
+            t for t in qa_tests if t.endswith(".py") and "__pycache__" not in t
         ]  # Defense: skip cache artifacts
         if qa_tests:
             print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
@@ -786,9 +1001,7 @@ def _run_implement_subagent(issue: dict) -> bool:
     return success
 
 
-def _write_stage_report(
-    issue_num: int, stage: str, failed_step: str, output: str
-):
+def _write_stage_report(issue_num: int, stage: str, failed_step: str, output: str):
     """Write a failure report file following the Failure Reporting Contract."""
     report_path = PROJECT_ROOT / ".ralph" / f"issue-{issue_num}-report.md"
     report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -796,8 +1009,7 @@ def _write_stage_report(
     max_output = 50000
     if len(output) > max_output:
         output = (
-            output[:max_output].rstrip()
-            + "\n\n_(output truncated for report file)_"
+            output[:max_output].rstrip() + "\n\n_(output truncated for report file)_"
         )
     report = (
         f"# Failure Report: Stage {stage}\n\n"
@@ -930,10 +1142,9 @@ def _save_test_tracking(issue_num: int, test_paths: list[str]):
     and non-.py files. The agent's output is untrusted input.
     """
     sanitized = [
-        p for p in test_paths
-        if p.endswith(".py")
-        and "__pycache__" not in p
-        and ".pytest_cache" not in p
+        p
+        for p in test_paths
+        if p.endswith(".py") and "__pycache__" not in p and ".pytest_cache" not in p
     ]
     path = _test_tracking_file(issue_num)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1471,8 +1682,6 @@ def invoke_agent(
             if continue_session:
                 cmd += ["--continue"]
             cmd.append(prompt)
-            result = run(cmd, check=False, capture=False, timeout=None)
-            _check_interrupt()
         elif agent_bin == "kimi":
             # kimi uses --prompt for non-interactive prompt mode (pi uses --print).
             # --prompt mode already runs under the auto permission policy, so no -y/--yolo
@@ -1504,11 +1713,24 @@ def invoke_agent(
                 cmd = [agent_bin, "--prompt", prompt, "--session", design_session_id]
             else:
                 cmd = [agent_bin, "--prompt", prompt]
-            result = run(cmd, check=False, capture=False, timeout=None)
-            _check_interrupt()
+        else:
+            print(f"[ralph] ERROR: Unknown agent '{agent_bin}'")
+            return False
+
+        # Capture output so we can detect provider-side failures, then echo it to
+        # the terminal so the operator still sees the agent conversation.
+        result = run(cmd, check=False, capture=True, timeout=None)
+        _check_interrupt()
+        if result.stdout:
+            print(result.stdout, end="")
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr)
+        _check_interrupt()
+
+        if result.returncode == 0:
             # After a successful kimi invocation that should establish context (DESIGN),
             # capture the session UUID so Mode B can resume it explicitly.
-            if result.returncode == 0 and session_file and not continue_session:
+            if agent_bin == "kimi" and session_file and not continue_session:
                 session_id = _get_kimi_session_id(PROJECT_ROOT)
                 if session_id:
                     session_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1519,14 +1741,29 @@ def invoke_agent(
                         f"[ralph] WARNING: Could not determine Kimi session ID for #{issue_num}. "
                         "Mode B continuation may fail."
                     )
-        else:
-            print(f"[ralph] ERROR: Unknown agent '{agent_bin}'")
-            return False
-        _check_interrupt()
-        return result.returncode == 0
+            return True
+
+        # Non-zero exit: inspect output for provider-side failures.
+        output = (result.stdout or "") + "\n" + (result.stderr or "")
+        kind = _classify_provider_error(output)
+        if kind == "rate_limit":
+            print(f"[ralph] {agent_bin} hit rate limit for #{issue_num}")
+            raise ProviderRateLimitError(
+                f"{agent_bin} rate limit for #{issue_num}: {output[:500]}"
+            )
+        if kind == "quota":
+            print(f"[ralph] {agent_bin} quota exhausted for #{issue_num}")
+            raise ProviderQuotaError(
+                f"{agent_bin} quota exhausted for #{issue_num}: {output[:500]}"
+            )
+
+        print(f"[ralph] {agent_bin} failed for #{issue_num}")
+        return False
     except subprocess.TimeoutExpired:
         print(f"[ralph] Agent timed out for #{issue_num}")
         return False
+    except ProviderError:
+        raise
     except Exception as e:
         print(f"[ralph] Agent invocation error: {e}")
         return False
@@ -1643,7 +1880,6 @@ def _handle_signal(signum, frame):
 
 def _check_interrupt():
     """Abort the current operation if a shutdown signal has been received."""
-    global _in_cleanup
     if _shutdown_requested and not _in_cleanup:
         raise RalphInterrupted()
 
@@ -1690,6 +1926,7 @@ def run_loop(auto_close: bool = False):
 
     try:
         recovered = recover_from_crash()
+        tried_agents: set[str] = set()
 
         while not _shutdown_requested:
             # ── Sync ──
@@ -1714,7 +1951,13 @@ def run_loop(auto_close: bool = False):
                         issue_num, "🔄 Ralph resuming BUILD stage after crash recovery."
                     )
                     save_checkpoint(issue_num, "build")
-                    success = run_build_stage(issue)
+                    try:
+                        success = run_build_stage(issue)
+                    except ProviderError as e:
+                        if _handle_provider_error(issue, e, tried_agents) == "break":
+                            break
+                        recovered = None
+                        continue
                     if not success:
                         gh_comment(
                             issue_num, "❌ Resumed BUILD stage failed. Blocking issue."
@@ -1754,7 +1997,13 @@ def run_loop(auto_close: bool = False):
                         "🔄 Ralph resuming VERIFY stage after crash recovery.",
                     )
                     save_checkpoint(issue_num, "verify")
-                    verify_pass = run_verify_stage(issue)
+                    try:
+                        verify_pass = run_verify_stage(issue)
+                    except ProviderError as e:
+                        if _handle_provider_error(issue, e, tried_agents) == "break":
+                            break
+                        recovered = None
+                        continue
                     clear_checkpoint()
                     if verify_pass:
                         if auto_close:
@@ -1797,7 +2046,12 @@ def run_loop(auto_close: bool = False):
                 if resume_stage == "design":
                     # Run the full pipeline from scratch (already rolled back to pre-design)
                     recovered = None
-                    run_pipeline(issue, auto_close=auto_close)
+                    try:
+                        run_pipeline(issue, auto_close=auto_close)
+                    except ProviderError as e:
+                        if _handle_provider_error(issue, e, tried_agents) == "break":
+                            break
+                        continue
                     continue
 
                 recovered = None
@@ -1807,6 +2061,7 @@ def run_loop(auto_close: bool = False):
             retry = fetch_retry_issue()
             if retry is not None:
                 issue, resume_stage = retry
+                tried_agents.clear()
                 issue_num = issue["number"]
                 if resume_stage == "verify":
                     transition_label(issue_num, "status:verify", "status:verify-retry")
@@ -1822,7 +2077,14 @@ def run_loop(auto_close: bool = False):
                         f"🔄 Ralph claimed #{issue_num} for BUILD retry "
                         "(skipping DESIGN).",
                     )
-                run_pipeline(issue, auto_close=auto_close, resume_stage=resume_stage)
+                try:
+                    run_pipeline(
+                        issue, auto_close=auto_close, resume_stage=resume_stage
+                    )
+                except ProviderError as e:
+                    if _handle_provider_error(issue, e, tried_agents) == "break":
+                        break
+                    continue
                 if not _shutdown_requested:
                     time.sleep(5)
                 continue
@@ -1842,12 +2104,18 @@ def run_loop(auto_close: bool = False):
                 continue
 
             # ── Claim & Pipeline ──
+            tried_agents.clear()
             issue_num = issue["number"]
             transition_label(issue_num, "status:design", "status:ready")
             gh_comment(
                 issue_num, f"⏳ Ralph claimed issue #{issue_num} and started DESIGN."
             )
-            run_pipeline(issue, auto_close=auto_close)
+            try:
+                run_pipeline(issue, auto_close=auto_close)
+            except ProviderError as e:
+                if _handle_provider_error(issue, e, tried_agents) == "break":
+                    break
+                continue
 
             # Brief pause between issues
             if not _shutdown_requested:

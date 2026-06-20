@@ -209,16 +209,19 @@ def test_save_test_tracking_handles_empty_list(tmp_path):
 
 def test_classify_provider_error_detects_kimi_rate_limit():
     """Kimi APIProviderRateLimitError / 429 is classified as rate-limit."""
-    assert engine._classify_provider_error("APIProviderRateLimitError: 429") == "rate_limit"
-    assert engine._classify_provider_error("Provider returned 429 rate limit") == "rate_limit"
+    assert (
+        engine._classify_provider_error("APIProviderRateLimitError: 429")
+        == "rate_limit"
+    )
+    assert (
+        engine._classify_provider_error("Provider returned 429 rate limit")
+        == "rate_limit"
+    )
 
 
 def test_classify_provider_error_detects_pi_quota():
     """Pi quota/billing errors are classified as quota."""
-    assert (
-        engine._classify_provider_error("Monthly usage limit reached")
-        == "quota"
-    )
+    assert engine._classify_provider_error("Monthly usage limit reached") == "quota"
     assert engine._classify_provider_error("insufficient_quota") == "quota"
     assert engine._classify_provider_error("FreeUsageLimitError") == "quota"
 
@@ -231,26 +234,35 @@ def test_classify_provider_error_returns_none_for_normal_failure():
 
 def test_invoke_agent_raises_rate_limit_error_on_kimi_429():
     """invoke_agent raises ProviderRateLimitError when output contains 429."""
-    fake_result = mock.Mock(returncode=1, stdout="", stderr="APIProviderRateLimitError: 429")
-    with mock.patch.object(engine, "_resolve_agent_binary", return_value="kimi"), \
-         mock.patch.object(engine, "run", return_value=fake_result):
+    fake_result = mock.Mock(
+        returncode=1, stdout="", stderr="APIProviderRateLimitError: 429"
+    )
+    with mock.patch.object(
+        engine, "_resolve_agent_binary", return_value="kimi"
+    ), mock.patch.object(engine, "run", return_value=fake_result):
         with pytest.raises(engine.ProviderRateLimitError):
             engine.invoke_agent("prompt", 42)
 
 
 def test_invoke_agent_raises_quota_error_on_pi_limit():
     """invoke_agent raises ProviderQuotaError when output contains quota message."""
-    fake_result = mock.Mock(returncode=1, stdout="", stderr="FreeUsageLimitError: quota exceeded")
-    with mock.patch.object(engine, "_resolve_agent_binary", return_value="pi"), \
-         mock.patch.object(engine, "run", return_value=fake_result):
+    fake_result = mock.Mock(
+        returncode=1, stdout="", stderr="FreeUsageLimitError: quota exceeded"
+    )
+    with mock.patch.object(
+        engine, "_resolve_agent_binary", return_value="pi"
+    ), mock.patch.object(engine, "run", return_value=fake_result):
         with pytest.raises(engine.ProviderQuotaError):
             engine.invoke_agent("prompt", 42)
 
 
 def test_find_alternate_agent_returns_other_available_agent():
     """_find_alternate_agent returns the other agent when it is on PATH."""
+
     def fake_which(cmd):
-        return mock.Mock(returncode=0 if cmd[0] == "which" and cmd[1] in ("kimi", "pi") else 1)
+        return mock.Mock(
+            returncode=0 if cmd[0] == "which" and cmd[1] in ("kimi", "pi") else 1
+        )
 
     with mock.patch.object(engine, "subprocess") as mock_subp:
         mock_subp.run.side_effect = lambda cmd, **kw: fake_which(cmd)
@@ -262,6 +274,7 @@ def test_find_alternate_agent_returns_other_available_agent():
 
 def test_find_alternate_agent_returns_none_when_no_other_agent():
     """_find_alternate_agent returns None when the other agent is not installed."""
+
     def fake_which(cmd):
         # Only kimi is available.
         return mock.Mock(returncode=0 if cmd == ["which", "kimi"] else 1)
@@ -271,36 +284,68 @@ def test_find_alternate_agent_returns_none_when_no_other_agent():
         assert engine._find_alternate_agent({"kimi"}) is None
 
 
+def _make_sleep_shutdown():
+    """Return a side-effect that sets the shutdown flag on the first sleep call."""
+    called = False
+
+    def _sleep(seconds):
+        nonlocal called
+        if not called:
+            called = True
+            engine._shutdown_requested = True
+
+    return _sleep
+
+
 def test_run_loop_reverts_ready_and_sleeps_on_rate_limit():
     """A provider rate-limit pauses the loop, reverts the ticket to ready, and does not block it."""
+    engine._shutdown_requested = False
+    engine._in_cleanup = False
+    os.environ.pop("RALPH_AGENT", None)
     issue = {"number": 42, "title": "Test"}
 
-    def shutdown_after_error(*args, **kwargs):
-        engine._shutdown_requested = True
-        raise engine.ProviderRateLimitError("429")
-
-    with mock.patch.object(engine, "acquire_pid_file", return_value=True), \
-         mock.patch.object(engine, "recover_from_crash", return_value=None), \
-         mock.patch.object(engine, "fetch_ready_ticket", side_effect=[issue, None]), \
-         mock.patch.object(engine, "transition_label") as mock_transition, \
-         mock.patch.object(engine, "run_pipeline", side_effect=shutdown_after_error), \
-         mock.patch.object(engine, "_find_alternate_agent", return_value=None), \
-         mock.patch.object(engine, "_revert_to_ready") as mock_revert, \
-         mock.patch.object(engine, "time") as mock_time, \
-         mock.patch.object(engine, "gh_comment"), \
-         mock.patch.object(engine, "log_metrics"), \
-         mock.patch.object(engine, "release_pid_file"):
+    with mock.patch.object(
+        engine, "acquire_pid_file", return_value=True
+    ), mock.patch.object(
+        engine, "recover_from_crash", return_value=None
+    ), mock.patch.object(
+        engine, "fetch_ready_ticket", side_effect=[issue, None]
+    ), mock.patch.object(
+        engine, "transition_label"
+    ) as mock_transition, mock.patch.object(
+        engine, "run_pipeline", side_effect=engine.ProviderRateLimitError("429")
+    ), mock.patch.object(
+        engine, "_find_alternate_agent", return_value=None
+    ), mock.patch.object(
+        engine, "_revert_to_ready"
+    ) as mock_revert, mock.patch.object(
+        engine, "time"
+    ) as mock_time, mock.patch.object(
+        engine, "gh", return_value=mock.Mock(stdout="[]")
+    ), mock.patch.object(
+        engine, "sync_status"
+    ), mock.patch.object(
+        engine, "gh_comment"
+    ), mock.patch.object(
+        engine, "log_metrics"
+    ), mock.patch.object(
+        engine, "release_pid_file"
+    ):
+        mock_time.sleep.side_effect = _make_sleep_shutdown()
         engine.run_loop()
 
     # Claimed to design, then reverted to ready.
     mock_transition.assert_any_call(42, "status:design", "status:ready")
     mock_revert.assert_called_once_with(42)
-    # Rate-limit backoff sleep.
-    mock_time.sleep.assert_any_call(engine.RATE_LIMIT_BACKOFF_SECONDS)
+    # Rate-limit backoff uses 1-second interruptible sleeps.
+    mock_time.sleep.assert_any_call(1)
 
 
 def test_run_loop_falls_back_to_alternate_agent():
     """When the current agent is rate-limited, the loop tries the alternate agent once."""
+    engine._shutdown_requested = False
+    engine._in_cleanup = False
+    os.environ.pop("RALPH_AGENT", None)
     issue = {"number": 42, "title": "Test"}
     calls = []
 
@@ -308,20 +353,43 @@ def test_run_loop_falls_back_to_alternate_agent():
         calls.append(1)
         if len(calls) == 1:
             raise engine.ProviderRateLimitError("429")
-        engine._shutdown_requested = True
         return True
 
-    with mock.patch.object(engine, "acquire_pid_file", return_value=True), \
-         mock.patch.object(engine, "recover_from_crash", return_value=None), \
-         mock.patch.object(engine, "fetch_ready_ticket", side_effect=[issue, None]), \
-         mock.patch.object(engine, "transition_label") as mock_transition, \
-         mock.patch.object(engine, "run_pipeline", side_effect=fail_then_succeed), \
-         mock.patch.object(engine, "_find_alternate_agent", return_value="pi"), \
-         mock.patch.object(engine, "_revert_to_ready") as mock_revert, \
-         mock.patch.object(engine, "time") as mock_time, \
-         mock.patch.object(engine, "gh_comment"), \
-         mock.patch.object(engine, "log_metrics"), \
-         mock.patch.object(engine, "release_pid_file"):
+    def fetch_gen():
+        # First claim (with original agent), then re-claim after fallback.
+        yield issue
+        yield issue
+        engine._shutdown_requested = True
+        while True:
+            yield None
+
+    with mock.patch.object(
+        engine, "acquire_pid_file", return_value=True
+    ), mock.patch.object(
+        engine, "recover_from_crash", return_value=None
+    ), mock.patch.object(
+        engine, "fetch_ready_ticket", side_effect=fetch_gen()
+    ), mock.patch.object(
+        engine, "transition_label"
+    ) as mock_transition, mock.patch.object(
+        engine, "run_pipeline", side_effect=fail_then_succeed
+    ), mock.patch.object(
+        engine, "_find_alternate_agent", return_value="pi"
+    ), mock.patch.object(
+        engine, "_revert_to_ready"
+    ) as mock_revert, mock.patch.object(
+        engine, "time"
+    ), mock.patch.object(
+        engine, "gh", return_value=mock.Mock(stdout="[]")
+    ), mock.patch.object(
+        engine, "sync_status"
+    ), mock.patch.object(
+        engine, "gh_comment"
+    ), mock.patch.object(
+        engine, "log_metrics"
+    ), mock.patch.object(
+        engine, "release_pid_file"
+    ):
         engine.run_loop()
 
     # Reverted to ready before retrying with alternate agent.
@@ -333,24 +401,40 @@ def test_run_loop_falls_back_to_alternate_agent():
 
 def test_run_loop_creates_project_issue_when_all_agents_exhausted():
     """When all agents hit quota/rate-limit, the loop logs a project issue and stops."""
+    engine._shutdown_requested = False
+    engine._in_cleanup = False
+    os.environ.pop("RALPH_AGENT", None)
     issue = {"number": 42, "title": "Test"}
 
-    def shutdown_after_error(*args, **kwargs):
-        engine._shutdown_requested = True
-        raise engine.ProviderQuotaError("quota")
-
-    with mock.patch.object(engine, "acquire_pid_file", return_value=True), \
-         mock.patch.object(engine, "recover_from_crash", return_value=None), \
-         mock.patch.object(engine, "fetch_ready_ticket", side_effect=[issue, None]), \
-         mock.patch.object(engine, "transition_label"), \
-         mock.patch.object(engine, "run_pipeline", side_effect=shutdown_after_error), \
-         mock.patch.object(engine, "_find_alternate_agent", return_value=None), \
-         mock.patch.object(engine, "_revert_to_ready"), \
-         mock.patch.object(engine, "_create_provider_issue") as mock_create, \
-         mock.patch.object(engine, "time"), \
-         mock.patch.object(engine, "gh_comment"), \
-         mock.patch.object(engine, "log_metrics"), \
-         mock.patch.object(engine, "release_pid_file"):
+    with mock.patch.object(
+        engine, "acquire_pid_file", return_value=True
+    ), mock.patch.object(
+        engine, "recover_from_crash", return_value=None
+    ), mock.patch.object(
+        engine, "fetch_ready_ticket", side_effect=[issue, None]
+    ), mock.patch.object(
+        engine, "transition_label"
+    ), mock.patch.object(
+        engine, "run_pipeline", side_effect=engine.ProviderQuotaError("quota")
+    ), mock.patch.object(
+        engine, "_find_alternate_agent", return_value=None
+    ), mock.patch.object(
+        engine, "_revert_to_ready"
+    ), mock.patch.object(
+        engine, "_create_provider_issue"
+    ) as mock_create, mock.patch.object(
+        engine, "time"
+    ), mock.patch.object(
+        engine, "gh", return_value=mock.Mock(stdout="[]")
+    ), mock.patch.object(
+        engine, "sync_status"
+    ), mock.patch.object(
+        engine, "gh_comment"
+    ), mock.patch.object(
+        engine, "log_metrics"
+    ), mock.patch.object(
+        engine, "release_pid_file"
+    ):
         engine.run_loop()
 
     mock_create.assert_called_once()
