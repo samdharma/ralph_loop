@@ -12,6 +12,7 @@ Usage (via CLI):
 import hashlib
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -526,7 +527,10 @@ def run_build_stage(issue: dict) -> bool:
     print(f"\n[ralph] Running validation gate...")
     core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
     qa_tests = _load_test_tracking(issue_num)
-    qa_tests = [t for t in qa_tests if t.endswith(".py")]  # Defense: skip cache artifacts
+    qa_tests = [
+        t for t in qa_tests
+        if t.endswith(".py") and "__pycache__" not in t
+    ]  # Defense: skip cache artifacts
     if qa_tests:
         print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
         val_result = run(
@@ -635,7 +639,10 @@ def run_verify_stage(issue: dict) -> bool:
         print(f"\n[ralph] Running validation gate...")
         core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
         qa_tests = _load_test_tracking(issue_num)
-        qa_tests = [t for t in qa_tests if t.endswith(".py")]  # Defense: skip cache artifacts
+        qa_tests = [
+            t for t in qa_tests
+            if t.endswith(".py") and "__pycache__" not in t
+        ]  # Defense: skip cache artifacts
         if qa_tests:
             print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
             val_result = run(
@@ -917,10 +924,20 @@ def _test_tracking_file(issue_num: int) -> Path:
 
 
 def _save_test_tracking(issue_num: int, test_paths: list[str]):
-    """Persist the list of test files created during the TEST stage."""
+    """Persist the list of test files created during the TEST stage.
+
+    Sanitizes input to exclude cache artifacts (__pycache__/, .pytest_cache/)
+    and non-.py files. The agent's output is untrusted input.
+    """
+    sanitized = [
+        p for p in test_paths
+        if p.endswith(".py")
+        and "__pycache__" not in p
+        and ".pytest_cache" not in p
+    ]
     path = _test_tracking_file(issue_num)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"tests": test_paths}, indent=2))
+    path.write_text(json.dumps({"tests": sanitized}, indent=2))
 
 
 def _load_test_tracking(issue_num: int) -> list[str]:
