@@ -273,24 +273,13 @@ def run_lint(tool: str, files: list[str]) -> bool:
     }
 
     if tool == "mypy":
-        # Build module names from file paths
-        modules = []
-        for f in files:
-            if f.endswith(".py"):
-                if f.endswith("__init__.py"):
-                    mod = (
-                        f.replace("src/", "")
-                        .replace("/", ".")
-                        .replace(".__init__.py", "")
-                    )
-                else:
-                    mod = f.replace("src/", "").replace("/", ".").replace(".py", "")
-                if mod:
-                    modules.extend(["-m", mod])
-        if not modules:
-            print("[ralph] mypy: no modules to check.")
+        # Pass file paths directly; mypy resolves module names via mypy_path
+        # or project structure. This works for both src/ and flat layouts.
+        py_files = [f for f in files if f.endswith(".py")]
+        if not py_files:
+            print("[ralph] mypy: no files to check.")
             return True
-        cmd = [PYTHON_CMD, "-m", "mypy", "--follow-imports=silent"] + modules
+        cmd = [PYTHON_CMD, "-m", "mypy", "--follow-imports=silent"] + py_files
     elif tool in tool_configs:
         cmd = tool_configs[tool]
     else:

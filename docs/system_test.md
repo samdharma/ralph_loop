@@ -315,7 +315,7 @@ fi
 
 ```bash
 cd /tmp/ralph-init-test
-for f in docs/agent/prompts/{design,build,verify,test,implement}.md; do
+for f in docs/agent/prompts/{design,test,implement,verify}.md; do
     if [ -s "$f" ]; then
         echo "  ✓  $f ($(wc -c < "$f" | tr -d ' ') bytes)"
     else
@@ -326,7 +326,7 @@ done
 
 | Expected | How to verify |
 |----------|---------------|
-| All 5 prompt files non-empty | All show ✓ with byte counts > 0 |
+| All 4 stage prompt files non-empty | All show ✓ with byte counts > 0 |
 
 ---
 
