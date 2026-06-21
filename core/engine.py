@@ -40,6 +40,10 @@ PREFLIGHT_SCRIPT = PROJECT_ROOT / "config" / "ralph_preflight.sh"
 # Backoff used when all available agents are rate-limited.
 RATE_LIMIT_BACKOFF_SECONDS = 15 * 60  # 15 minutes
 
+# Extra flags passed to pi via --pi-flag (validated at startup against pi --help).
+# Each string may contain multiple whitespace-separated tokens.
+_PI_FLAGS: list[str] = []
+
 
 # ─────────────────────────────────────────────────────────
 # Provider error handling
@@ -1674,6 +1678,75 @@ def _parse_reference_docs(body: str) -> list[str]:
     return refs
 
 
+def _parse_pi_valid_flags() -> set[str]:
+    """Run `pi --help` and return the set of valid long flag names.
+
+    Extracts flags like --model, --no-skills, --thinking from the help output.
+    Only long-form flags are returned (--flag, not -f aliases).
+    """
+    try:
+        result = subprocess.run(
+            ["pi", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        output = result.stdout + result.stderr
+    except Exception as e:
+        print(f"[ralph] ERROR: could not run 'pi --help': {e}")
+        sys.exit(1)
+
+    flags: set[str] = set()
+    for line in output.splitlines():
+        stripped = line.strip()
+        # Lines like "  --model <pattern>  ..." or "  --no-skills  ..."
+        if stripped.startswith("--"):
+            # Extract flag name: everything from -- to first space/comma/end
+            flag = stripped.split()[0]
+            # Handle aliases: "--continue, -c" → just "--continue"
+            flag = flag.rstrip(",")
+            if flag.startswith("--"):
+                flags.add(flag)
+    return flags
+
+
+def validate_pi_flags(raw_flags: list[str]) -> list[str]:
+    """Validate each --pi-flag value against the known pi flag set.
+
+    Returns a flat list of CLI tokens (whitespace-split from each raw flag).
+    Exits immediately with a helpful error if any flag is unknown.
+    """
+    valid = _parse_pi_valid_flags()
+    if not valid:
+        print("[ralph] ERROR: could not determine valid pi flags from 'pi --help'.")
+        sys.exit(1)
+
+    tokens: list[str] = []
+    for raw in raw_flags:
+        parts = raw.strip().split()
+        if not parts:
+            continue
+        flag_name = parts[0]
+        if not flag_name.startswith("--"):
+            print(
+                f"[ralph] ERROR: --pi-flag value must start with '--', got: '{raw}'"
+            )
+            print("  Example: --pi-flag='--model=claude-sonnet-4'")
+            sys.exit(1)
+        # Strip '=value' suffix for validation
+        flag_base = flag_name.split("=")[0]
+        if flag_base not in valid:
+            print(f"[ralph] ERROR: unknown pi flag: '{flag_base}'")
+            print(f"  Provided via: --pi-flag='{raw}'")
+            similar = [f for f in sorted(valid) if flag_base.lstrip("-") in f]
+            if similar:
+                print(f"  Did you mean one of: {', '.join(similar[:5])}?")
+            print(f"  Run 'pi --help' for the full list of valid flags.")
+            sys.exit(1)
+        tokens.extend(parts)
+    return tokens
+
+
 def _resolve_agent_binary() -> str:
     """
     Determine which AI agent binary to invoke.
@@ -1791,6 +1864,8 @@ def invoke_agent(
     try:
         if agent_bin == "pi":
             cmd = [agent_bin, "--print", "--no-skills"]
+            if _PI_FLAGS:
+                cmd.extend(_PI_FLAGS)
             if session_file:
                 cmd += ["--session", str(session_file)]
             if continue_session:
@@ -2341,7 +2416,23 @@ if __name__ == "__main__":
         metavar="N",
         help="Process only issue #N and exit",
     )
+    parser.add_argument(
+        "--pi-flag",
+        action="append",
+        default=[],
+        metavar="FLAG",
+        help="Extra flag for every pi invocation (repeatable). "
+        "Example: --pi-flag='--model=claude-sonnet-4' --pi-flag='--thinking high'",
+    )
     args = parser.parse_args()
     if args.agent:
         os.environ["RALPH_AGENT"] = args.agent
+    # Validate and store pi flags
+    if args.pi_flag:
+        resolved_agent = args.agent or os.environ.get("RALPH_AGENT", "") or "pi"
+        if resolved_agent != "pi":
+            print(f"[ralph] WARNING: --pi-flag is set but agent is '{resolved_agent}' (not 'pi'). Flags will be ignored.")
+        else:
+            _PI_FLAGS[:] = validate_pi_flags(args.pi_flag)
+            print(f"[ralph] Validated {len(args.pi_flag)} pi flag(s): {' '.join(_PI_FLAGS)}")
     run_loop(auto_close=args.auto_close, single_issue=args.issue)
