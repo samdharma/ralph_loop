@@ -23,6 +23,7 @@ Do NOT mark tickets `status:blocked` for provider errors.
 
 ## For Agents
 
+- You have access to: **git**, **gh** (GitHub CLI), **python**, **pi**, **kimi**, and **bash**.
 - Read `docs/agent/PROMPT.md` for universal rules and the failure-reporting contract.
 - Read the stage prompt for your current role in `docs/agent/prompts/<stage>.md`.
 - Read `docs/agent/PROGRESS.md` for the active design spec and progress log.
