@@ -56,7 +56,7 @@ docs/
 │   │   ├── test.md               ← unchanged
 │   │   ├── implement.md          ← unchanged
 │   │   └── verify.md             ← unchanged
-│   └── progress-isolation.md     ← this doc
+├── progress-isolation.md         ← this doc (ralph-internal design spec)
 └── designs/                      ← NEW: per-issue design specs (project content)
     ├── 70.md
     ├── 71.md
