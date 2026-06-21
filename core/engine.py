@@ -584,7 +584,12 @@ def run_pipeline(
         )
     else:
         save_checkpoint(issue_num, "design")
-        if not run_design_stage(issue):
+        try:
+            design_ok = run_design_stage(issue)
+        except ProviderError:
+            clear_checkpoint()
+            raise
+        if not design_ok:
             clear_checkpoint()
             _cleanup_issue_artifacts(issue_num)
             partial_spec = _read_partial_design_spec()
@@ -629,7 +634,12 @@ def run_pipeline(
         )
     else:
         save_checkpoint(issue_num, "build")
-        if not run_build_stage(issue):
+        try:
+            build_ok = run_build_stage(issue)
+        except ProviderError:
+            clear_checkpoint()
+            raise
+        if not build_ok:
             clear_checkpoint()
             _archive_issue_artifacts(issue_num)
             # run_build_stage already posted a detailed failure comment.
@@ -670,7 +680,11 @@ def run_pipeline(
 
     # ── STAGE 3: VERIFY ──
     save_checkpoint(issue_num, "verify")
-    verify_pass = run_verify_stage(issue)
+    try:
+        verify_pass = run_verify_stage(issue)
+    except ProviderError:
+        clear_checkpoint()
+        raise
     clear_checkpoint()
     _cleanup_issue_artifacts(issue_num)
 
@@ -2150,7 +2164,12 @@ def run_loop(auto_close: bool = False, single_issue: Optional[int] = None):
                     single_issue,
                     f"⏳ Ralph claimed #{single_issue} and started DESIGN (single-issue mode).",
                 )
-                run_pipeline(issue, auto_close=auto_close)
+                try:
+                    run_pipeline(issue, auto_close=auto_close)
+                except ProviderError as e:
+                    if _handle_provider_error(issue, e, tried_agents) == "break":
+                        break
+                    continue
                 break
 
             # ── Handle crash recovery resume ──
