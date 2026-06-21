@@ -1372,13 +1372,43 @@ def _extract_failure_summary(stdout: str, stderr: str) -> str:
 
 
 def _rollback_working_tree():
-    """Discard all uncommitted changes so stale files don't pollute later stages."""
+    """Discard all uncommitted changes so stale files don't pollute later stages.
+
+    Uses the checkpoint's pre_stage_sha for a precise rollback to the exact
+    state before the BUILD stage started. This avoids two problems with the
+    old approach (git clean -fd + git checkout -- .):
+
+    1. git clean -fd destroys entire untracked directories (e.g. a new
+       adapters/ subpackage created by the IMPLEMENT agent). On retry the
+       agent may not recreate them, causing "missing __init__.py" lint errors.
+
+    2. git checkout -- . resets to the index, not HEAD. If stray staged
+       changes exist, the restore is imprecise.
+    """
     try:
-        # Remove untracked files first
-        run(["git", "clean", "-fd"], check=False, capture=True)
-        # Reset tracked files to HEAD
-        run(["git", "checkout", "--", "."], check=False, capture=True)
-        print("[ralph] Working tree rolled back after BUILD failure.")
+        # Read pre_stage_sha from checkpoint for precise rollback
+        pre_sha = None
+        if CHECKPOINT_FILE.exists():
+            try:
+                data = json.loads(CHECKPOINT_FILE.read_text())
+                pre_sha = data.get("pre_stage_sha")
+            except Exception:
+                pass
+
+        if pre_sha:
+            # Reset tracked files + index to pre-build state
+            run(["git", "reset", "--hard", pre_sha], check=False, capture=True)
+            # Remove untracked files and directories
+            run(["git", "clean", "-fd"], check=False, capture=True)
+            print(
+                f"[ralph] Working tree rolled back to checkpoint "
+                f"SHA {pre_sha[:8]}."
+            )
+        else:
+            # Fallback: restore tracked files to HEAD
+            run(["git", "clean", "-fd"], check=False, capture=True)
+            run(["git", "checkout", "--", "."], check=False, capture=True)
+            print("[ralph] Working tree rolled back after BUILD failure (fallback).")
     except Exception as e:
         print(f"[ralph] WARNING: rollback failed: {e}")
 
