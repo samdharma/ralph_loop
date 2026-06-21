@@ -580,7 +580,7 @@ flowchart TD
 |---|---|---|
 | **Context** | Fresh agent session. No conversation history. No codebase knowledge. | Full parent context. All prior conversation, codebase familiarity. |
 | **What it receives** | Only what the orchestrator explicitly injects: issue body, design spec, git diff, prompt file. | Everything the parent agent saw plus the orchestrator's stage instructions. |
-| **Implementation** | `pi --print "<assembled prompt>"` — a brand-new invocation with no prior session. | DESIGN saves session via `pi --print --session <file>`; IMPLEMENT resumes it via `pi --continue --session <file> --print`. For `kimi`, best-effort Mode B is implemented via `kimi --continue --print`; however kimi's `--continue` picks up the most recent session, which may be TEST (not DESIGN) if TEST runs with kimi. A warning is logged. Use pi for reliable Mode B. |
+| **Implementation** | `pi --print "<assembled prompt>"` — a brand-new invocation with no prior session. Ralph automatically injects `--no-skills` to keep the pipeline environment clean. | DESIGN saves session via `pi --print --no-skills --session <file>`; IMPLEMENT resumes it via `pi --continue --no-skills --session <file> --print`. For `kimi`, best-effort Mode B is implemented via `kimi --continue --print`; however kimi's `--continue` picks up the most recent session, which may be TEST (not DESIGN) if TEST runs with kimi. A warning is logged. Use pi for reliable Mode B. |
 | **Use for** | TEST, VERIFY — independence is the point | IMPLEMENT — needs to see spec + codebase |
 | **Anti-pattern** | Using Mode A for IMPLEMENT (agent codes blind, can't reference conventions or existing code) | Using Mode B for TEST (agent sees implementation details, writes biased tests) |
 
@@ -878,7 +878,23 @@ Found during real-agent and crash-recovery testing on `samdharma/ralph-e2e-test`
 
 ### Remaining Tasks
 
-- [ ] **Cold-start test** — Install Ralph from scratch on a clean machine (no prior ~/.ralph, no cached tools). Verify: one-line install, `ralph init --create-labels`, `ralph setup`, `ralph daemon` against a real GitHub repo with a `status:ready` issue. Catches PATH edge cases, missing dependencies, python version issues, and gh auth gaps.
+- [x] ~~Cold-start test~~ ✅ Not yet run — deferred to continuous validation
+
+### Late-Breaking Changes (2026-06-21)
+
+After the Phase 3 completion, the following features were added:
+
+1. **Rule #7 relaxed — external review tools may update labels.** The blanket prohibition "Do NOT touch GitHub labels or issues" was narrowed to agent pipeline execution only. After Ralph posts the handoff comment (`status:review`), external tools and reviewers may modify labels. The handoff comment now explicitly states: "External tools and reviewers may now update labels on this issue. Ralph will not touch this issue again unless a retry label is set." See `AGENTS.md`, `docs/agent/PROMPT.md` rule 7, and `core/engine.py` handoff comments.
+
+2. **`--no-skills` injected into all pi invocations.** Ralph adds `--no-skills` to every `pi` command to prevent project or global skills from interfering with the controlled stage prompts. This is unconditional — no CLI flag needed.
+
+3. **`--pi-flag` for operator-controlled pi flags.** `ralph daemon --agent=pi --pi-flag="--model=..." --pi-flag="--thinking high"` (repeatable). Each flag is validated against `pi --help` at startup; unknown flags produce a clear error with "did you mean?" suggestions. Use cases: change model, adjust thinking level, disable extensions, etc.
+
+4. **Tools line in AGENTS.md.** Every project's `AGENTS.md` now lists the tools available to pipeline agents: `git`, `gh`, `python`, `pi`, `kimi`, and `bash`.
+
+5. **Provider error handling completed.** The orchestrator detects provider-side failures (429 rate-limit, quota/billing) from agent output and handles them gracefully: rate-limit → pause 15 min + revert ticket to `status:ready`; quota → try alternate agent → create project issue if both exhausted. Three new metric event types: `provider_rate_limit_pause`, `agent_fallback`, `provider_exhausted`.
+
+*Last updated: 2026-06-21.*
 
 **Test repo preserved** at `samdharma/ralph-e2e-test` for future validation runs. Has proper labels, Kanban board, and a working `get_version()` example from the real-agent E2E.
 

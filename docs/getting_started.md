@@ -138,9 +138,24 @@ ralph daemon                 # foreground
 ralph daemon &               # background
 ralph daemon --auto-close    # close issues on success
 ralph daemon --issue 42      # single issue, then exit
+ralph daemon --agent=pi --pi-flag="--model=claude-sonnet-4" --pi-flag="--thinking high"
 ```
 
 The daemon syncs from origin, picks up ready tickets, runs the pipeline, and pushes commits after DESIGN and BUILD.
+
+### Pi-Specific Flags (`--pi-flag`)
+
+When running with `--agent=pi`, you can inject extra pi CLI flags via `--pi-flag` (repeatable):
+
+```bash
+# Change model + thinking level
+ralph daemon --agent=pi --pi-flag="--model=gemini-2.5-pro" --pi-flag="--thinking high"
+
+# Disable extensions
+ralph daemon --agent=pi --pi-flag="--no-extensions"
+```
+
+Each flag is validated against `pi --help` at startup. Unknown flags produce a clear error and exit immediately. Ralph also automatically adds `--no-skills` to every pi invocation to keep the controlled pipeline environment clean.
 
 ### Signal Handling
 
@@ -316,4 +331,4 @@ See [Observability](observability.md) for dashboards, metric event types, and ex
 
 *Next: [Observability](observability.md) for metrics and monitoring, [v3 Redesign](v3-redesign.md) for system architecture.*
 
-*Last updated: 2026-06-19.*
+*Last updated: 2026-06-21. --pi-flag, --no-skills, external review tools may update labels after handoff.*

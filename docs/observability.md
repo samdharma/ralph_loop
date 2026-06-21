@@ -42,6 +42,9 @@ Structured JSONL at `logs/ralph_metrics.jsonl`:
 | `agent_invoke` | `issue`, `agent` (`pi`/`kimi`) | Agent invocation |
 | `crash_recovery` | `issue`, `stage` | Restart after crash |
 | `daemon_error` | `error` | Unhandled exception |
+| `provider_rate_limit_pause` | `issue`, `agents` | All agents rate-limited, pausing 15 min |
+| `agent_fallback` | `issue`, `from_agent`, `to_agent`, `reason` | Agent failed, fell back to alternate |
+| `provider_exhausted` | `agent`, `issue_url` | All agents exhausted (quota/rate-limit) |
 
 Example:
 
@@ -118,4 +121,4 @@ ralph report --period=week   # weekly summary
 Generates a summary from metrics + GitHub issue history: issues processed,
 pass/fail rates, blocked issues, retries.
 
-*Last updated: 2026-06-19.*
+*Last updated: 2026-06-21. Provider error metrics added (rate_limit_pause, agent_fallback, provider_exhausted).*

@@ -70,7 +70,7 @@ Fix the problem, then re-queue with a retry label — no need to re-run earlier 
 |---------|---------|
 | `ralph init [dir]` | Scaffold a Ralph project |
 | `ralph setup` | Check prerequisites (gh auth, labels, deps) |
-| `ralph daemon [--auto-close] [--issue=N]` | Start the build loop |
+| `ralph daemon [--auto-close] [--issue=N] [--pi-flag=FLAG]` | Start the build loop |
 | `ralph status` | Show daemon PID, active issue, recent metrics |
 | `ralph validate [--tier=...]` | Run the validation gate (pytest + lint) |
 | `ralph report` | Generate daily/weekly summary |
@@ -105,4 +105,4 @@ my-project/
 
 MIT
 
-*Last updated: 2026-06-19.*
+*Last updated: 2026-06-21. --pi-flag, --no-skills, rule #7 relaxed for external review tools.*
