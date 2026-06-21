@@ -64,6 +64,7 @@ cmd_help() {
     echo "  daemon --agent=<pi|kimi>  AI agent to use (overrides RALPH_AGENT and config)"
 echo "  daemon --auto-close       Close issues on success (skip human review)"
     echo "  daemon --issue=N          Process only issue #N and exit"
+    echo "  daemon --pi-flag=FLAG     Extra pi flag (repeatable, validated against pi --help)"
     echo ""
     echo "Environment:"
     echo "  RALPH_PROJECT_DIR      Project root (default: pwd)"
