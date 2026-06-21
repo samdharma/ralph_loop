@@ -1790,7 +1790,7 @@ def invoke_agent(
 
     try:
         if agent_bin == "pi":
-            cmd = [agent_bin, "--print"]
+            cmd = [agent_bin, "--print", "--no-skills"]
             if session_file:
                 cmd += ["--session", str(session_file)]
             if continue_session:
