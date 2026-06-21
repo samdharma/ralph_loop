@@ -37,7 +37,8 @@
 - This doc does **not** change the DESIGN prompt's "Output Format" (the H1 `# Design Spec: #<N> <title>` structure stays).
 - This doc does **not** introduce a new docs framework (no mkdocs, no sphinx, no design-doc tooling).
 - This doc does **not** change the in-conversation Mode B inheritance mechanism.
-- This doc does **not** touch `PROMPT.md` (the universal rules for agents) or the `prompts/test.md` / `prompts/implement.md` / `prompts/verify.md` files (only `prompts/design.md` and the engine change).
+- This doc makes **one** small change to the universal prompt `PROMPT.md` (line 51): update a stale path reference from `docs/agent/PROGRESS.md` to `docs/designs/<issue-number>.md`. See Section 4.4.1.
+- This doc does **not** touch the persona prompts `prompts/test.md` / `prompts/implement.md` / `prompts/verify.md` (only `prompts/design.md` and the engine change). Verified: none of these three files reference `PROGRESS.md` or any specific design-file path — they reference "the design spec" generically, which the engine injects at runtime.
 - This doc does **not** migrate existing in-PROGRESS.md content. Old design content stays in `PROGRESS.md` as historical artifact; new issues go to the new location.
 
 ---
@@ -50,7 +51,7 @@
 docs/
 ├── agent/                        ← ralph orchestration (consumed by engine)
 │   ├── PROGRESS.md               ← small status board (target: < 200 lines)
-│   ├── PROMPT.md                 ← universal agent prompt (unchanged)
+│   ├── PROMPT.md                 ← universal agent prompt (1-line path update)
 │   ├── prompts/                  ← stage prompts
 │   │   ├── design.md             ← UPDATED (writes to docs/designs/<N>.md)
 │   │   ├── test.md               ← unchanged
@@ -255,6 +256,40 @@ Also add a clarifying line in the "Constraints" section at the end of `prompts/d
 
 (The implementer should decide whether the DESIGN agent is the right place to maintain the PROGRESS.md status board, or whether a small post-DESIGN engine function should do it. Recommendation: **engine-side**, not agent-side. Add a `_update_progress_board(issue_num, stage)` helper in `core/engine.py` and call it at every stage transition. See Section 4.5.)
 
+### 4.4.1 Universal prompt change — `docs/agent/PROMPT.md`
+
+`PROMPT.md` is the base of every sub-agent prompt (read by `_assemble_subagent_prompt()` and `assemble_stage_prompt()` in `core/engine.py`). Its Failure Reporting Contract section currently says:
+
+> *"Ralph will: ... 2. Reference `docs/agent/PROGRESS.md` for design context. ..."*
+
+After this fix, the design context is in `docs/designs/<issue-number>.md`, not `PROGRESS.md`. **The reference is stale and will mislead any agent (or human) reading the failure report.**
+
+**Change** (single line, `docs/agent/PROMPT.md` line 51):
+
+**Before:**
+
+```markdown
+Ralph will:
+1. Read this report and post it as a GitHub issue comment.
+2. Reference `docs/agent/PROGRESS.md` for design context.
+3. On interrupt: suggest the appropriate retry label (`status:build-retry` or `status:verify-retry`).
+```
+
+**After:**
+
+```markdown
+Ralph will:
+1. Read this report and post it as a GitHub issue comment.
+2. Reference `docs/designs/<issue-number>.md` for design context.
+3. On interrupt: suggest the appropriate retry label (`status:build-retry` or `status:verify-retry`).
+```
+
+That is the **only** change required in `PROMPT.md`. The eight universal rules, the failure-report format, and the rest of the file are unchanged.
+
+**Why the persona prompts (`test.md` / `implement.md` / `verify.md`) are NOT changed:**
+
+I verified each of the three persona prompts end-to-end. They reference "the design spec", "the issue", "the test files", and "the git diff" — generically. None of them mention `PROGRESS.md` or any specific design-file path. The engine injects the per-issue design spec into the prompt at runtime (Section 4.3.C), so the persona prompt doesn't need to know the path. Updating the persona prompts would be churn without benefit.
+
 ### 4.5 New helper: regenerate `PROGRESS.md` as a status board
 
 Add a small helper to `core/engine.py` (place near other stage helpers, ~line 1090):
@@ -337,10 +372,11 @@ def _update_progress_board(issue_num: int, stage: str, status: str) -> None:
 |---|---|---|
 | `core/engine.py` | UPDATE | Add `DESIGN_SPEC_DIR` + `_design_spec_path()` (Section 4.2); update `_summarize_design_spec()` (Section 4.3.A); update `_read_partial_design_spec()` (Section 4.3.B); update `_assemble_subagent_prompt()` Mode A/B block (Section 4.3.C); add `_update_progress_board()` + helper `_fetch_issue_title()` (Section 4.5); add call sites at every stage transition; update call sites of `_summarize_design_spec` and `_read_partial_design_spec` to pass `issue_num`. |
 | `docs/agent/prompts/design.md` | UPDATE | Replace the "Your Goal" line (Section 4.4). Add constraint about not appending to PROGRESS.md. |
+| `docs/agent/PROMPT.md` | UPDATE (1 line) | Update line 51 to point at `docs/designs/<issue-number>.md` instead of `docs/agent/PROGRESS.md` (Section 4.4.1). |
 | `docs/designs/` | CREATE | New directory. Empty initially; populated by the DESIGN stage on first run of each new issue. |
 | `docs/agent/PROGRESS.md` | TRIM (one-time, manual) | After the engine change is deployed, a one-time manual cleanup to a small status-board format. The engine then maintains it. (For new projects, this is automatic.) |
 
-**No changes** to: `docs/agent/PROMPT.md`, `docs/agent/prompts/test.md`, `docs/agent/prompts/implement.md`, `docs/agent/prompts/verify.md`, `core/init.py`, `core/setup.py`, `core/status.py`, `core/validate.py`.
+**No changes** to: `docs/agent/prompts/test.md`, `docs/agent/prompts/implement.md`, `docs/agent/prompts/verify.md`, `core/init.py`, `core/setup.py`, `core/status.py`, `core/validate.py`. (The persona prompts are role-based guidance and don't reference design-file paths; the engine injects the per-issue design at runtime, so they remain accurate as-is.)
 
 ---
 
@@ -363,6 +399,8 @@ A reviewer (or the test sub-agent in the next design pass) should be able to ver
 - [ ] The DESIGN prompt at `docs/agent/prompts/design.md` instructs the agent to write to `docs/designs/<issue-number>.md` (not `PROGRESS.md`).
 - [ ] The DESIGN prompt explicitly says "Replace the file if it already exists. Do not append."
 - [ ] The DESIGN prompt's "Constraints" section mentions that PROGRESS.md is a status board, not a design log.
+- [ ] The universal prompt at `docs/agent/PROMPT.md` line 51 reads "Reference `docs/designs/<issue-number>.md` for design context." (Was: `docs/agent/PROGRESS.md`.)
+- [ ] The persona prompts (`prompts/test.md`, `prompts/implement.md`, `prompts/verify.md`) are unchanged from their pre-fix content.
 
 ### 7.3 End-to-end behavior
 
@@ -443,10 +481,10 @@ You are the next pi / llm session picking up this design. Here's how to approach
    4. Update `_assemble_subagent_prompt()` Mode A/B block.
    5. Add `_update_progress_board()` + `_fetch_issue_title()` helpers.
    6. Add `_update_progress_board()` call sites at every stage transition.
-5. **Update `prompts/design.md`** last — only after the engine changes are in place, so you can verify the agent's output matches the new expectations.
+5. **Update `prompts/design.md`** and `PROMPT.md` last — only after the engine changes are in place, so you can verify the agent's output matches the new expectations. The `PROMPT.md` change is one line (Section 4.4.1); the `prompts/design.md` change is in Section 4.4.
 6. **Run the existing test suite** (`ralph validate --tier=targeted`) after each change to catch regressions early.
 7. **Do a manual end-to-end test** (Section 8 step 2) before declaring done. The unit tests aren't enough — this is a behavior change that needs a real daemon run to verify.
-8. **Do not** change `docs/agent/PROMPT.md`, the `test.md` / `implement.md` / `verify.md` prompts, or the Mode B `--continue` session mechanism. They're out of scope.
+8. **Do not** change the persona prompts `test.md` / `implement.md` / `verify.md` (they're correct as-is), and do not change the Mode B `--continue` session mechanism.
 9. **Commit message convention:** `[ralph] fix: isolate per-issue design specs from PROGRESS.md` (matching the existing `[ralph] fix: ...` style in `git log`).
 10. **If you find a bug or gap in this spec**, fix it and update this doc in the same commit. Don't leave the doc out of sync with the code.
 
@@ -468,3 +506,4 @@ These all touch `core/engine.py` with surgical, well-scoped changes. Follow the 
 ## 12. Changelog
 
 - **2026-06-21** — Initial draft. Authored in response to gap_scanner #72 incident (TEST sub-agent received 15,865-line PROGRESS.md blob, exited non-zero, blocked the build). Previous fix `29b62b5` addressed a different bug (ProviderError unhandled in `run_pipeline`); this spec addresses the spec-isolation root cause.
+- **2026-06-21** — Revision: added Section 4.4.1 for the `PROMPT.md` one-line path fix (line 51: `docs/agent/PROGRESS.md` → `docs/designs/<issue-number>.md`). Previously the spec claimed PROMPT.md was unchanged; that was incorrect — the Failure Reporting Contract in PROMPT.md has a stale path reference that would mislead any agent (or operator) reading the failure report. Persona prompts (`test.md` / `implement.md` / `verify.md`) explicitly verified unchanged — they reference "the design spec" generically and the engine injects the per-issue spec at runtime, so no updates are required there.
