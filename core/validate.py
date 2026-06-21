@@ -362,27 +362,34 @@ def validate(tier: str = DEFAULT_TIER, pytest_paths: list[str] | None = None) ->
     step += 1
 
     # ── 2-5. Lint tools (on modified files only) ──
-    modified_files = get_modified_py_files()
+    # Only check modified files if tests passed. If tests already failed,
+    # skip lint — the gate is already doomed and the "modified files"
+    # message is just confusing noise (the IMPLEMENT agent always modifies
+    # files, that's normal).
+    if not failed:
+        modified_files = get_modified_py_files()
 
-    if not modified_files:
-        print("\n[ralph] No modified/untracked Python files detected.")
-        print("[ralph] Skipping lint/formatter checks.")
+        if not modified_files:
+            print("\n[ralph] No modified/untracked Python files detected.")
+            print("[ralph] Skipping lint/formatter checks.")
+        else:
+            print("\n[ralph] Checking modified/untracked Python files (IMPLEMENT agent changes):")
+            for f in modified_files:
+                print(f"  {f}")
+            print()
+
+            for tool in DEFAULT_LINT_TOOLS:
+                if step > total_steps:
+                    continue
+                print(f"\n[{step}/{total_steps}] Running {tool}...")
+                if run_lint(tool, modified_files):
+                    print(f"\n[{step}/{total_steps}] {tool} PASSED")
+                else:
+                    print(f"\n[{step}/{total_steps}] {tool} FAILED")
+                    failed = True
+                step += 1
     else:
-        print("\n[ralph] Modified/untracked Python files detected:")
-        for f in modified_files:
-            print(f"  {f}")
-        print()
-
-        for tool in DEFAULT_LINT_TOOLS:
-            if step > total_steps:
-                continue
-            print(f"\n[{step}/{total_steps}] Running {tool}...")
-            if run_lint(tool, modified_files):
-                print(f"\n[{step}/{total_steps}] {tool} PASSED")
-            else:
-                print(f"\n[{step}/{total_steps}] {tool} FAILED")
-                failed = True
-            step += 1
+        print("\n[ralph] Tests failed — skipping modified-file lint checks.")
 
     # ── Result ──
     print()

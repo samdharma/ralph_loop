@@ -48,5 +48,5 @@ Keep it factual and concise. Do NOT write more than 4000 characters.
 
 Ralph will:
 1. Read this report and post it as a GitHub issue comment.
-2. Reference `docs/agent/PROGRESS.md` for design context.
+2. Reference `docs/designs/<issue-number>.md` for design context.
 3. On interrupt: suggest the appropriate retry label (`status:build-retry` or `status:verify-retry`).

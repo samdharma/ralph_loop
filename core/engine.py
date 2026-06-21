@@ -35,6 +35,10 @@ METRICS_FILE = LOG_DIR / "ralph_metrics.jsonl"
 PROMPT_FILE = PROJECT_ROOT / "docs" / "agent" / "PROMPT.md"
 PROGRESS_FILE = PROJECT_ROOT / "docs" / "agent" / "PROGRESS.md"
 PROMPTS_DIR = PROJECT_ROOT / "docs" / "agent" / "prompts"
+
+# Per-issue design specs live in docs/designs/<N>.md (one file per issue).
+# These are project content, separate from PROGRESS.md (the ralph queue).
+DESIGN_SPEC_DIR = PROJECT_ROOT / "docs" / "designs"
 PREFLIGHT_SCRIPT = PROJECT_ROOT / "config" / "ralph_preflight.sh"
 
 # Backoff used when all available agents are rate-limited.
@@ -241,6 +245,11 @@ def _handle_provider_error(
     return "break"
 
 
+def _design_spec_path(issue_num: int) -> Path:
+    """Return the path to the per-issue design spec for issue_num."""
+    return DESIGN_SPEC_DIR / f"{issue_num}.md"
+
+
 # ─────────────────────────────────────────────────────────
 # Shell helpers
 # ─────────────────────────────────────────────────────────
@@ -343,23 +352,6 @@ def fetch_ready_ticket() -> Optional[dict]:
     return None
 
 
-def fetch_issue_by_number(number: int) -> Optional[dict]:
-    """Fetch a single open issue by number, or None if closed/missing/deps unmet."""
-    try:
-        result = gh("issue", "view", str(number), "--json", "number,title,body,state")
-        issue = json.loads(result.stdout)
-    except (subprocess.CalledProcessError, json.JSONDecodeError):
-        return None
-
-    if issue.get("state") != "OPEN":
-        return None
-
-    if not _dependencies_met(issue):
-        return None
-
-    return issue
-
-
 # Retry labels let humans re-queue a blocked issue without re-running all stages.
 # Ordered smallest scope first — verify-only is faster than build+verify.
 RETRY_LABEL_MAP = {
@@ -440,11 +432,14 @@ def fetch_issue_by_number(issue_num: int) -> Optional[dict]:
     """
     try:
         result = gh(
-            "issue", "view", str(issue_num),
-            "--json", "number,title,body,state",
+            "issue",
+            "view",
+            str(issue_num),
+            "--json",
+            "number,title,body,state",
         )
         issue = json.loads(result.stdout)
-    except subprocess.CalledProcessError:
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
         return None
 
     if issue.get("state") != "OPEN":
@@ -580,9 +575,10 @@ def run_pipeline(
         gh_comment(
             issue_num,
             f"⏭️ Skipping DESIGN — resuming from `{resume_stage}`. "
-            "Using existing `docs/agent/PROGRESS.md`.",
+            "Using existing design spec.",
         )
     else:
+        _update_progress_board(issue_num, "design", "🎨")
         save_checkpoint(issue_num, "design")
         try:
             design_ok = run_design_stage(issue)
@@ -592,9 +588,10 @@ def run_pipeline(
         if not design_ok:
             clear_checkpoint()
             _cleanup_issue_artifacts(issue_num)
-            partial_spec = _read_partial_design_spec()
+            partial_spec = _read_partial_design_spec(issue_num)
             detail = _format_stage_failure("DESIGN", partial_spec=partial_spec)
             gh_comment(issue_num, detail)
+            _update_progress_board(issue_num, "design", "🛑")
             transition_label(issue_num, "status:blocked", "status:design")
             log_metrics(
                 "pipeline_complete",
@@ -609,6 +606,7 @@ def run_pipeline(
             clear_checkpoint()
             _cleanup_issue_artifacts(issue_num)
             gh_comment(issue_num, "💥 DESIGN commit/push failed. Blocking issue.")
+            _update_progress_board(issue_num, "design", "🛑")
             transition_label(issue_num, "status:blocked", "status:design")
             log_metrics(
                 "pipeline_complete",
@@ -620,9 +618,10 @@ def run_pipeline(
             return False
         gh_comment(issue_num, "✅ DESIGN stage completed and committed.")
         # Post a permanent design summary to the GitHub issue.
-        design_summary = _summarize_design_spec()
+        design_summary = _summarize_design_spec(issue_num)
         if design_summary:
             gh_comment(issue_num, design_summary)
+        _update_progress_board(issue_num, "build", "🔨")
         transition_label(issue_num, "status:build", "status:design")
 
     # ── STAGE 2: BUILD ──
@@ -652,6 +651,7 @@ def run_pipeline(
                     f"`.ralph/blocked/issue-{issue_num}/issue-{issue_num}-report.md` "
                     f"(also visible in `.ralph/issue-{issue_num}-report.md`).",
                 )
+            _update_progress_board(issue_num, "build", "🛑")
             transition_label(issue_num, "status:blocked", "status:build")
             log_metrics(
                 "pipeline_complete",
@@ -666,6 +666,7 @@ def run_pipeline(
             clear_checkpoint()
             _cleanup_issue_artifacts(issue_num)
             gh_comment(issue_num, "💥 BUILD commit/push failed. Blocking issue.")
+            _update_progress_board(issue_num, "build", "🛑")
             transition_label(issue_num, "status:blocked", "status:build")
             log_metrics(
                 "pipeline_complete",
@@ -676,6 +677,7 @@ def run_pipeline(
             )
             return False
         gh_comment(issue_num, "✅ BUILD stage completed and committed.")
+        _update_progress_board(issue_num, "verify", "🔍")
         transition_label(issue_num, "status:verify", "status:build")
 
     # ── STAGE 3: VERIFY ──
@@ -697,7 +699,11 @@ def run_pipeline(
             print(f"[ralph] #{issue_num} auto-closed")
             log_metrics("pipeline_complete", issue=str(issue_num), result="closed")
         else:
-            gh_comment(issue_num, "✅ VERIFY passed. Handing off for review — external tools and reviewers may now update labels on this issue. Ralph will not touch this issue again unless a retry label is set.")
+            gh_comment(
+                issue_num,
+                "✅ VERIFY passed. Handing off for review — external tools and reviewers may now update labels on this issue. Ralph will not touch this issue again unless a retry label is set.",
+            )
+            _update_progress_board(issue_num, "review", "✅")
             transition_label(issue_num, "status:review", "status:verify")
             log_metrics("pipeline_complete", issue=str(issue_num), result="review")
     else:
@@ -711,6 +717,7 @@ def run_pipeline(
                 f"📋 Full VERIFY failure report at "
                 f"`.ralph/blocked/issue-{issue_num}/issue-{issue_num}-report.md`.",
             )
+        _update_progress_board(issue_num, "verify", "🛑")
         transition_label(issue_num, "status:blocked", "status:verify")
         log_metrics(
             "pipeline_complete", issue=str(issue_num), result="blocked", stage="verify"
@@ -732,9 +739,55 @@ def run_design_stage(issue: dict) -> bool:
     gh_comment(issue_num, "🎨 DESIGN stage started.")
     log_metrics("stage_start", issue=str(issue_num), stage="design")
 
+    # Create the per-issue design spec placeholder BEFORE the agent runs,
+    # so the agent sees the file exists and has a path to write to.
+    design_file = _design_spec_path(issue_num)
+    design_file.parent.mkdir(parents=True, exist_ok=True)
+    if not design_file.exists():
+        design_file.write_text(
+            f"# Design Spec: #{issue_num} <title>\n\n"
+            f"<!-- Engine-created placeholder. "
+            f"The DESIGN agent will overwrite this file. -->\n",
+            encoding="utf-8",
+        )
+        print(f"[ralph] Created placeholder {design_file}")
+
+    # Snapshot PROGRESS.md BEFORE the agent runs so we can strip any
+    # design content the agent may append (the engine manages the status
+    # board below "# Ralph Queue"; legacy design content stays untouched).
+    progress_snapshot: Optional[str] = None
+    if PROGRESS_FILE.exists():
+        progress_snapshot = PROGRESS_FILE.read_text(encoding="utf-8")
+
     session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
     prompt = assemble_stage_prompt(issue, "design.md")
     success = invoke_agent(prompt, issue_num, session_file=session_file)
+
+    # Post-DESIGN cleanup: restore PROGRESS.md to its pre-agent content
+    # (the engine manages the status board via _update_progress_board).
+    # This prevents the DESIGN agent from appending design content into
+    # PROGRESS.md — the design spec goes in docs/designs/<N>.md only.
+    if success:
+        if not design_file.exists():
+            print(
+                f"[ralph] WARNING: DESIGN agent did not create {design_file}. "
+                f"Falling back to PROGRESS.md."
+            )
+        else:
+            content = design_file.read_text(encoding="utf-8")
+            if "<!-- Engine-created placeholder" in content:
+                print(
+                    f"[ralph] WARNING: DESIGN agent left placeholder {design_file} "
+                    f"untouched. Design may not have been written."
+                )
+            else:
+                print(f"[ralph] Design spec written to {design_file}")
+
+        # Restore PROGRESS.md to pre-agent state (keeps legacy content intact).
+        # If the agent appended design content, it gets removed here.
+        if progress_snapshot is not None:
+            PROGRESS_FILE.write_text(progress_snapshot, encoding="utf-8")
+            print("[ralph] Restored PROGRESS.md to pre-DESIGN state")
 
     log_metrics("stage_complete", issue=str(issue_num), stage="design")
     return success
@@ -905,20 +958,57 @@ def run_verify_stage(issue: dict) -> bool:
         if len(diff) > 8000:
             prompt += "\n\n(…diff truncated — review key files from the repo)"
 
-    success = invoke_agent(prompt, issue_num)
-    if success:
+    agent_ok = invoke_agent(prompt, issue_num)
+    if agent_ok:
         gh_comment(issue_num, "✅ VERIFY review sub-agent completed.")
     else:
         gh_comment(issue_num, "❌ VERIFY review sub-agent failed.")
+
+    # Determine the agent's own verdict by checking the last issue comment.
+    # The agent writes "## Overall: PASS" or "## Overall: FAIL" per the verify.md prompt.
+    agent_verdict_pass: Optional[bool] = None
+    try:
+        comments_json = gh(
+            "issue",
+            "view",
+            str(issue_num),
+            "--json",
+            "comments",
+            "-q",
+            ".comments[-1].body",
+        ).stdout
+        if '"## Overall: FAIL"' in comments_json or '"Overall: FAIL"' in comments_json:
+            agent_verdict_pass = False
+        elif (
+            '"## Overall: PASS"' in comments_json or '"Overall: PASS"' in comments_json
+        ):
+            agent_verdict_pass = True
+    except Exception:
+        pass
+
+    # The stage passes only if BOTH the agent exited 0 AND the agent's
+    # textual verdict is PASS (no override means we trust the exit code).
+    if agent_verdict_pass is False:
+        print("[ralph] VERIFY agent returned FAIL verdict — forcing stage failure")
+        gh_comment(issue_num, "❌ VERIFY review failed — agent reported FAIL. ")
+        success = False
+    else:
+        success = agent_ok
+
     log_metrics(
         "subagent_complete",
         issue=str(issue_num),
         subagent="verify",
         mode="A",
         result="success" if success else "failure",
+        agent_verdict=(
+            "fail"
+            if agent_verdict_pass is False
+            else "pass" if agent_verdict_pass else "unknown"
+        ),
     )
 
-    # Run validation gate after review (only tests written by the independent QA session)
+    # Run validation gate after review
     if success:
         print("\n[ralph] Running validation gate...")
         core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
@@ -1053,9 +1143,7 @@ def _run_implement_subagent(issue: dict) -> bool:
     # precisely which tests it must pass — not just the TEST_MAP-based
     # set produced by `ralph validate --tier=targeted`.
     qa_tests = _load_test_tracking(issue_num)
-    qa_tests = [
-        t for t in qa_tests if t.endswith(".py") and "__pycache__" not in t
-    ]
+    qa_tests = [t for t in qa_tests if t.endswith(".py") and "__pycache__" not in t]
     qa_tests = _resolve_existing_test_paths(qa_tests)
     if qa_tests:
         test_list = "\n".join(f"  - {t}" for t in qa_tests)
@@ -1112,11 +1200,104 @@ def _write_stage_report(issue_num: int, stage: str, failed_step: str, output: st
         f"See the output above for the specific test/lint failures.\n\n"
         f"## What to Check\n"
         f"- The full report is at `.ralph/issue-{issue_num}-report.md`\n"
-        f"- Design spec: `docs/agent/PROGRESS.md`\n"
+        f"- Design spec: `docs/designs/{issue_num}.md` (or `docs/agent/PROGRESS.md` legacy)\n"
         f"- QA-written tests: `.ralph/issue-{issue_num}-tests.json`\n"
     )
     report_path.write_text(report, encoding="utf-8")
     print(f"[ralph] Failure report written to {report_path}")
+
+
+def _fetch_issue_title(issue_num: int) -> Optional[str]:
+    """Fetch the issue title from GitHub via gh CLI.
+    Returns None on failure (offline, rate-limit, etc.)."""
+    try:
+        result = gh("issue", "view", str(issue_num), "--json", "title", "-q", ".title")
+        return result.stdout.strip()
+    except Exception:
+        return None
+
+
+def _update_progress_board(issue_num: int, stage: str, status: str) -> None:
+    """Append/update a single status-board entry in PROGRESS.md.
+
+    PROGRESS.md preserves any legacy design-spec content (historical artifact)
+    above the `# Ralph Queue` divider. The engine-managed status board table
+    lives under that divider and is fully replaced on each call.
+
+    The DESIGN agent no longer writes here (it writes to docs/designs/<N>.md).
+    The engine maintains this file.
+
+    Format (Markdown table):
+
+        | # | Title | Stage | Status |
+        | --- | ----- | ----- | ------ |
+        | 72 | [RISK-4] PositionSizer... | build | \U0001f6a8 |
+    """
+    PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load: preserve everything before "# Ralph Queue" (legacy design content),
+    # and parse existing table rows from the engine-managed section.
+    legacy_lines: list[str] = []
+    existing_rows: list[tuple[str, str, str, str]] = []
+    in_engine_section = False
+    in_table = False
+
+    if PROGRESS_FILE.exists():
+        for line in PROGRESS_FILE.read_text(encoding="utf-8").splitlines():
+            if line.startswith("# Ralph Queue"):
+                in_engine_section = True
+                continue
+            if not in_engine_section:
+                legacy_lines.append(line)
+                continue
+            # Engine-managed section: parse table rows
+            if line.startswith("| # |"):
+                in_table = True
+                continue
+            if line.startswith("| --- |"):
+                continue
+            if line.startswith("| ") and in_table:
+                parts = [p.strip() for p in line.split("|")]
+                if len(parts) >= 5:
+                    existing_rows.append((parts[1], parts[2], parts[3], parts[4]))
+            if not line.startswith("|"):
+                in_table = False
+
+    # Ensure legacy content ends with a blank line before the engine section.
+    if legacy_lines and legacy_lines[-1] != "":
+        legacy_lines.append("")
+
+    # Fetch title from gh (or fall back to existing row).
+    title = _fetch_issue_title(issue_num)
+    if title is None:
+        for n, t, _, _ in existing_rows:
+            if n == str(issue_num):
+                title = t
+                break
+    title = title or f"#{issue_num}"
+
+    # Replace or append the current issue's row.
+    existing_rows = [
+        (n, t, s, st) for (n, t, s, st) in existing_rows if n != str(issue_num)
+    ]
+    existing_rows.append((str(issue_num), title, stage, status))
+
+    # Build the engine-managed status board.
+    board_lines = [
+        "# Ralph Queue",
+        "",
+        "Auto-generated status board. Per-issue design specs live in `docs/designs/<N>.md`.",
+        "Detailed stage history lives in the GitHub issue comments.",
+        "",
+        "| # | Title | Stage | Status |",
+        "| --- | ----- | ----- | ------ |",
+    ]
+    for n, t, s, st in sorted(existing_rows, key=lambda r: int(r[0])):
+        board_lines.append(f"| {n} | {t} | {s} | {st} |")
+    board_lines.append("")
+
+    text = "\n".join(legacy_lines) + "\n".join(board_lines)
+    PROGRESS_FILE.write_text(text, encoding="utf-8")
 
 
 def _extract_failure_summary(stdout: str, stderr: str) -> str:
@@ -1127,6 +1308,31 @@ def _extract_failure_summary(stdout: str, stderr: str) -> str:
 
     lines = combined.splitlines()
     summary_lines: list[str] = []
+
+    # Determine what failed — add a header line for clarity
+    has_test_failure = any(
+        "pytest" in l and "FAILED" in l for l in lines
+    )
+    has_lint_failure = any(
+        f"{tool} FAILED" in l for tool in ["black", "isort", "flake8", "ruff", "mypy"]
+    )
+    has_skip_msg = any("skipping modified-file lint" in l.lower() for l in lines)
+
+    if has_test_failure and not has_lint_failure:
+        summary_lines.append(
+            "═══ Validation failed: TESTS did not pass (lint checks were skipped) ═══"
+        )
+        summary_lines.append("")
+    elif has_test_failure and has_lint_failure:
+        summary_lines.append(
+            "═══ Validation failed: TESTS and LINT both failed ═══"
+        )
+        summary_lines.append("")
+    elif has_lint_failure:
+        summary_lines.append(
+            "═══ Validation failed: LINT checks failed on modified files ═══"
+        )
+        summary_lines.append("")
 
     # Always include FAILED lines and their surrounding context
     include_next = 0
@@ -1233,9 +1439,7 @@ def _snapshot_file_hashes(paths: list[str]) -> dict[str, str]:
     return snapshot
 
 
-def _detect_tampered_tests(
-    before: dict[str, str], after: dict[str, str]
-) -> list[str]:
+def _detect_tampered_tests(before: dict[str, str], after: dict[str, str]) -> list[str]:
     """Return paths whose content hash changed between two snapshots.
 
     Used to detect if the IMPLEMENT sub-agent modified QA-written test files.
@@ -1295,11 +1499,21 @@ def _resolve_existing_test_paths(test_paths: list[str]) -> list[str]:
     return existing
 
 
-def _summarize_design_spec() -> Optional[str]:
-    """Read PROGRESS.md and return a condensed design summary for an issue comment."""
-    if not PROGRESS_FILE.exists():
+def _summarize_design_spec(issue_num: int) -> Optional[str]:
+    """Read the per-issue design spec and return a condensed design summary
+    for posting as a GitHub issue comment.
+
+    Reads from docs/designs/<issue_num>.md (preferred).
+    Falls back to docs/agent/PROGRESS.md if the per-issue file is missing
+    (backward compat for projects mid-migration).
+    """
+    design_file = _design_spec_path(issue_num)
+    if design_file.exists():
+        text = design_file.read_text(encoding="utf-8")
+    elif PROGRESS_FILE.exists():
+        text = PROGRESS_FILE.read_text(encoding="utf-8")
+    else:
         return None
-    text = PROGRESS_FILE.read_text(encoding="utf-8")
     lines = text.splitlines()
 
     title = ""
@@ -1347,7 +1561,14 @@ def _summarize_design_spec() -> Optional[str]:
     if summary_parts:
         out.append(f"**Summary:** {' '.join(summary_parts)}")
         out.append("")
-    out.append("**Files:** See [`docs/agent/PROGRESS.md`](docs/agent/PROGRESS.md)")
+    if design_file.exists():
+        out.append(
+            f"**Files:** See [`docs/designs/{issue_num}.md`](docs/designs/{issue_num}.md)"
+        )
+    else:
+        out.append(
+            "**Files:** See [`docs/agent/PROGRESS.md`](docs/agent/PROGRESS.md) (legacy)"
+        )
     if decisions:
         out.append("")
         out.append("**Key Decisions:**")
@@ -1361,17 +1582,26 @@ def _summarize_design_spec() -> Optional[str]:
     out.append("")
     out.append(f"**Acceptance Criteria:** {ac_count} criteria defined.")
     out.append("")
-    out.append("Full design spec committed to `docs/agent/PROGRESS.md`.")
+    if design_file.exists():
+        out.append(f"Full design spec committed to `docs/designs/{issue_num}.md`.")
+    else:
+        out.append("Full design spec committed to `docs/agent/PROGRESS.md` (legacy).")
     return "\n".join(out)
 
 
-def _read_partial_design_spec(max_chars: int = 2000) -> Optional[str]:
-    """Read PROGRESS.md if it exists (including partial/incomplete specs).
-    Returns truncated content or None if the file doesn't exist."""
-    if not PROGRESS_FILE.exists():
+def _read_partial_design_spec(issue_num: int, max_chars: int = 2000) -> Optional[str]:
+    """Read the per-issue design spec (or PROGRESS.md fallback) if it exists.
+    Returns truncated content or None if neither file exists."""
+    design_file = _design_spec_path(issue_num)
+    text: Optional[str] = None
+    if design_file.exists():
+        text = design_file.read_text(encoding="utf-8")
+    elif PROGRESS_FILE.exists():
+        text = PROGRESS_FILE.read_text(encoding="utf-8")
+    if text is None:
         return None
     try:
-        text = PROGRESS_FILE.read_text(encoding="utf-8").strip()
+        text = text.strip()
         if not text:
             return None
         if len(text) > max_chars:
@@ -1393,7 +1623,7 @@ def _format_stage_failure(
     """Build a detailed stage-failure comment with pointers to artifacts."""
     lines = [f"❌ {stage} stage failed.", ""]
     lines.append(
-        "See [`docs/agent/PROGRESS.md`](docs/agent/PROGRESS.md) for the design spec."
+        "See the design spec for this issue (at `docs/designs/<N>.md` or `docs/agent/PROGRESS.md` legacy)."
     )
     if partial_spec:
         lines.append("")
@@ -1554,10 +1784,26 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
         f"{body}"
     )
 
-    # Design spec (Mode A only — Mode B already has it in session context)
-    if mode == "A" and PROGRESS_FILE.exists():
+    # Design spec — read per-issue file (preferred) with PROGRESS.md fallback.
+    # Injected in both Mode A and Mode B so the prompt is self-contained.
+    design_file = _design_spec_path(issue["number"])
+    if design_file.exists():
+        design_spec = design_file.read_text(encoding="utf-8")
+        prompt += (
+            f"\n\n## Design Spec (from DESIGN stage)\n\n"
+            f"{design_spec}\n\n"
+            f"_Source: `docs/designs/{issue['number']}.md` — "
+            f"this is the design for the current issue only._"
+        )
+    elif PROGRESS_FILE.exists():
         design_spec = PROGRESS_FILE.read_text(encoding="utf-8")
-        prompt += f"\n\n## Design Spec (from DESIGN stage)\n\n{design_spec}"
+        prompt += (
+            f"\n\n## Design Spec (from DESIGN stage)\n\n"
+            f"{design_spec}\n\n"
+            f"_Source: `docs/agent/PROGRESS.md` (legacy location) — "
+            f"may contain designs for other issues; use the section that "
+            f"matches issue #{issue['number']}._"
+        )
 
     # Reference docs (all modes)
     ref_docs = _parse_reference_docs(body)
@@ -1742,9 +1988,7 @@ def validate_pi_flags(raw_flags: list[str]) -> list[str]:
             continue
         flag_name = parts[0]
         if not flag_name.startswith("--"):
-            print(
-                f"[ralph] ERROR: --pi-flag value must start with '--', got: '{raw}'"
-            )
+            print(f"[ralph] ERROR: --pi-flag value must start with '--', got: '{raw}'")
             print("  Example: --pi-flag='--model=claude-sonnet-4'")
             sys.exit(1)
         # Strip '=value' suffix for validation
@@ -1755,7 +1999,7 @@ def validate_pi_flags(raw_flags: list[str]) -> list[str]:
             similar = [f for f in sorted(valid) if flag_base.lstrip("-") in f]
             if similar:
                 print(f"  Did you mean one of: {', '.join(similar[:5])}?")
-            print(f"  Run 'pi --help' for the full list of valid flags.")
+            print("  Run 'pi --help' for the full list of valid flags.")
             sys.exit(1)
         tokens.extend(parts)
     return tokens
@@ -2450,8 +2694,12 @@ if __name__ == "__main__":
     if args.pi_flag:
         resolved_agent = args.agent or os.environ.get("RALPH_AGENT", "") or "pi"
         if resolved_agent != "pi":
-            print(f"[ralph] WARNING: --pi-flag is set but agent is '{resolved_agent}' (not 'pi'). Flags will be ignored.")
+            print(
+                f"[ralph] WARNING: --pi-flag is set but agent is '{resolved_agent}' (not 'pi'). Flags will be ignored."
+            )
         else:
             _PI_FLAGS[:] = validate_pi_flags(args.pi_flag)
-            print(f"[ralph] Validated {len(args.pi_flag)} pi flag(s): {' '.join(_PI_FLAGS)}")
+            print(
+                f"[ralph] Validated {len(args.pi_flag)} pi flag(s): {' '.join(_PI_FLAGS)}"
+            )
     run_loop(auto_close=args.auto_close, single_issue=args.issue)
