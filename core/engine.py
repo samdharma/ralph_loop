@@ -679,7 +679,7 @@ def run_pipeline(
             print(f"[ralph] #{issue_num} auto-closed")
             log_metrics("pipeline_complete", issue=str(issue_num), result="closed")
         else:
-            gh_comment(issue_num, "✅ VERIFY passed. Handing off for human review.")
+            gh_comment(issue_num, "✅ VERIFY passed. Handing off for review — external tools and reviewers may now update labels on this issue. Ralph will not touch this issue again unless a retry label is set.")
             transition_label(issue_num, "status:review", "status:verify")
             log_metrics("pipeline_complete", issue=str(issue_num), result="review")
     else:
@@ -2161,7 +2161,7 @@ def run_loop(auto_close: bool = False, single_issue: Optional[int] = None):
                         else:
                             gh_comment(
                                 issue_num,
-                                "✅ Resumed VERIFY passed. Handing off for human review.",
+                                "✅ Resumed VERIFY passed. Handing off for review — external tools and reviewers may now update labels on this issue. Ralph will not touch this issue again unless a retry label is set.",
                             )
                             transition_label(
                                 issue_num, "status:review", "status:verify"

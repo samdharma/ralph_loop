@@ -28,7 +28,7 @@ Do NOT mark tickets `status:blocked` for provider errors.
 - Read `docs/agent/PROGRESS.md` for the active design spec and progress log.
 - Follow existing code conventions. Research the codebase before writing.
 - Run `ralph validate --tier=targeted` when your stage work is complete.
-- Do NOT modify GitHub labels or issues — the orchestrator handles transitions.
+- Do NOT modify GitHub labels or issues **during pipeline execution** — the orchestrator handles all in-flight label transitions. After Ralph hands off (`status:review`), external review tools may update labels.
 
 ## Project Layout
 
