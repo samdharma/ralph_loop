@@ -305,7 +305,9 @@ def invoke_agent(
         if result.stdout:
             print(result.stdout.decode("utf-8", errors="replace"), end="")
         if result.stderr:
-            print(result.stderr.decode("utf-8", errors="replace"), end="", file=sys.stderr)
+            print(
+                result.stderr.decode("utf-8", errors="replace"), end="", file=sys.stderr
+            )
         _check_interrupt()
 
         if result.returncode == 0:

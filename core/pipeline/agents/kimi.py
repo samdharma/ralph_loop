@@ -1,9 +1,13 @@
-"""Kimi agent wrapper (C1.5c — per plan §1.1 C1.5).
+"""Kimi agent wrapper (C1 step 9 — per plan §1.1 C1).
 
-Per docs/IMPROVEMENT_ROADMAP_SPEC.md §6.1, the kimi agent wrapper lives
-at ``core/pipeline/agents/kimi.py``. DEVIATION: thin wrapper that
-delegates to engine.invoke_agent; the actual implementation stays
-in engine.py pending C-046.
+Per docs/IMPROVEMENT_ROADMAP_SPEC.md §6.1, the kimi agent wrapper
+lives at ``core/pipeline/agents/kimi.py``. It delegates to the
+shared invocation path in ``core.pipeline.agents.pi``.
+
+Per spec §10.1 A3 (R1): kimi and pi use the same invocation path
+(no kimi-specific ``--continue`` workaround). The only difference
+is the non-interactive flag (``--prompt`` for kimi vs ``--print``
+for pi); both are handled inside ``invoke_agent``.
 """
 
 from __future__ import annotations
@@ -20,27 +24,23 @@ for p in (str(_PROJECT_ROOT), str(_CORE_DIR)):
         sys.path.insert(0, p)
 
 from core.pipeline.agents.base import AgentBase  # noqa: E402
+from core.pipeline.agents.pi import invoke_agent  # noqa: E402
 
 
 class KimiAgent(AgentBase):
     """Wrapper for the ``kimi`` agent binary.
 
-    Per spec §10.1 A3: symmetric with PiAgent — NO --continue /
-    --session flags. The kimi-specific session-UUID workaround was
-    removed in A3.3.
+    Per spec §10.1 A3: symmetric with :class:`PiAgent` — NO
+    ``--continue`` / ``--session`` flags. The kimi-specific
+    session-UUID workaround was removed in A3.3 (plan §3 R-1).
     """
 
     name = "kimi"
 
     def invoke(self, *args: Any, **kwargs: Any) -> Any:
-        """Delegate to engine.invoke_agent with binary='kimi'."""
-        # Lazy import to avoid a circular import when core.engine is
-        # imported as a package module (engine.py imports core.pipeline.state,
-        # whose package init loads this module).
-        from core.engine import invoke_agent as _engine_invoke_agent
-
+        """Delegate to :func:`invoke_agent` with ``binary='kimi'``."""
         kwargs.setdefault("binary", "kimi")
-        return _engine_invoke_agent(*args, **kwargs)
+        return invoke_agent(*args, **kwargs)
 
 
 __all__ = ["KimiAgent"]

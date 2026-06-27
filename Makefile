@@ -60,13 +60,13 @@ test-integration:  ## Run integration tests.
 # ─────────────────────────────────────────────────────────
 
 lint:  ## black + isort + flake8 + mypy (check only).
-	black --check core tests bin
+	black --target-version py310 --check core tests bin
 	isort --check-only --profile black core tests bin
 	flake8 core tests bin
 	mypy --explicit-package-bases core/migrate.py core/validate.py core/pipeline/__init__.py core/pipeline/state.py core/pipeline/agents/artifacts.py core/pipeline/agents/base.py core/pipeline/agents/pi.py core/pipeline/agents/kimi.py
 
 format:  ## black + isort (apply).
-	black core tests bin
+	black --target-version py310 core tests bin
 	isort --profile black core tests bin
 
 # ─────────────────────────────────────────────────────────

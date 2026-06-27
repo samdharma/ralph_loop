@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from core.project_sync import _get_config, sync_closed, sync_status
+from core.project_sync import sync_closed, sync_status
 
 # Ensure the project root (parent of ``core/``) is on sys.path so
 # ``from core.pipeline.state import ...`` works whether engine.py is
@@ -2243,12 +2243,6 @@ from core.pipeline.agents.pi import (  # noqa: E402,F401
     validate_pi_flags,
 )
 
-
-# ─────────────────────────────────────────────────────────
-# Item 7: Checkpoint & Crash Recovery
-# ─────────────────────────────────────────────────────────
-
-
 # ─────────────────────────────────────────────────────────
 # C1 step 2 — checkpoint.py re-exports (per plan §1.1 C1)
 # ─────────────────────────────────────────────────────────
@@ -2280,6 +2274,10 @@ from core.pipeline.recovery import (  # noqa: E402,F401
     recover_from_crash,
     release_pid_file,
 )
+
+# ─────────────────────────────────────────────────────────
+# Item 7: Checkpoint & Crash Recovery
+# ─────────────────────────────────────────────────────────
 
 
 def run_loop(auto_close: bool = False, single_issue: Optional[int] = None):

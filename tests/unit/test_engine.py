@@ -396,18 +396,20 @@ class TestInvokeAgentNoContinue:
         self, monkeypatch, agent_bin: str, **invoke_kwargs
     ) -> list[str]:
         """Patch subprocess and capture the assembled command."""
+        from core.pipeline.agents import pi as pi_mod
+
         captured: dict[str, list[str]] = {}
 
         def fake_run(cmd, *args, **kwargs):
             captured["cmd"] = list(cmd)
             fake_proc = mock.MagicMock()
             fake_proc.returncode = 0
-            fake_proc.stdout = ""
-            fake_proc.stderr = ""
+            fake_proc.stdout = b""
+            fake_proc.stderr = b""
             return fake_proc
 
-        monkeypatch.setattr(engine, "_resolve_agent_binary", lambda: agent_bin)
-        monkeypatch.setattr(engine, "run", fake_run)
+        monkeypatch.setattr(pi_mod, "_resolve_agent_binary", lambda: agent_bin)
+        monkeypatch.setattr(pi_mod, "_run_agent", fake_run)
         engine.invoke_agent("do something", 1, **invoke_kwargs)
         return captured.get("cmd", [])
 
@@ -437,6 +439,8 @@ class TestInvokeAgentNoContinue:
 
     def test_pi_and_kimi_code_paths_are_identical(self, monkeypatch) -> None:
         """Per spec §10.1 A3, kimi and pi use the same invocation path (no kimi-specific workaround)."""
+        from core.pipeline.agents import pi as pi_mod
+
         captured: dict[str, list[str]] = {}
 
         def make_fake_run(key: str):
@@ -444,21 +448,21 @@ class TestInvokeAgentNoContinue:
                 captured[key] = list(cmd)
                 fake_proc = mock.MagicMock()
                 fake_proc.returncode = 0
-                fake_proc.stdout = ""
-                fake_proc.stderr = ""
+                fake_proc.stdout = b""
+                fake_proc.stderr = b""
                 return fake_proc
 
             return fake_run
 
         # Capture pi invocation
-        monkeypatch.setattr(engine, "_resolve_agent_binary", lambda: "pi")
-        monkeypatch.setattr(engine, "run", make_fake_run("pi"))
+        monkeypatch.setattr(pi_mod, "_resolve_agent_binary", lambda: "pi")
+        monkeypatch.setattr(pi_mod, "_run_agent", make_fake_run("pi"))
         engine.invoke_agent("do something", 1, continue_session=True)
         pi_cmd = captured["pi"]
 
         # Capture kimi invocation
-        monkeypatch.setattr(engine, "_resolve_agent_binary", lambda: "kimi")
-        monkeypatch.setattr(engine, "run", make_fake_run("kimi"))
+        monkeypatch.setattr(pi_mod, "_resolve_agent_binary", lambda: "kimi")
+        monkeypatch.setattr(pi_mod, "_run_agent", make_fake_run("kimi"))
         engine.invoke_agent("do something", 1, continue_session=True)
         kimi_cmd = captured["kimi"]
 
@@ -865,9 +869,7 @@ def test_invoke_agent_raises_quota_error_on_pi_limit():
         returncode=1, stdout=b"", stderr=b"FreeUsageLimitError: quota exceeded"
     )
     with (
-        mock.patch(
-            "core.pipeline.agents.pi._resolve_agent_binary", return_value="pi"
-        ),
+        mock.patch("core.pipeline.agents.pi._resolve_agent_binary", return_value="pi"),
         mock.patch("core.pipeline.agents.pi._run_agent", return_value=fake_result),
     ):
         with pytest.raises(Exception) as exc_info:
