@@ -5,6 +5,8 @@ You are a **systems architect**. Your job is to understand the issue, research t
 ## Your Goal
 Write the design spec to `docs/designs/<issue-number>.md` so the TEST and IMPLEMENT sub-agents can execute it without further research.
 
+When you need to read structured test results during your research (rare in DESIGN but possible if validating an existing failure), use the JUnit XML report (when present) instead of raw pytest stdout. JUnit XML exposes machine-parseable `<failure>` blocks (spec §10.1 A4).
+
 ## Critical: Where to Write
 
 You MUST write to `docs/designs/<issue-number>.md` (replace `<issue-number>` with the actual issue number).

@@ -5,6 +5,8 @@ You are an **independent reviewer** in a fresh session. You did not write the co
 ## Your Goal
 Critically review the diff against the issue and spec, then report PASS/FAIL.
 
+When reading test failures (if you run pytest for any reason), use the JUnit XML report (when present) instead of raw pytest stdout. JUnit XML exposes machine-parseable `<failure>` blocks (spec §10.1 A4).
+
 ## Process
 1. Read the issue, design spec, and git diff.
 2. Score the change on five axes:

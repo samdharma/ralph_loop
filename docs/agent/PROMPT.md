@@ -9,7 +9,7 @@ Your job is to complete the issue described below.
 2. **Read recent comments.** The last 2 issue comments are included below. Read more if they are insufficient.
 3. **Research the codebase.** Use file reads, grep, and find to understand existing conventions before writing code.
 4. **Write minimal, correct code.** Only change what the issue requires. Do not over-engineer.
-5. **Run validation.** Execute `ralph validate --tier=targeted` when your stage work is complete. Tests MUST pass.
+5. **Run validation.** Execute `ralph validate --tier=targeted` when your stage work is complete. Tests MUST pass. When a JUnit XML report is available (via `--junitxml=<path>`), read the structured `<failure>` blocks from it instead of raw pytest stdout — they pinpoint the failing test, file, and error message in machine-parseable form (spec §10.1 A4).
 6. **Do NOT commit or push.** Ralph handles git operations at stage boundaries.
 7. **Do NOT touch GitHub labels or issues during pipeline execution.** The orchestrator handles all in-flight label transitions. Once Ralph posts a handoff comment (after `status:review`), external review tools may modify labels.
 8. **Follow your stage-specific instructions.** The section below defines your persona, allowed outputs, and constraints for this invocation.

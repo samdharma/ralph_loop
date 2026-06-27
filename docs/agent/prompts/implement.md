@@ -22,6 +22,8 @@ The artifact directory contains four files:
 - `acceptance_criteria.json` — the numbered AC list
 - `qa_tests_to_pass.json` — the list of test node IDs to satisfy
 
+When reading test failures (your own or pre-existing), use the JUnit XML report (when present) instead of raw pytest stdout. JUnit XML exposes machine-parseable `<failure>` blocks (spec §10.1 A4).
+
 ## Process
 1. Read the test files in `tests/` to understand expectations.
 2. **If the QA tests import modules or classes NOT listed in the design spec**,
