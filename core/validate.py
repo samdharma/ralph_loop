@@ -22,6 +22,7 @@ import argparse
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 # ─────────────────────────────────────────────────────────
@@ -154,6 +155,56 @@ def detect_collisions(paths: list[str]) -> dict[str, list[str]]:
     for p in paths:
         by_basename[Path(p).name].append(p)
     return {name: ps for name, ps in by_basename.items() if len(ps) > 1}
+
+
+# ─────────────────────────────────────────────────────────
+# A1.1 — Pytest exit-code classifier (spec §10.1 A1)
+# ─────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class Classification:
+    """Result of classifying a pytest exit code.
+
+    Per spec §7.2 — frozen dataclass for lookup tables.
+    """
+
+    exit_code: int
+    classification: str  # one of: success, test_failure, timeout, interrupted, internal_error, unknown
+    action: str  # one of: accept, retry_transient, block
+
+
+# Pytest exit codes and their meaning.
+# Reference: pytest docs + POSIX signal conventions.
+_PYTEST_EXIT_TABLE: dict[int, Classification] = {
+    0: Classification(0, "success", "accept"),
+    1: Classification(1, "test_failure", "block"),
+    2: Classification(2, "test_failure", "block"),  # test execution interrupted
+    3: Classification(3, "internal_error", "block"),  # internal error
+    4: Classification(4, "test_failure", "block"),  # pytest usage error
+    5: Classification(5, "internal_error", "block"),  # no tests collected (config issue)
+    # 124, 137, 143 handled separately for distinct classification
+}
+
+
+def classify_pytest_exit_code(exit_code: int) -> Classification:
+    """Classify a pytest exit code into a structured Classification.
+
+    Per spec §10.1 A1:
+    - exit 0   → success / accept
+    - exit 1-5 → test_failure or internal_error / block
+    - exit 124 → timeout / retry_transient
+    - exit 137 → interrupted (SIGKILL) / retry_transient (DISTINCT from timeout)
+    - exit 143 → interrupted (SIGTERM) / retry_transient (DISTINCT from timeout)
+    - other    → unknown / block
+    """
+    if exit_code == 124:
+        return Classification(exit_code, "timeout", "retry_transient")
+    if exit_code in (137, 143):
+        return Classification(exit_code, "interrupted", "retry_transient")
+    if exit_code in _PYTEST_EXIT_TABLE:
+        return _PYTEST_EXIT_TABLE[exit_code]
+    return Classification(exit_code, "unknown", "block")
 
 
 def run_pytest_invocation(cmd: list[str], env: dict[str, str] | None = None) -> int:
