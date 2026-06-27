@@ -388,6 +388,85 @@ def load_retry_config() -> RetryBudget:
 
 
 # ─────────────────────────────────────────────────────────
+# B1.3 — Agent re-invocation helper (spec §10.2 B1)
+# ─────────────────────────────────────────────────────────
+
+
+def _max_attempts_for_action(action: str, budget: RetryBudget) -> int:
+    """Return the maximum number of invocations allowed for ``action``.
+
+    Per spec §10.2 B1:
+      - retry_transient → ``l1_max_attempts`` (default 1)
+      - retry_l2       → ``l2_max_attempts`` (default 2)
+      - accept / block → 1 (single invocation, no retry)
+    """
+    if action == "retry_transient":
+        return budget.l1_max_attempts
+    if action == "retry_l2":
+        return budget.l2_max_attempts
+    return 1
+
+
+def _invoke_with_retry(
+    prompt: str,
+    issue_num: int,
+    classify_fn,
+    budget: RetryBudget,
+) -> tuple[bool, str]:
+    """Invoke the agent with retry-policy enforcement.
+
+    Loops until either:
+      - the classifier returns ``accept`` (success), or
+      - the maximum attempts for the classifier's action are exhausted.
+
+    On each retry, the previous invocation's ``stdout`` is appended
+    to the prompt under a "## Previous failure output" header so the
+    agent can react to it.
+
+    Args:
+        prompt: initial prompt to send to the agent.
+        issue_num: GitHub issue number (forwarded to the agent).
+        classify_fn: ``callable(str, int) -> str`` mapping
+            ``(stdout, returncode)`` to an action
+            (``accept | retry_l2 | retry_transient | block``).
+        budget: ``RetryBudget`` from :func:`load_retry_config`.
+
+    Returns:
+        ``(success, last_stdout)`` — success is True iff the final
+        action is ``accept``.
+    """
+    current_prompt = prompt
+    last_stdout = ""
+    # Upper bound: the largest budget dimension. Per-action limits
+    # are enforced via ``_max_attempts_for_action``.
+    upper_bound = max(budget.l1_max_attempts, budget.l2_max_attempts, 1)
+    for attempt in range(1, upper_bound + 1):
+        ok, last_stdout = invoke_agent_with_output(current_prompt, issue_num)
+        action = classify_fn(last_stdout, 0 if ok else 1)
+        if action == "accept":
+            return True, last_stdout
+        if action == "block":
+            return False, last_stdout
+        # Determine max invocations for this action.
+        max_for_action = _max_attempts_for_action(action, budget)
+        if attempt >= max_for_action:
+            # Exhausted.
+            print(
+                f"[ralph] Retry budget exhausted for #{issue_num} "
+                f"(action={action}, attempt={attempt}/{max_for_action})"
+            )
+            return False, last_stdout
+        # Build a retry prompt that inlines the previous output.
+        current_prompt = (
+            f"{prompt}\n\n"
+            f"## Previous failure output (attempt {attempt}, "
+            f"action={action})\n\n"
+            f"```\n{last_stdout}\n```\n"
+        )
+    return False, last_stdout
+
+
+# ─────────────────────────────────────────────────────────
 # Metrics logging
 # ─────────────────────────────────────────────────────────
 
@@ -2354,6 +2433,50 @@ def invoke_agent(
     except Exception as e:
         print(f"[ralph] Agent invocation error: {e}")
         return False
+
+
+def invoke_agent_with_output(
+    prompt: str,
+    issue_num: int,
+) -> tuple[bool, str]:
+    """Invoke the agent and return ``(ok, captured_stdout)``.
+
+    Like :func:`invoke_agent` but returns the captured stdout so retry
+    wrappers can inline it into the next prompt. Per spec §10.2 B1 the
+    retry wrapper needs the previous attempt's output to give the
+    agent feedback context.
+
+    Args:
+        prompt: The assembled prompt text.
+        issue_num: GitHub issue number (for logging).
+
+    Returns:
+        ``(ok, captured_stdout)``. ``ok`` is True iff the underlying
+        agent exits 0. ``captured_stdout`` is the agent's combined
+        stdout + stderr (best effort; on subprocess error it's "").
+    """
+    agent_bin = _resolve_agent_binary()
+    if not agent_bin:
+        return False, ""
+
+    if agent_bin == "pi":
+        cmd = [agent_bin, "--print", "--no-skills"]
+        if _PI_FLAGS:
+            cmd.extend(_PI_FLAGS)
+        cmd.append(prompt)
+    elif agent_bin == "kimi":
+        cmd = [agent_bin, "--prompt", prompt]
+    else:
+        return False, ""
+
+    try:
+        result = run(cmd, check=False, capture=True, timeout=None)
+        captured = ((result.stdout or b"") + (result.stderr or b"")).decode(
+            "utf-8", errors="replace"
+        )
+        return result.returncode == 0, captured
+    except Exception as e:
+        return False, f"agent invocation error: {e}"
 
 
 # ─────────────────────────────────────────────────────────

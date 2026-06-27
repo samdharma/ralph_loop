@@ -1184,11 +1184,9 @@ class TestAgentReinvocation:
     to control the agent's return code and output.
     """
 
-    def test_retry_l2_triggers_reinvocation(
-        self, tmp_path, monkeypatch
-    ) -> None:
+    def test_retry_l2_triggers_reinvocation(self, tmp_path, monkeypatch) -> None:
         """retry_l2 action → second invocation up to l2_max_attempts."""
-        from engine import _invoke_with_retry, RetryBudget
+        from engine import RetryBudget, _invoke_with_retry
 
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
 
@@ -1201,19 +1199,24 @@ class TestAgentReinvocation:
             ]
         )
 
-        def fake_invoke_agent(prompt, issue_num, session_file=None, continue_session=False):
+        def fake_invoke_agent(
+            prompt, issue_num, session_file=None, continue_session=False
+        ):
             result = next(responses)
             return (result.returncode == 0, result.stdout.decode())
 
-        with mock.patch.object(engine, "invoke_agent", side_effect=fake_invoke_agent):
+        with mock.patch.object(
+            engine, "invoke_agent_with_output", side_effect=fake_invoke_agent
+        ):
             budget = RetryBudget(l1_max_attempts=1, l2_max_attempts=2)
             # First attempt: classify returns retry_l2.
             # Second attempt: classify returns accept.
             actions = iter(["retry_l2", "accept"])
-            classify_fn = lambda stdout, rc: next(actions)
-            ok, last_stdout = _invoke_with_retry(
-                "do thing", 1, classify_fn, budget
-            )
+
+            def classify_fn(stdout, rc):
+                return next(actions)
+
+            ok, last_stdout = _invoke_with_retry("do thing", 1, classify_fn, budget)
 
         assert ok is True
 
@@ -1221,44 +1224,50 @@ class TestAgentReinvocation:
         self, tmp_path, monkeypatch
     ) -> None:
         """Each retry's prompt contains the previous stdout tail."""
-        from engine import _invoke_with_retry, RetryBudget
+        from engine import RetryBudget, _invoke_with_retry
 
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
 
         captured_prompts: list[str] = []
 
-        def fake_invoke_agent(prompt, issue_num, session_file=None, continue_session=False):
+        def fake_invoke_agent(
+            prompt, issue_num, session_file=None, continue_session=False
+        ):
             captured_prompts.append(prompt)
             if len(captured_prompts) == 1:
                 return (False, "previous failure output line 1\nline 2")
             return (True, "now succeeds")
 
-        with mock.patch.object(engine, "invoke_agent", side_effect=fake_invoke_agent):
+        with mock.patch.object(
+            engine, "invoke_agent_with_output", side_effect=fake_invoke_agent
+        ):
             budget = RetryBudget(l1_max_attempts=1, l2_max_attempts=2)
             actions = iter(["retry_l2", "accept"])
-            classify_fn = lambda stdout, rc: next(actions)
+
+            def classify_fn(stdout, rc):
+                return next(actions)
+
             _invoke_with_retry("first prompt", 1, classify_fn, budget)
 
         assert len(captured_prompts) == 2
         # The second prompt should contain the previous stdout content.
         assert "previous failure output line 1" in captured_prompts[1]
 
-    def test_max_attempts_exhausted_blocks(
-        self, tmp_path, monkeypatch
-    ) -> None:
+    def test_max_attempts_exhausted_blocks(self, tmp_path, monkeypatch) -> None:
         """After max attempts the wrapper returns blocked status."""
-        from engine import _invoke_with_retry, RetryBudget
+        from engine import RetryBudget, _invoke_with_retry
 
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
 
-        with mock.patch.object(engine, "invoke_agent") as fake:
+        with mock.patch.object(engine, "invoke_agent_with_output") as fake:
             fake.return_value = (False, "still failing")
             budget = RetryBudget(l1_max_attempts=1, l2_max_attempts=2)
             # Always returns retry_l2 → eventually exhausted.
-            classify_fn = lambda stdout, rc: "retry_l2"
-            ok, _ = _invoke_with_retry(
-                "do thing", 1, classify_fn, budget
-            )
+
+            def classify_fn(stdout, rc):
+                return "retry_l2"
+
+            ok, _ = _invoke_with_retry("do thing", 1, classify_fn, budget)
 
         # l2_max_attempts=2 → 2 invocations total, both fail, blocked.
         assert ok is False
@@ -1268,17 +1277,18 @@ class TestAgentReinvocation:
         self, tmp_path, monkeypatch
     ) -> None:
         """retry_transient triggers at most l1_max_attempts (default 1)."""
-        from engine import _invoke_with_retry, RetryBudget
+        from engine import RetryBudget, _invoke_with_retry
 
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
 
-        with mock.patch.object(engine, "invoke_agent") as fake:
+        with mock.patch.object(engine, "invoke_agent_with_output") as fake:
             fake.return_value = (False, "still failing")
             budget = RetryBudget(l1_max_attempts=1, l2_max_attempts=2)
-            classify_fn = lambda stdout, rc: "retry_transient"
-            ok, _ = _invoke_with_retry(
-                "do thing", 1, classify_fn, budget
-            )
+
+            def classify_fn(stdout, rc):
+                return "retry_transient"
+
+            ok, _ = _invoke_with_retry("do thing", 1, classify_fn, budget)
 
         # l1_max_attempts=1 → 1 invocation total.
         assert ok is False
