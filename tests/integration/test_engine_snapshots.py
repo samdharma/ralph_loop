@@ -39,7 +39,10 @@ SNAPSHOT_FILES = _list_snapshot_files()
 @pytest.mark.skipif(
     len(SNAPSHOT_FILES) == 0,
     reason="No engine snapshots found at tests/integration/fixtures/engine_snapshots/. "
-    "Generate them with: python scripts/generate_engine_snapshots.py",
+    "The one-shot generator scripts/generate_engine_snapshots.py was "
+    "removed at the end of Phase C (per plan §3 R-2). Snapshots in "
+    "tests/integration/fixtures/engine_snapshots/ are now the "
+    "permanent regression baseline.",
 )
 @pytest.mark.parametrize("snapshot_path", SNAPSHOT_FILES, ids=lambda p: p.name)
 def test_engine_snapshot_matches(snapshot_path: Path) -> None:

@@ -6,8 +6,8 @@
     "42",
     "--help"
   ],
-  "exit_code": 0,
-  "stdout_pattern": "usage: engine.py [-h] [--auto-close] [--agent {pi,kimi}] [--issue N]\n                 [--pi-flag FLAG]\n\nRalph v3 Daemon\n\noptions:\n  -h, --help         show this help message and exit\n  --auto-close   ",
-  "stderr_pattern": "",
+  "exit_code": 1,
+  "stdout_pattern": "",
+  "stderr_pattern": "Traceback (most recent call last):\n  File \"/Users/sam.dharma/Trading/ralph/core/engine.py\", line 26, in <module>\n    from core.project_sync import _get_config, sync_closed, sync_status\nModuleNotFoundE",
   "description": "engine --issue 42 --help"
 }

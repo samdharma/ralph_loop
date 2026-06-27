@@ -164,7 +164,14 @@ class TestArtifactsAtNewPath:
         from core.pipeline.agents.artifacts import write_files_in_scope
 
         write_files_in_scope(99, ["a.py", "b.py"])
-        path = project_root / ".ralph" / "issues" / "99" / "artifacts" / "files_in_scope.json"
+        path = (
+            project_root
+            / ".ralph"
+            / "issues"
+            / "99"
+            / "artifacts"
+            / "files_in_scope.json"
+        )
         assert path.exists()
 
     def test_write_acceptance_criteria_at_new_path(self, project_root: Path) -> None:

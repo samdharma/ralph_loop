@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from project_sync import _get_config, sync_closed, sync_status
+from core.project_sync import _get_config, sync_closed, sync_status
 
 # Ensure the project root (parent of ``core/``) is on sys.path so
 # ``from core.pipeline.state import ...`` works whether engine.py is

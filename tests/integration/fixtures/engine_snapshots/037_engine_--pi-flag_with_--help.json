@@ -6,8 +6,8 @@
     "--model=test",
     "--help"
   ],
-  "exit_code": 2,
+  "exit_code": 1,
   "stdout_pattern": "",
-  "stderr_pattern": "usage: engine.py [-h] [--auto-close] [--agent {pi,kimi}] [--issue N]\n                 [--pi-flag FLAG]\nengine.py: error: argument --pi-flag: expected one argument\n",
+  "stderr_pattern": "Traceback (most recent call last):\n  File \"/Users/sam.dharma/Trading/ralph/core/engine.py\", line 26, in <module>\n    from core.project_sync import _get_config, sync_closed, sync_status\nModuleNotFoundE",
   "description": "engine --pi-flag with --help"
 }
