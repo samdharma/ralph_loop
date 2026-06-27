@@ -18,7 +18,6 @@ Tests verify:
 from __future__ import annotations
 
 import io
-import json
 import sys
 from contextlib import redirect_stdout
 from datetime import datetime, timezone
@@ -34,7 +33,9 @@ from core.pipeline import metrics  # noqa: E402
 from core.schemas.events import TrajectoryEvent  # noqa: E402
 
 
-def _stage_transition(issue_num: int, ts: datetime, from_s: str, to_s: str) -> TrajectoryEvent:
+def _stage_transition(
+    issue_num: int, ts: datetime, from_s: str, to_s: str
+) -> TrajectoryEvent:
     return TrajectoryEvent.model_validate(
         {
             "event_type": "stage_transition",

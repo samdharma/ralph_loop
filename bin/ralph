@@ -45,6 +45,7 @@ cmd_help() {
     echo "  report             Generate daily/weekly summary"
     echo "  generate-test-map  Auto-generate TEST_MAP.yaml from project structure"
     echo "  migrate [opts]     Migrate v3 state files to v3.1 layout (--dry-run supported)"
+    echo "  trajectory <N>     Print the timeline of trajectory events for issue #N"
     echo "  version            Show version"
     echo "  help               Show this help"
     echo ""
@@ -108,6 +109,10 @@ cmd_migrate() {
     exec "${PYTHON_CMD}" "${CORE_DIR}/migrate.py" "$@"
 }
 
+cmd_trajectory() {
+    exec "${PYTHON_CMD}" "${CORE_DIR}/trajectory.py" "$@"
+}
+
 # ─────────────────────────────────────────────────────────
 # Dispatch
 # ─────────────────────────────────────────────────────────
@@ -123,6 +128,7 @@ case "${1:-help}" in
     report)                    shift; cmd_report "$@" ;;
     generate-test-map)         shift; cmd_generate_test_map "$@" ;;
     migrate)                   shift; cmd_migrate "$@" ;;
+    trajectory)                shift; cmd_trajectory "$@" ;;
     *)
         echo "ralph: unknown command '${1}'"
         echo "Run 'ralph help' for usage."
