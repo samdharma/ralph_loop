@@ -1097,3 +1097,79 @@ class TestIdempotentWrappers:
         log = tmp_path / ".ralph" / "issues" / "1" / "idempotency.jsonl"
         assert log.exists()
         assert log.stat().st_size > 0
+
+
+# ─────────────────────────────────────────────────────────
+# B1.1 — Per-stage retry budget config (spec §10.2 B1, plan §3 R-6)
+# ─────────────────────────────────────────────────────────
+
+
+class TestRetryBudgetConfig:
+    """B1.1: load_retry_config() reads [retry] from .ralph/config.toml.
+
+    Per spec §10.2 B1 + plan §3 R-6 mitigation:
+      - missing [retry] section → defaults (l1_max_attempts=1,
+        l2_max_attempts=2)
+      - [retry] l1_max_attempts = 0 → L1 retry disabled
+      - [retry] l2_max_attempts = 3 → L2 retries up to 3 times
+      - invalid (negative) → defaults + WARNING log
+    """
+
+    def test_no_retry_section_uses_defaults(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Missing [retry] section → defaults: l1=1, l2=2."""
+        from core.engine import load_retry_config
+
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        budget = load_retry_config()
+        assert budget.l1_max_attempts == 1
+        assert budget.l2_max_attempts == 2
+
+    def test_l1_max_attempts_zero_disables_l1(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """[retry] l1_max_attempts = 0 → no L1 retry."""
+        from core.engine import load_retry_config
+
+        config_dir = tmp_path / ".ralph"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.toml").write_text(
+            "[retry]\nl1_max_attempts = 0\n"
+        )
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        budget = load_retry_config()
+        assert budget.l1_max_attempts == 0
+        assert budget.l2_max_attempts == 2  # default
+
+    def test_l2_max_attempts_three(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """[retry] l2_max_attempts = 3 → L2 retries up to 3 times."""
+        from core.engine import load_retry_config
+
+        config_dir = tmp_path / ".ralph"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.toml").write_text(
+            "[retry]\nl2_max_attempts = 3\n"
+        )
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        budget = load_retry_config()
+        assert budget.l1_max_attempts == 1  # default
+        assert budget.l2_max_attempts == 3
+
+    def test_invalid_negative_value_uses_defaults(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Invalid (negative) value → defaults."""
+        from core.engine import load_retry_config
+
+        config_dir = tmp_path / ".ralph"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.toml").write_text(
+            "[retry]\nl1_max_attempts = -1\n"
+        )
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        budget = load_retry_config()
+        assert budget.l1_max_attempts == 1  # default
+        assert budget.l2_max_attempts == 2  # default
