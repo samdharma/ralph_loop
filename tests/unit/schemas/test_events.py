@@ -25,14 +25,17 @@ beyond type checking. We focus on shape and discriminator fidelity.
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
-# Import path that the GREEN task will create:
-from core.schemas.events import TrajectoryEvent
+# Make core/ importable without installing Ralph.
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "core"))
 
+from core.schemas.events import TrajectoryEvent  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Shared fixtures: timestamps for deterministic test data.
@@ -50,8 +53,8 @@ T1 = datetime(2026, 6, 27, 15, 35, 12, tzinfo=timezone.utc)
 
 def test_stage_transition_serializes_with_event_type() -> None:
     """StageTransition carries `event_type=stage_transition` in JSON form."""
-    evt = TrajectoryEvent(
-        **{
+    evt = TrajectoryEvent.model_validate(
+        {
             "event_type": "stage_transition",
             "timestamp": T0,
             "issue_num": 42,
@@ -74,8 +77,8 @@ def test_stage_transition_serializes_with_event_type() -> None:
 
 def test_subagent_invocation_serializes_with_event_type() -> None:
     """SubagentInvocation records the agent binary and prompt size."""
-    evt = TrajectoryEvent(
-        **{
+    evt = TrajectoryEvent.model_validate(
+        {
             "event_type": "subagent_invocation",
             "timestamp": T0,
             "issue_num": 42,
@@ -97,8 +100,8 @@ def test_subagent_invocation_serializes_with_event_type() -> None:
 
 def test_validation_run_serializes_with_event_type() -> None:
     """ValidationRun records the structured pytest result."""
-    evt = TrajectoryEvent(
-        **{
+    evt = TrajectoryEvent.model_validate(
+        {
             "event_type": "validation_run",
             "timestamp": T1,
             "issue_num": 42,
@@ -123,8 +126,8 @@ def test_validation_run_serializes_with_event_type() -> None:
 
 def test_label_transition_serializes_with_event_type() -> None:
     """LabelTransition records add/remove label lists."""
-    evt = TrajectoryEvent(
-        **{
+    evt = TrajectoryEvent.model_validate(
+        {
             "event_type": "label_transition",
             "timestamp": T0,
             "issue_num": 42,
@@ -146,8 +149,8 @@ def test_label_transition_serializes_with_event_type() -> None:
 
 def test_retry_serializes_with_event_type() -> None:
     """Retry records attempt number and the previous action's classification."""
-    evt = TrajectoryEvent(
-        **{
+    evt = TrajectoryEvent.model_validate(
+        {
             "event_type": "retry",
             "timestamp": T1,
             "issue_num": 42,
@@ -170,8 +173,8 @@ def test_retry_serializes_with_event_type() -> None:
 
 def test_model_validate_round_trip_reconstructs_variant() -> None:
     """Serialize → JSON → deserialize → same variant."""
-    original = TrajectoryEvent(
-        **{
+    original = TrajectoryEvent.model_validate(
+        {
             "event_type": "stage_transition",
             "timestamp": T0,
             "issue_num": 42,
@@ -191,8 +194,8 @@ def test_model_validate_round_trip_reconstructs_variant() -> None:
 def test_invalid_event_type_raises_validation_error() -> None:
     """Unknown event_type discriminator → ValidationError."""
     with pytest.raises(ValidationError):
-        TrajectoryEvent(
-            **{
+        TrajectoryEvent.model_validate(
+            {
                 "event_type": "this_variant_does_not_exist",
                 "timestamp": T0,
                 "issue_num": 42,
@@ -203,8 +206,8 @@ def test_invalid_event_type_raises_validation_error() -> None:
 
 def test_event_type_discriminator_is_set_on_instance() -> None:
     """All constructed instances expose a string event_type attribute."""
-    evt = TrajectoryEvent(
-        **{
+    evt = TrajectoryEvent.model_validate(
+        {
             "event_type": "retry",
             "timestamp": T1,
             "issue_num": 42,
