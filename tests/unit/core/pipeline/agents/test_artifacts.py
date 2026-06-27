@@ -15,17 +15,15 @@ from pathlib import Path
 
 import pytest
 
-# Ensure the real `core` package resolves, not tests/unit/core/.
-_REPO_ROOT = str(Path(__file__).resolve().parents[4])
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
+# Make core/ importable without installing Ralph.
+sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent / "core"))
+
+from core.pipeline.agents import artifacts  # noqa: E402
 
 
 @pytest.fixture
 def project_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Point PROJECT_ROOT at tmp_path so artifacts land in tmp_path/.ralph/."""
-    from core.pipeline.agents import artifacts  # type: ignore[import-not-found]
-
     monkeypatch.setattr(artifacts, "PROJECT_ROOT", tmp_path)
     return tmp_path
 
