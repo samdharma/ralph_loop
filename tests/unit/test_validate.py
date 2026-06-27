@@ -960,10 +960,14 @@ class TestQuarantineIssuePost:
     """
 
     def test_fresh_quarantine_creates_issue_with_correct_title(
-        self, monkeypatch
+        self, tmp_path, monkeypatch
     ) -> None:
         """A fresh auto-quarantine invokes gh issue create with title 🦠 Flake quarantined: <test_id>."""
         from core import validate
+
+        # Redirect the idempotency file to tmp so this test is isolated.
+        idem_path = tmp_path / ".ralph" / "quarantine-issue-idempotency.jsonl"
+        monkeypatch.setattr(validate, "QUARANTINE_ISSUE_IDEMPOTENCY_FILE", idem_path)
 
         recorded_cmds: list[list[str]] = []
 
@@ -1005,9 +1009,13 @@ class TestQuarantineIssuePost:
         assert "test-failure-history.jsonl" in body
         assert issue_url  # non-empty
 
-    def test_idempotent_no_duplicate_issue(self, monkeypatch) -> None:
+    def test_idempotent_no_duplicate_issue(self, tmp_path, monkeypatch) -> None:
         """A second auto-quarantine for the same test_id does NOT create a second issue."""
         from core import validate
+
+        # Redirect idempotency file to tmp.
+        idem_path = tmp_path / ".ralph" / "quarantine-issue-idempotency.jsonl"
+        monkeypatch.setattr(validate, "QUARANTINE_ISSUE_IDEMPOTENCY_FILE", idem_path)
 
         recorded_cmds: list[list[str]] = []
 
@@ -1037,9 +1045,13 @@ class TestQuarantineIssuePost:
         assert len(recorded_cmds) == 1  # still 1
         assert url2 == url1  # same URL returned
 
-    def test_gh_failure_does_not_raise(self, monkeypatch) -> None:
+    def test_gh_failure_does_not_raise(self, tmp_path, monkeypatch) -> None:
         """If gh issue create fails, the function returns None and does not raise."""
         from core import validate
+
+        # Redirect idempotency file to tmp.
+        idem_path = tmp_path / ".ralph" / "quarantine-issue-idempotency.jsonl"
+        monkeypatch.setattr(validate, "QUARANTINE_ISSUE_IDEMPOTENCY_FILE", idem_path)
 
         def fake_run(cmd, *args, **kwargs):
             from unittest import mock

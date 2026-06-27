@@ -19,6 +19,8 @@ Usage:
 """
 
 import argparse
+import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -948,3 +950,126 @@ def unquarantine_stale_entries(now: str | None = None) -> int:
     if removed > 0:
         save_quarantine_entries(kept)
     return removed
+
+
+# ─────────────────────────────────────────────────────────
+# C3.4 — 🦠 Flake quarantined: GitHub issue post (spec §10.3 C3)
+# ─────────────────────────────────────────────────────────
+#
+# Per spec §10.3 C3 + plan §3 R-7: when a test is auto-quarantined,
+# post a GitHub issue with title ``🦠 Flake quarantined: <test_id>``
+# whose body contains the two failure timestamps and a link to the
+# failure history. The post is idempotent per ``(run_id, test_id)``
+# via a small dedicated JSONL log at
+# ``.ralph/quarantine-issue-idempotency.jsonl``.
+
+QUARANTINE_ISSUE_IDEMPOTENCY_FILE = (
+    PROJECT_ROOT / ".ralph" / "quarantine-issue-idempotency.jsonl"
+)
+
+
+def _quarantine_issue_already_posted(run_id: str, test_id: str, body_hash: str) -> bool:
+    """Return True if the (run_id, test_id, body_hash) has been recorded."""
+    if not QUARANTINE_ISSUE_IDEMPOTENCY_FILE.exists():
+        return False
+    key = f"{run_id}|{test_id}|{body_hash}"
+    try:
+        with QUARANTINE_ISSUE_IDEMPOTENCY_FILE.open("r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if record.get("key") == key:
+                    return True
+    except OSError:
+        return False
+    return False
+
+
+def _record_quarantine_issue(
+    run_id: str, test_id: str, body_hash: str, issue_url: str | None
+) -> None:
+    """Append a record to the quarantine-issue idempotency log."""
+    QUARANTINE_ISSUE_IDEMPOTENCY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    key = f"{run_id}|{test_id}|{body_hash}"
+    record = {
+        "key": key,
+        "test_id": test_id,
+        "run_id": run_id,
+        "body_hash": body_hash,
+        "issue_url": issue_url,
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+    }
+    with QUARANTINE_ISSUE_IDEMPOTENCY_FILE.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
+
+
+def _build_flake_quarantine_body(test_id: str, failure_timestamps: list[str]) -> str:
+    """Build the body for the flake-quarantined GitHub issue."""
+    ts_lines = "\n".join(f"- {ts}" for ts in failure_timestamps)
+    history_path = TEST_FAILURE_HISTORY_FILE
+    return (
+        f"## 🦠 Flake quarantined: `{test_id}`\n\n"
+        f"This test was auto-added to `tests/quarantine.yaml` after "
+        f"{len(failure_timestamps)} consecutive failures.\n\n"
+        f"### Failure timestamps\n{ts_lines}\n\n"
+        f"### Failure history\n"
+        f"Full per-test failure history: `{history_path}`\n\n"
+        f"### Auto-removal\n"
+        f"This entry will be auto-removed by "
+        f"`bin/ralph validate --unquarantine-stale` after 7 days.\n"
+    )
+
+
+def post_flake_quarantined_issue(
+    test_id: str,
+    failure_timestamps: list[str],
+    run_id: str | None = None,
+) -> str | None:
+    """Post a 🦠 Flake quarantined: <test_id> GitHub issue. Idempotent.
+
+    Returns the issue URL on success, ``None`` on failure. Idempotent
+    per ``(run_id, test_id, body_hash)``: re-invoking with the same
+    key returns the previously-recorded URL without making a second
+    ``gh`` call.
+    """
+    if run_id is None:
+        run_id = os.environ.get("RALPH_RUN_ID", "default")
+    body = _build_flake_quarantine_body(test_id, failure_timestamps)
+    body_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()[:16]
+
+    # Idempotency check.
+    if _quarantine_issue_already_posted(run_id, test_id, body_hash):
+        # Return the previously recorded URL.
+        if not QUARANTINE_ISSUE_IDEMPOTENCY_FILE.exists():
+            return None
+        key = f"{run_id}|{test_id}|{body_hash}"
+        try:
+            with QUARANTINE_ISSUE_IDEMPOTENCY_FILE.open("r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if record.get("key") == key:
+                        return record.get("issue_url")
+        except OSError:
+            return None
+        return None
+
+    title = f"🦠 Flake quarantined: {test_id}"
+    cmd = ["gh", "issue", "create", "--title", title, "--body", body]
+    result = run(cmd, check=False)
+    if result.returncode != 0:
+        return None
+    # gh prints the new issue URL on stdout.
+    issue_url = (result.stdout or "").strip() or None
+    _record_quarantine_issue(run_id, test_id, body_hash, issue_url)
+    return issue_url
