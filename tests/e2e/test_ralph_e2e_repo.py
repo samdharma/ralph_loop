@@ -193,8 +193,6 @@ def test_phase_b_trajectory_and_idempotency_artifacts(tmp_path: Path) -> None:
 
     issue_num = _make_e2e_issue("b", "Phase B idempotency + trajectory", target)
     issue_dir = target / ".ralph" / "issues" / str(issue_num)
-    idemp = issue_dir / "idempotency.jsonl"
-    trajectory = issue_dir / "trajectory.jsonl"
 
     # Path layout (per spec §6.2). The daemon populates these during its run;
     # we only assert the expected directory structure here.
