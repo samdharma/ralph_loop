@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "-c",
+    "from core.pipeline import Stage; print('ok')"
+  ],
+  "exit_code": 1,
+  "stdout_pattern": "",
+  "stderr_pattern": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    from core.pipeline import Stage; print('ok')\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nImportError: cannot import name 'Stage' f",
+  "description": "public API: from core.pipeline import Stage"
+}

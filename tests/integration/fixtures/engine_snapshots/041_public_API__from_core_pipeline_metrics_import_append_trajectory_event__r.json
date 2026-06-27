@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "-c",
+    "from core.pipeline.metrics import append_trajectory_event, read_trajectory; print('ok')"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "ok\n",
+  "stderr_pattern": "",
+  "description": "public API: from core.pipeline.metrics import append_trajectory_event, r"
+}

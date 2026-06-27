@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/validate.py",
+    "--unquarantine-stale"
+  ],
+  "exit_code": 1,
+  "stdout_pattern": "",
+  "stderr_pattern": "Traceback (most recent call last):\n  File \"/Users/sam.dharma/Trading/ralph/core/validate.py\", line 687, in <module>\n    sys.exit(main())\n             ~~~~^^\n  File \"/Users/sam.dharma/Trading/ralph/cor",
+  "description": "validate --unquarantine-stale",
+  "skip_runtime": true
+}

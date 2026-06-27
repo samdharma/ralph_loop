@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/status.py",
+    "--help"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "==================================================\nRalph v3 \u2014 Status\n==================================================\n\n\u2500\u2500 Daemon \u2500\u2500\n  Status:  Stopped\n\n\u2500\u2500 Active Issue \u2500\u2500\n  None (idle)\n\n\u2500\u2500 Recent Ev",
+  "stderr_pattern": "",
+  "description": "status --help",
+  "skip_runtime": true
+}

@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/generate_test_map.py",
+    "--help"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "usage: generate_test_map.py [-h] [--dry-run]\n\nGenerate TEST_MAP.yaml from project structure\n\noptions:\n  -h, --help  show this help message and exit\n  --dry-run   Preview the generated TEST_MAP without",
+  "stderr_pattern": "",
+  "description": "generate_test_map --help"
+}

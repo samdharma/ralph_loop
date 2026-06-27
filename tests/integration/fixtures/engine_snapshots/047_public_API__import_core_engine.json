@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "-c",
+    "import core.engine; print('ok')"
+  ],
+  "exit_code": 1,
+  "stdout_pattern": "",
+  "stderr_pattern": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import core.engine; print('ok')\n    ^^^^^^^^^^^^^^^^^^\n  File \"/Users/sam.dharma/Trading/ralph/core/engine.py\", line 26, i",
+  "description": "public API: import core.engine"
+}

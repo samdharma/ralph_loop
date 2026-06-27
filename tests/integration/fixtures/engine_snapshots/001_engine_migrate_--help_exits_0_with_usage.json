@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/engine.py",
+    "migrate",
+    "--help"
+  ],
+  "exit_code": 1,
+  "stdout_pattern": "",
+  "stderr_pattern": "Traceback (most recent call last):\n  File \"/Users/sam.dharma/Trading/ralph/core/engine.py\", line 3048, in <module>\n    from core.migrate import main as migrate_main\nModuleNotFoundError: No module name",
+  "description": "engine migrate --help exits 0 with usage"
+}

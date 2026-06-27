@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/engine.py"
+  ],
+  "exit_code": 1,
+  "stdout_pattern": "[ralph] Daemon started\n[ralph] Syncing with remote...\n[ralph] WARNING: could not sync ready tickets: Command '['gh', 'issue', 'list', '--label', 'status:ready', '--state', 'open', '--json', 'number', ",
+  "stderr_pattern": "Traceback (most recent call last):\n  File \"/Users/sam.dharma/Trading/ralph/core/engine.py\", line 3094, in <module>\n    run_loop(auto_close=args.auto_close, single_issue=args.issue)\n    ~~~~~~~~^^^^^^^",
+  "description": "daemon with no args (exits when no gh / no repo)",
+  "skip_runtime": true
+}

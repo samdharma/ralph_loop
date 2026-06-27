@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/report.py",
+    "--help"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "============================================================\nRalph v3 \u2014 Day Report\nGenerated: 2026-06-27 11:49 UTC\n============================================================\n\n\u2500\u2500 Pipeline Activity \u2500\u2500",
+  "stderr_pattern": "",
+  "description": "report --help",
+  "skip_runtime": true
+}

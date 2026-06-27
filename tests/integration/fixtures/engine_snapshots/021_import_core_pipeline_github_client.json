@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "-c",
+    "import core.pipeline.github.client; print('ok')"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "ok\n",
+  "stderr_pattern": "",
+  "description": "import core.pipeline.github.client"
+}

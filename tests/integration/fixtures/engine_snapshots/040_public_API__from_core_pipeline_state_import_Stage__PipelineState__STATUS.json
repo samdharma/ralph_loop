@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "-c",
+    "from core.pipeline.state import Stage, PipelineState, STATUS_LABEL; print('ok')"
+  ],
+  "exit_code": 1,
+  "stdout_pattern": "",
+  "stderr_pattern": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    from core.pipeline.state import Stage, PipelineState, STATUS_LABEL; print('ok')\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^",
+  "description": "public API: from core.pipeline.state import Stage, PipelineState, STATUS"
+}

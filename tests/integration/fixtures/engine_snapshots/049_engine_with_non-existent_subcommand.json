@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/engine.py",
+    "this_is_not_a_real_subcommand"
+  ],
+  "exit_code": 2,
+  "stdout_pattern": "",
+  "stderr_pattern": "usage: engine.py [-h] [--auto-close] [--agent {pi,kimi}] [--issue N]\n                 [--pi-flag FLAG]\nengine.py: error: unrecognized arguments: this_is_not_a_real_subcommand\n",
+  "description": "engine with non-existent subcommand"
+}

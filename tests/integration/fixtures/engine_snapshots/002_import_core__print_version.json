@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "-c",
+    "import core; print(core.__version__)"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "3.1.1\n",
+  "stderr_pattern": "",
+  "description": "import core; print version"
+}

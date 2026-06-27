@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/init.py",
+    "--help"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "usage: init.py [-h] [--yes] [--create-labels] [--agent {pi,kimi}]\n               [--tier {smoke,targeted,integration,full}] [--github-project N]\n               [name]\n\nScaffold a new Ralph v3 project\n",
+  "stderr_pattern": "",
+  "description": "init --help"
+}

@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/engine.py",
+    "--pi-flag",
+    "--model=test",
+    "--help"
+  ],
+  "exit_code": 2,
+  "stdout_pattern": "",
+  "stderr_pattern": "usage: engine.py [-h] [--auto-close] [--agent {pi,kimi}] [--issue N]\n                 [--pi-flag FLAG]\nengine.py: error: argument --pi-flag: expected one argument\n",
+  "description": "engine --pi-flag with --help"
+}

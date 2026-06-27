@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/doctor.py",
+    "--help"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "usage: doctor.py [-h] [--quiet] [issue_num]\n\nDiagnose Ralph's runtime health.\n\npositional arguments:\n  issue_num   Optional GitHub issue number to focus the diagnostic on.\n\noptions:\n  -h, --help  show",
+  "stderr_pattern": "",
+  "description": "doctor --help"
+}
