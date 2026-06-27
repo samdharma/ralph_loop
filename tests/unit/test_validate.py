@@ -354,3 +354,69 @@ class TestJunitxmlFlag:
         failure_cases = [c for c in cases if c.find("failure") is not None]
         assert len(failure_cases) == 1
         assert failure_cases[0].attrib["name"] == "test_b"
+
+
+# ─────────────────────────────────────────────────────────
+# A6.1 — Critical-path test config (spec §10.1 A6)
+# ─────────────────────────────────────────────────────────
+
+
+class TestCriticalPaths:
+    """A6.1: [validate] critical_paths config + --critical CLI flag.
+
+    Per spec §10.1 A6: critical paths run FIRST; their failure blocks BUILD
+    (returns action='block'). Non-critical tests run after.
+    """
+
+    def _write_config(self, tmp_path: Path, critical_paths: list[str]) -> Path:
+        """Write a .ralph/config.toml with [validate] critical_paths. Returns the path."""
+        config_dir = tmp_path / ".ralph"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        config_path = config_dir / "config.toml"
+        paths_literal = ", ".join(f'"{p}"' for p in critical_paths)
+        config_path.write_text(f"[validate]\ncritical_paths = [{paths_literal}]\n")
+        return config_path
+
+    def test_default_critical_paths_is_empty(self, tmp_path, monkeypatch) -> None:
+        """With no [validate] critical_paths (default), behavior is unchanged."""
+        monkeypatch.setattr(validate, "PROJECT_ROOT", tmp_path)
+        if hasattr(validate, "_CONFIG"):
+            monkeypatch.setattr(validate, "_CONFIG", {})
+        paths = validate.get_critical_paths()
+        assert paths == []
+
+    def test_critical_paths_loaded_from_config(self, tmp_path, monkeypatch) -> None:
+        """Non-empty critical_paths from config are loaded correctly."""
+        self._write_config(tmp_path, ["tests/unit/core/test_smoke.py::test_x"])
+        monkeypatch.setattr(validate, "PROJECT_ROOT", tmp_path)
+        new_config = validate._load_config()  # type: ignore[attr-defined]
+        monkeypatch.setattr(validate, "_CONFIG", new_config)
+        paths = validate.get_critical_paths()
+        assert paths == ["tests/unit/core/test_smoke.py::test_x"]
+
+    def test_critical_path_failure_blocks(self, tmp_path, monkeypatch) -> None:
+        """A failing critical-path test → action == 'block' (not 'accept')."""
+        from unittest import mock
+
+        critical_cmd = ["pytest", "tests/critical/", "--junitxml=/tmp/x.xml"]
+        fake = mock.MagicMock()
+        fake.returncode = 1
+        fake.stdout = "1 failed"
+        fake.stderr = ""
+
+        def fake_run(cmd, *args, **kwargs):
+            if cmd == critical_cmd:
+                return fake
+            return mock.MagicMock(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(validate, "run", fake_run)
+        result = validate.run_pytest_invocation(critical_cmd)
+        assert result["action"] == "block"
+        assert result["classification"] == "test_failure"
+
+    def test_critical_flag_overrides_empty_config(self, tmp_path, monkeypatch) -> None:
+        """--critical CLI flag forces critical mode even when config is empty."""
+        monkeypatch.setattr(validate, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(validate, "_CONFIG", {})
+        is_critical = validate.is_critical_run(force=True)
+        assert is_critical is True
