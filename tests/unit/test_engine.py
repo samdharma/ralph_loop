@@ -885,12 +885,15 @@ def test_find_alternate_agent_returns_other_available_agent():
             returncode=0 if cmd[0] == "which" and cmd[1] in ("kimi", "pi") else 1
         )
 
-    with mock.patch.object(engine, "subprocess") as mock_subp:
+    # _find_alternate_agent lives at core.pipeline.providers now (C1 step 14a).
+    from core.pipeline import providers as providers_mod
+
+    with mock.patch.object(providers_mod, "subprocess") as mock_subp:
         mock_subp.run.side_effect = lambda cmd, **kw: fake_which(cmd)
         # Current agent is kimi, so alternate is pi.
-        assert engine._find_alternate_agent({"kimi"}) == "pi"
+        assert providers_mod._find_alternate_agent({"kimi"}) == "pi"
         # Current agent is pi, so alternate is kimi.
-        assert engine._find_alternate_agent({"pi"}) == "kimi"
+        assert providers_mod._find_alternate_agent({"pi"}) == "kimi"
 
 
 def test_find_alternate_agent_returns_none_when_no_other_agent():
@@ -900,9 +903,11 @@ def test_find_alternate_agent_returns_none_when_no_other_agent():
         # Only kimi is available.
         return mock.Mock(returncode=0 if cmd == ["which", "kimi"] else 1)
 
-    with mock.patch.object(engine, "subprocess") as mock_subp:
+    from core.pipeline import providers as providers_mod
+
+    with mock.patch.object(providers_mod, "subprocess") as mock_subp:
         mock_subp.run.side_effect = lambda cmd, **kw: fake_which(cmd)
-        assert engine._find_alternate_agent({"kimi"}) is None
+        assert providers_mod._find_alternate_agent({"kimi"}) is None
 
 
 def _make_sleep_shutdown():
@@ -925,6 +930,11 @@ def test_run_loop_reverts_ready_and_sleeps_on_rate_limit():
     os.environ.pop("RALPH_AGENT", None)
     issue = {"number": 42, "title": "Test"}
 
+    # The provider-error machinery lives at core.pipeline.providers now.
+    # We patch it there (its canonical home) so the patches take effect
+    # when _handle_provider_error runs.
+    from core.pipeline import providers as providers_mod
+
     with (
         mock.patch.object(engine, "acquire_pid_file", return_value=True),
         mock.patch.object(engine, "recover_from_crash", return_value=None),
@@ -933,8 +943,8 @@ def test_run_loop_reverts_ready_and_sleeps_on_rate_limit():
         mock.patch.object(
             engine, "run_pipeline", side_effect=engine.ProviderRateLimitError("429")
         ),
-        mock.patch.object(engine, "_find_alternate_agent", return_value=None),
-        mock.patch.object(engine, "_revert_to_ready") as mock_revert,
+        mock.patch.object(providers_mod, "_find_alternate_agent", return_value=None),
+        mock.patch.object(providers_mod, "_revert_to_ready") as mock_revert,
         mock.patch.object(engine, "time") as mock_time,
         mock.patch.object(engine, "gh", return_value=mock.Mock(stdout="[]")),
         mock.patch.object(engine, "sync_status"),
@@ -974,14 +984,16 @@ def test_run_loop_falls_back_to_alternate_agent():
         while True:
             yield None
 
+    from core.pipeline import providers as providers_mod
+
     with (
         mock.patch.object(engine, "acquire_pid_file", return_value=True),
         mock.patch.object(engine, "recover_from_crash", return_value=None),
         mock.patch.object(engine, "fetch_ready_ticket", side_effect=fetch_gen()),
         mock.patch.object(engine, "transition_label") as mock_transition,
         mock.patch.object(engine, "run_pipeline", side_effect=fail_then_succeed),
-        mock.patch.object(engine, "_find_alternate_agent", return_value="pi"),
-        mock.patch.object(engine, "_revert_to_ready") as mock_revert,
+        mock.patch.object(providers_mod, "_find_alternate_agent", return_value="pi"),
+        mock.patch.object(providers_mod, "_revert_to_ready") as mock_revert,
         mock.patch.object(engine, "time"),
         mock.patch.object(engine, "gh", return_value=mock.Mock(stdout="[]")),
         mock.patch.object(engine, "sync_status"),
@@ -1005,6 +1017,8 @@ def test_run_loop_creates_project_issue_when_all_agents_exhausted():
     os.environ.pop("RALPH_AGENT", None)
     issue = {"number": 42, "title": "Test"}
 
+    from core.pipeline import providers as providers_mod
+
     with (
         mock.patch.object(engine, "acquire_pid_file", return_value=True),
         mock.patch.object(engine, "recover_from_crash", return_value=None),
@@ -1013,9 +1027,9 @@ def test_run_loop_creates_project_issue_when_all_agents_exhausted():
         mock.patch.object(
             engine, "run_pipeline", side_effect=engine.ProviderQuotaError("quota")
         ),
-        mock.patch.object(engine, "_find_alternate_agent", return_value=None),
-        mock.patch.object(engine, "_revert_to_ready"),
-        mock.patch.object(engine, "_create_provider_issue") as mock_create,
+        mock.patch.object(providers_mod, "_find_alternate_agent", return_value=None),
+        mock.patch.object(providers_mod, "_revert_to_ready"),
+        mock.patch.object(providers_mod, "_create_provider_issue") as mock_create,
         mock.patch.object(engine, "time"),
         mock.patch.object(engine, "gh", return_value=mock.Mock(stdout="[]")),
         mock.patch.object(engine, "sync_status"),

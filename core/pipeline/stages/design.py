@@ -15,10 +15,9 @@ previously carried Mode-B context is now a no-op
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 # Bootstrap sys.path so core.engine and core.pipeline.stages.base can
 # be imported when this module is loaded via pytest from a tests/

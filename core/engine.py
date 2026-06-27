@@ -13,7 +13,6 @@ import hashlib
 import json
 import logging
 import os
-import re
 import signal
 import subprocess
 import sys
@@ -79,203 +78,32 @@ RATE_LIMIT_BACKOFF_SECONDS = 15 * 60  # 15 minutes
 # Each string may contain multiple whitespace-separated tokens.
 _PI_FLAGS: list[str] = []
 
-
 # ─────────────────────────────────────────────────────────
-# Provider error handling
+# C1 step 14a — providers.py re-exports (per plan §1.1 C1)
 # ─────────────────────────────────────────────────────────
-
-
-class ProviderError(Exception):
-    """Base class for provider-side errors that Ralph should handle specially."""
-
-    pass
-
-
-class ProviderRateLimitError(ProviderError):
-    """429 / rate-limit / overload: backoff and retry later."""
-
-    pass
-
-
-class ProviderQuotaError(ProviderError):
-    """Quota / billing exhausted: try alternate agent or stop."""
-
-    pass
-
-
-# Patterns matched against agent stdout/stderr. Be conservative: normal test
-# failures must NOT match these.
-PROVIDER_RATE_LIMIT_PATTERNS = [
-    r"APIProviderRateLimitError",
-    r"\b429\b",
-    r"rate\s*limit",
-    r"too\s+many\s+requests",
-    r"overloaded",
-]
-
-PROVIDER_QUOTA_PATTERNS = [
-    r"GoUsageLimitError",
-    r"FreeUsageLimitError",
-    r"Monthly usage limit reached",
-    r"available balance",
-    r"insufficient_quota",
-    r"out of budget",
-    r"quota\s*exceeded",
-    r"billing",
-]
-
-
-def _classify_provider_error(output: str) -> Optional[str]:
-    """Classify captured agent output as a provider-side failure.
-
-    Returns:
-        "quota" if a quota/billing limit is detected,
-        "rate_limit" if a rate limit / 429 is detected,
-        None otherwise.
-    """
-    if not output:
-        return None
-    text = output.lower()
-    for pattern in PROVIDER_QUOTA_PATTERNS:
-        if re.search(pattern, text, re.IGNORECASE):
-            return "quota"
-    for pattern in PROVIDER_RATE_LIMIT_PATTERNS:
-        if re.search(pattern, text, re.IGNORECASE):
-            return "rate_limit"
-    return None
-
-
-def _find_alternate_agent(excluded: set[str]) -> Optional[str]:
-    """Return an available agent binary that is not in `excluded`."""
-    for candidate in ("pi", "kimi"):
-        if candidate in excluded:
-            continue
-        if subprocess.run(["which", candidate], capture_output=True).returncode == 0:
-            return candidate
-    return None
-
-
-def _revert_to_ready(issue_num: int):
-    """Move an issue back to status:ready, removing any in-flight stage labels."""
-    # Per spec §6.1: derive the labels from the Stage enum rather than
-    # hand-writing the strings here. Keeps the source-of-truth single.
-    for label in [
-        STATUS_LABEL[Stage.DESIGN],
-        STATUS_LABEL[Stage.BUILD],
-        STATUS_LABEL[Stage.VERIFY],
-        STATUS_LABEL[Stage.REVIEW],
-        STATUS_LABEL[Stage.BLOCKED],
-    ]:
-        try:
-            gh("issue", "edit", str(issue_num), "--remove-label", label)
-        except subprocess.CalledProcessError:
-            pass
-    try:
-        gh("issue", "edit", str(issue_num), "--add-label", "status:ready")
-        sync_status(issue_num, "status:ready")
-        print(f"[ralph] #{issue_num} reverted to status:ready (provider issue)")
-    except subprocess.CalledProcessError as e:
-        print(f"[ralph] WARNING: could not revert #{issue_num} to status:ready: {e}")
-
-
-def _create_provider_issue(agent: str, error: ProviderError) -> Optional[str]:
-    """Create a GitHub issue documenting provider exhaustion and stop processing."""
-    title = f"🛑 Ralph provider exhausted: {agent}"
-    body = (
-        f"Ralph stopped processing because `{agent}` reported a provider error:\n\n"
-        f"```\n{str(error)[:2000]}\n```\n\n"
-        f"- Timestamp: {datetime.now(timezone.utc).isoformat()}\n"
-        f"- Action required: Check the provider account / billing / quota, "
-        f"then restart the Ralph daemon.\n"
-    )
-    try:
-        result = gh(
-            "issue",
-            "create",
-            "--title",
-            title,
-            "--body",
-            body,
-            "--label",
-            "type:exit",
-        )
-        url = result.stdout.strip()
-        print(f"[ralph] Created provider issue: {url}")
-        log_metrics("provider_exhausted", agent=agent, issue_url=url)
-        return url
-    except subprocess.CalledProcessError as e:
-        print(f"[ralph] WARNING: could not create provider issue: {e}")
-        log_metrics("provider_exhausted", agent=agent, error=str(e))
-        return None
-
-
-def _sleep_with_interrupt(seconds: int):
-    """Sleep in 1-second chunks so SIGINT/SIGTERM can break out quickly."""
-    for _ in range(seconds):
-        _check_interrupt()
-        if _shutdown_requested:
-            break
-        time.sleep(1)
-
-
-def _handle_provider_error(
-    issue: dict, error: ProviderError, tried_agents: set[str]
-) -> str:
-    """
-    Handle a provider-side error for the current issue.
-
-    Returns:
-        "continue" if the loop should continue (fallback or pause),
-        "break" if the daemon should stop (quota exhausted, no fallback).
-    """
-    issue_num = issue["number"]
-    current_agent = _resolve_agent_binary()
-    if current_agent:
-        tried_agents.add(current_agent)
-    clear_checkpoint()
-
-    alternate = _find_alternate_agent(tried_agents)
-    if alternate:
-        gh_comment(
-            issue_num,
-            f"⏸️ {current_agent or 'agent'} {type(error).__name__} — "
-            f"trying `{alternate}`...",
-        )
-        _revert_to_ready(issue_num)
-        os.environ["RALPH_AGENT"] = alternate
-        print(f"[ralph] Switching agent to {alternate} for #{issue_num}")
-        log_metrics(
-            "agent_fallback",
-            issue=str(issue_num),
-            from_agent=current_agent or "unknown",
-            to_agent=alternate,
-            reason=type(error).__name__,
-        )
-        time.sleep(5)
-        return "continue"
-
-    if isinstance(error, ProviderRateLimitError):
-        gh_comment(
-            issue_num,
-            "⏸️ All available agents rate-limited — pausing pipeline for 15 minutes.",
-        )
-        _revert_to_ready(issue_num)
-        log_metrics(
-            "provider_rate_limit_pause",
-            issue=str(issue_num),
-            agents=sorted(tried_agents),
-        )
-        _sleep_with_interrupt(RATE_LIMIT_BACKOFF_SECONDS)
-        tried_agents.clear()
-        return "continue"
-
-    gh_comment(
-        issue_num,
-        "🛑 Provider quota exhausted — stopping pipeline.",
-    )
-    _revert_to_ready(issue_num)
-    _create_provider_issue(current_agent or "unknown", error)
-    return "break"
+# ProviderError, ProviderRateLimitError, ProviderQuotaError,
+# _classify_provider_error, _find_alternate_agent,
+# _revert_to_ready, _create_provider_issue, _sleep_with_interrupt,
+# _handle_provider_error, RATE_LIMIT_BACKOFF_SECONDS, and the
+# PROVIDER_*_PATTERNS lists all live at core.pipeline.providers
+# (per spec §6.1, §10.3 C1). They are re-imported here so existing
+# callers that ``from core.engine import ProviderError`` (or any of
+# the others) continue to work. New code should import directly
+# from core.pipeline.providers.
+from core.pipeline.providers import (  # noqa: E402,F401
+    PROVIDER_QUOTA_PATTERNS,
+    PROVIDER_RATE_LIMIT_PATTERNS,
+    RATE_LIMIT_BACKOFF_SECONDS,
+    ProviderError,
+    ProviderQuotaError,
+    ProviderRateLimitError,
+    _classify_provider_error,
+    _create_provider_issue,
+    _find_alternate_agent,
+    _handle_provider_error,
+    _revert_to_ready,
+    _sleep_with_interrupt,
+)
 
 
 def _design_spec_path(issue_num: int) -> Path:
