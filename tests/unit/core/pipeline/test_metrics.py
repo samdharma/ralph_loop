@@ -127,3 +127,22 @@ def test_each_line_is_valid_json(project_root: Path) -> None:
         payload = json.loads(line)
         assert "event_type" in payload
         assert "issue_num" in payload
+
+
+# ─────────────────────────────────────────────────────────
+# C1.7b — metrics at new path (spec §6.1, §10.3 C1)
+# ─────────────────────────────────────────────────────────
+
+
+class TestMetricsAtNewPath:
+    """C1.7b: metrics module is at the new path with public API intact."""
+
+    def test_append_trajectory_event_importable(self) -> None:
+        from core.pipeline.metrics import append_trajectory_event
+
+        assert callable(append_trajectory_event)
+
+    def test_read_trajectory_importable(self) -> None:
+        from core.pipeline.metrics import read_trajectory
+
+        assert callable(read_trajectory)
