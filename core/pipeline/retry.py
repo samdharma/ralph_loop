@@ -24,9 +24,7 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import sys
-import time
 import tomllib
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -230,9 +228,8 @@ def _emit_trajectory(
     than the log.
     """
     try:
-        from core.schemas.events import TrajectoryEvent
-
         from core.pipeline import metrics as _metrics
+        from core.schemas.events import TrajectoryEvent
 
         base: dict[str, object] = {
             "timestamp": datetime.now(timezone.utc),

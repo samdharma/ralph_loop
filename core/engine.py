@@ -163,7 +163,6 @@ def git(*args: str) -> subprocess.CompletedProcess:
 # core.pipeline.github.client.
 from core.pipeline.github.client import _build_github_client  # noqa: E402,F401
 
-
 # ─────────────────────────────────────────────────────────
 # C1 step 14b — retry.py re-exports (per plan §1.1 C1)
 # ─────────────────────────────────────────────────────────
@@ -175,15 +174,14 @@ from core.pipeline.github.client import _build_github_client  # noqa: E402,F401
 # (or any of the others) continue to work. New code should
 # import directly from core.pipeline.retry.
 from core.pipeline.retry import (  # noqa: E402,F401
-    RetryBudget,
     _DEFAULT_RETRY_BUDGET,
+    RetryBudget,
     _emit_trajectory,
     _invoke_with_retry,
     _max_attempts_for_action,
     load_retry_config,
     log_metrics,
 )
-
 
 # ─────────────────────────────────────────────────────────
 # Item 2: Ticket Fetcher
