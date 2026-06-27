@@ -100,6 +100,13 @@ PYTEST_TIMEOUT = int(os.environ.get("RALPH_PYTEST_TIMEOUT", "300"))
 # are deselected from pytest invocations.
 QUARANTINE_FILE = PROJECT_ROOT / TEST_DIR / "quarantine.yaml"
 
+# Retry mode (per spec §10.3 C4). When True, validate skips
+# integration/full/e2e tiers; only pytest-paths runs. Set via
+# ``bin/ralph validate --retry`` or RALPH_RETRY=1 env var.
+RETRY_MODE = os.environ.get("RALPH_RETRY", "0") == "1"
+
+_EXPENSIVE_TIERS = frozenset({"integration", "full", "e2e"})
+
 # Failure history for auto-quarantine (C3.2). Each line is one validate
 # run: ``{"run_at": iso8601, "failures": [test_id, ...], "passes": [...]}``.
 # The auto-add logic scans the last 2 runs for consecutive failures.
@@ -649,6 +656,12 @@ def main() -> int:
         help="Remove quarantine.yaml entries older than 7 days "
         "(per spec §10.3 C3). Prints the count of removed entries.",
     )
+    parser.add_argument(
+        "--retry",
+        action="store_true",
+        help="Run only the pytest-paths tier; skip integration/full/e2e "
+        "(per spec §10.3 C4). Used by BUILD's retry path.",
+    )
     args = parser.parse_args()
 
     # Also support --tier=value from the old bash CLI style
@@ -660,6 +673,13 @@ def main() -> int:
         removed = unquarantine_stale_entries()
         print(f"[ralph] Removed {removed} stale quarantine entries.")
         return 0
+    if args.retry:
+        os.environ["RALPH_RETRY"] = "1"
+        # The module-level constant is captured at import time, so we
+        # update it via the global for this invocation.
+        global RETRY_MODE
+        RETRY_MODE = True
+        return validate_with_retry(pytest_paths=args.pytest_paths)
     return validate(args.tier, pytest_paths=args.pytest_paths)
 
 
@@ -1073,3 +1093,40 @@ def post_flake_quarantined_issue(
     issue_url = (result.stdout or "").strip() or None
     _record_quarantine_issue(run_id, test_id, body_hash, issue_url)
     return issue_url
+
+
+# ─────────────────────────────────────────────────────────
+# C4.1 — ralph validate --retry flag (spec §10.3 C4)
+# ─────────────────────────────────────────────────────────
+#
+# Per spec §10.3 C4: ``ralph validate --retry`` runs only the
+# pytest-paths tier; integration/full/e2e tiers are skipped. Wired
+# into BUILD's retry path (per B1.3) so retry attempts use this flag.
+
+
+def is_retry_run() -> bool:
+    """Return True iff ``--retry`` (or RALPH_RETRY=1) is in effect."""
+    return RETRY_MODE
+
+
+def should_skip_expensive_tiers(tier: str) -> bool:
+    """In retry mode, skip integration/full/e2e tiers; otherwise never skip."""
+    if not RETRY_MODE:
+        return False
+    return tier in _EXPENSIVE_TIERS
+
+
+def validate_with_retry(pytest_paths: list[str] | None = None) -> int:
+    """Run only the pytest-paths tier (skipping expensive tiers).
+
+    Convenience wrapper around :func:`validate` that forces retry mode
+    on for this call and short-circuits expensive tier invocations.
+    Returns the exit code from the targeted/pytest-paths invocation.
+    """
+    global RETRY_MODE
+    saved = RETRY_MODE
+    RETRY_MODE = True
+    try:
+        return validate(tier="targeted", pytest_paths=pytest_paths)
+    finally:
+        RETRY_MODE = saved
