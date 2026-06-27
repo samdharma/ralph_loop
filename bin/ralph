@@ -46,6 +46,7 @@ cmd_help() {
     echo "  generate-test-map  Auto-generate TEST_MAP.yaml from project structure"
     echo "  migrate [opts]     Migrate v3 state files to v3.1 layout (--dry-run supported)"
     echo "  trajectory <N>     Print the timeline of trajectory events for issue #N"
+    echo "  doctor [N]         Diagnose Ralph's runtime health (5 categories)"
     echo "  version            Show version"
     echo "  help               Show this help"
     echo ""
@@ -113,6 +114,10 @@ cmd_trajectory() {
     exec "${PYTHON_CMD}" "${CORE_DIR}/trajectory.py" "$@"
 }
 
+cmd_doctor() {
+    exec "${PYTHON_CMD}" "${CORE_DIR}/doctor.py" "$@"
+}
+
 # ─────────────────────────────────────────────────────────
 # Dispatch
 # ─────────────────────────────────────────────────────────
@@ -129,6 +134,7 @@ case "${1:-help}" in
     generate-test-map)         shift; cmd_generate_test_map "$@" ;;
     migrate)                   shift; cmd_migrate "$@" ;;
     trajectory)                shift; cmd_trajectory "$@" ;;
+    doctor)                    shift; cmd_doctor "$@" ;;
     *)
         echo "ralph: unknown command '${1}'"
         echo "Run 'ralph help' for usage."
