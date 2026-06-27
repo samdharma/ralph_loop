@@ -1888,6 +1888,56 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
             f"matches issue #{issue['number']}._"
         )
 
+    # A3.2: artifact-based handoff for IMPLEMENT sub-agent (Mode B).
+    # The IMPLEMENT agent reads its inputs from disk, not from session context.
+    if mode == "B":
+        artifact_dir = PROJECT_ROOT / ".ralph" / "issues" / str(issue["number"]) / "artifacts"
+        if not artifact_dir.is_dir():
+            # Per task A-021 acceptance criteria: fail fast, no silent fallback.
+            raise FileNotFoundError(
+                f"Artifact directory missing: {artifact_dir}. "
+                "The DESIGN stage must write artifacts before IMPLEMENT can run. "
+                "See docs/IMPROVEMENT_ROADMAP_SPEC.md §6.2."
+            )
+        design_artifact = artifact_dir / "design.md"
+        files_in_scope_artifact = artifact_dir / "files_in_scope.json"
+        acceptance_criteria_artifact = artifact_dir / "acceptance_criteria.json"
+        qa_tests_artifact = artifact_dir / "qa_tests_to_pass.json"
+
+        prompt += "\n\n## Implement Inputs (from DESIGN artifacts)\n"
+        prompt += (
+            f"\n_All inputs below are read from `.ralph/issues/"
+            f"{issue['number']}/artifacts/`. Per spec §6.2, this replaces "
+            f"the v3 `--continue` session-based handoff._\n"
+        )
+
+        if design_artifact.exists():
+            prompt += f"\n### Design\n\n{design_artifact.read_text(encoding='utf-8')}\n"
+
+        if files_in_scope_artifact.exists():
+            import json as _json
+
+            paths = _json.loads(files_in_scope_artifact.read_text(encoding="utf-8"))
+            prompt += "\n### Files In Scope (you may modify ONLY these)\n\n"
+            for p in paths:
+                prompt += f"- `{p}`\n"
+
+        if acceptance_criteria_artifact.exists():
+            import json as _json
+
+            acs = _json.loads(acceptance_criteria_artifact.read_text(encoding="utf-8"))
+            prompt += "\n### Acceptance Criteria\n\n"
+            for idx, ac in enumerate(acs, 1):
+                prompt += f"{idx}. **[{ac.get('id', 'AC')}]** {ac.get('criterion', '')}\n"
+
+        if qa_tests_artifact.exists():
+            import json as _json
+
+            qa = _json.loads(qa_tests_artifact.read_text(encoding="utf-8"))
+            prompt += "\n### QA Tests to Pass\n\n"
+            for t in qa:
+                prompt += f"- `{t}`\n"
+
     # Reference docs (all modes)
     ref_docs = _parse_reference_docs(body)
     if ref_docs:
