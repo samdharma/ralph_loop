@@ -198,3 +198,65 @@ class TestPytestExitCodeClassifier:
         """The returned Classification carries the original exit_code field."""
         result = validate.classify_pytest_exit_code(1)
         assert result.exit_code == 1
+
+
+# ─────────────────────────────────────────────────────────
+# A1.2 — Structured pytest result emitter (spec §10.1 A1)
+# ─────────────────────────────────────────────────────────
+
+
+class TestRunPytestInvocation:
+    """A1.2: run_pytest_invocation returns a structured dict per spec §10.1 A1.
+
+    Expected return keys:
+        - exit_code: int
+        - classification: str (one of success, test_failure, timeout, interrupted, internal_error, unknown)
+        - action: str (one of accept, retry_transient, block)
+        - stdout_tail: str (last 50 lines of pytest stdout)
+        - junitxml_path: str | None (path to JUnit XML, set when --junitxml is passed)
+    """
+
+    def _mock_subprocess(self, monkeypatch, returncode: int, stdout: str) -> None:
+        """Patch subprocess.run inside validate.run to a fake CompletedProcess."""
+        from unittest import mock
+
+        fake = mock.MagicMock()
+        fake.returncode = returncode
+        fake.stdout = stdout
+        fake.stderr = ""
+
+        # Patch the local `run` reference used inside validate.run_pytest_invocation.
+        monkeypatch.setattr(validate, "run", mock.MagicMock(return_value=fake))
+
+    def test_returns_dict_with_all_five_keys(self, monkeypatch) -> None:
+        """Return value is a dict with exit_code, classification, action, stdout_tail, junitxml_path."""
+        self._mock_subprocess(monkeypatch, returncode=0, stdout="1 passed")
+        result = validate.run_pytest_invocation(["pytest", "tests/"])
+        assert isinstance(result, dict)
+        for key in ("exit_code", "classification", "action", "stdout_tail", "junitxml_path"):
+            assert key in result, f"Missing key: {key}"
+
+    def test_classification_matches_classifier(self, monkeypatch) -> None:
+        """classification and action match classify_pytest_exit_code for the same exit code."""
+        self._mock_subprocess(monkeypatch, returncode=1, stdout="FAILED")
+        result = validate.run_pytest_invocation(["pytest", "tests/"])
+        expected = validate.classify_pytest_exit_code(1)
+        assert result["classification"] == expected.classification
+        assert result["action"] == expected.action
+
+    def test_stdout_tail_is_last_n_lines(self, monkeypatch) -> None:
+        """stdout_tail contains the last lines of pytest stdout."""
+        # 60 lines of stdout — tail should be 50.
+        big_stdout = "\n".join(f"line {i}" for i in range(60))
+        self._mock_subprocess(monkeypatch, returncode=0, stdout=big_stdout)
+        result = validate.run_pytest_invocation(["pytest", "tests/"])
+        tail_lines = result["stdout_tail"].splitlines()
+        assert len(tail_lines) == 50
+        assert tail_lines[-1] == "line 59"
+        assert tail_lines[0] == "line 10"
+
+    def test_junitxml_path_none_when_not_passed(self, monkeypatch) -> None:
+        """junitxml_path is None when --junitxml is not in the command."""
+        self._mock_subprocess(monkeypatch, returncode=0, stdout="")
+        result = validate.run_pytest_invocation(["pytest", "tests/"])
+        assert result["junitxml_path"] is None
