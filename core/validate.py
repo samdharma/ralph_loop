@@ -158,6 +158,37 @@ def detect_collisions(paths: list[str]) -> dict[str, list[str]]:
 
 
 # ─────────────────────────────────────────────────────────
+# A6.1 — Critical-path test config (spec §10.1 A6)
+# ─────────────────────────────────────────────────────────
+
+
+def get_critical_paths() -> list[str]:
+    """Return the list of critical-path tests from .ralph/config.toml.
+
+    Per spec §10.1 A6: critical paths are run first; their failure blocks
+    BUILD. The list is loaded from `[validate] critical_paths = [...]` in
+    the project's `.ralph/config.toml`. Returns an empty list if not set.
+
+    The result is computed at call time (not import time) so config
+    changes are picked up without restarting the daemon.
+    """
+    config = globals().get("_CONFIG") or _load_config()
+    return list(config.get("validate", {}).get("critical_paths", []) or [])
+
+
+def is_critical_run(force: bool = False) -> bool:
+    """Return True if the current validate run is in critical-path mode.
+
+    Per spec §10.1 A6: critical-path mode is active when either:
+    - `[validate] critical_paths` is non-empty in config, OR
+    - The `--critical` CLI flag is set (passed via `force=True`).
+    """
+    if force:
+        return True
+    return len(get_critical_paths()) > 0
+
+
+# ─────────────────────────────────────────────────────────
 # A1.1 — Pytest exit-code classifier (spec §10.1 A1)
 # ─────────────────────────────────────────────────────────
 
@@ -287,6 +318,18 @@ def run_pytest(tier: str, pytest_paths: list[str] | None = None) -> int:
     junitxml_path = os.environ.get("RALPH_JUNITXML")
     if junitxml_path:
         base.append(f"--junitxml={junitxml_path}")
+
+    # A6.1: if critical-path mode is active, run critical paths FIRST.
+    # A failure here short-circuits to a blocking exit code so BUILD stops.
+    if is_critical_run(force=os.environ.get("RALPH_CRITICAL") == "1"):
+        critical_paths = get_critical_paths()
+        if critical_paths:
+            print(f"[ralph] Running {len(critical_paths)} critical-path test(s) first")
+            crit_cmd = base + critical_paths + ["-q"]
+            crit_result = run(crit_cmd, check=False, env={"RALPH_NO_RECURSIVE_PYTEST": "1"})
+            if crit_result.returncode != 0:
+                print("[ralph] Critical-path test(s) failed; blocking BUILD.")
+                return crit_result.returncode
 
     if pytest_paths:
         paths = pytest_paths
@@ -517,11 +560,19 @@ def main() -> int:
         help="Emit JUnit XML report to PATH (spec §10.1 A4). Used by the "
         "engine to surface structured failures to the agent.",
     )
+    parser.add_argument(
+        "--critical",
+        action="store_true",
+        help="Run critical-path tests first (per [validate] critical_paths "
+        "in .ralph/config.toml or this flag). Failure blocks BUILD.",
+    )
     args = parser.parse_args()
 
     # Also support --tier=value from the old bash CLI style
     if args.junitxml:
         os.environ["RALPH_JUNITXML"] = args.junitxml
+    if args.critical:
+        os.environ["RALPH_CRITICAL"] = "1"
     return validate(args.tier, pytest_paths=args.pytest_paths)
 
 

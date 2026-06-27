@@ -387,8 +387,9 @@ class TestCriticalPaths:
 
     def test_critical_paths_loaded_from_config(self, tmp_path, monkeypatch) -> None:
         """Non-empty critical_paths from config are loaded correctly."""
-        self._write_config(tmp_path, ["tests/unit/core/test_smoke.py::test_x"])
+        config_path = self._write_config(tmp_path, ["tests/unit/core/test_smoke.py::test_x"])
         monkeypatch.setattr(validate, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(validate, "CONFIG_FILE", config_path)
         new_config = validate._load_config()  # type: ignore[attr-defined]
         monkeypatch.setattr(validate, "_CONFIG", new_config)
         paths = validate.get_critical_paths()
