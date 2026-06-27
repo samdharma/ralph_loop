@@ -188,6 +188,96 @@ class TestAssembleImplementPrompt:
 # ─────────────────────────────────────────────────────────
 
 
+class TestInvokeAgentNoContinue:
+    """A3.3: invoke_agent never passes --continue or --session (artifact-based handoff).
+
+    The current v3 implementation adds --continue when callers pass
+    continue_session=True. After A3.3, that flag is ignored — neither
+    --continue nor --session ever appear in the command line.
+    """
+
+    def _capture_invocation(self, monkeypatch, agent_bin: str, **invoke_kwargs) -> list[str]:
+        """Patch subprocess and capture the assembled command."""
+        captured: dict[str, list[str]] = {}
+
+        def fake_run(cmd, *args, **kwargs):
+            captured["cmd"] = list(cmd)
+            fake_proc = mock.MagicMock()
+            fake_proc.returncode = 0
+            fake_proc.stdout = ""
+            fake_proc.stderr = ""
+            return fake_proc
+
+        monkeypatch.setattr(engine, "_resolve_agent_binary", lambda: agent_bin)
+        monkeypatch.setattr(engine, "run", fake_run)
+        engine.invoke_agent("do something", 1, **invoke_kwargs)
+        return captured.get("cmd", [])
+
+    def test_pi_invocation_has_no_continue_flag(self, monkeypatch) -> None:
+        """invoke_agent with binary='pi' does not include --continue (even when continue_session=True)."""
+        captured_cmd = self._capture_invocation(
+            monkeypatch, agent_bin="pi", continue_session=True
+        )
+        assert "--continue" not in captured_cmd
+
+    def test_kimi_invocation_has_no_continue_flag(self, monkeypatch) -> None:
+        """invoke_agent with binary='kimi' does not include --continue."""
+        captured_cmd = self._capture_invocation(
+            monkeypatch, agent_bin="kimi", continue_session=True
+        )
+        assert "--continue" not in captured_cmd
+
+    def test_no_session_flag_passed(self, monkeypatch) -> None:
+        """Neither pi nor kimi invocation passes --session <path> (even when session_file is provided)."""
+        import tempfile
+
+        with tempfile.NamedTemporaryFile(suffix=".session") as tf:
+            captured_cmd = self._capture_invocation(
+                monkeypatch, agent_bin="pi", session_file=Path(tf.name)
+            )
+            assert "--session" not in captured_cmd
+
+    def test_pi_and_kimi_code_paths_are_identical(self, monkeypatch) -> None:
+        """Per spec §10.1 A3, kimi and pi use the same invocation path (no kimi-specific workaround)."""
+        captured: dict[str, list[str]] = {}
+
+        def make_fake_run(key: str):
+            def fake_run(cmd, *args, **kwargs):
+                captured[key] = list(cmd)
+                fake_proc = mock.MagicMock()
+                fake_proc.returncode = 0
+                fake_proc.stdout = ""
+                fake_proc.stderr = ""
+                return fake_proc
+            return fake_run
+
+        # Capture pi invocation
+        monkeypatch.setattr(engine, "_resolve_agent_binary", lambda: "pi")
+        monkeypatch.setattr(engine, "run", make_fake_run("pi"))
+        engine.invoke_agent("do something", 1, continue_session=True)
+        pi_cmd = captured["pi"]
+
+        # Capture kimi invocation
+        monkeypatch.setattr(engine, "_resolve_agent_binary", lambda: "kimi")
+        monkeypatch.setattr(engine, "run", make_fake_run("kimi"))
+        engine.invoke_agent("do something", 1, continue_session=True)
+        kimi_cmd = captured["kimi"]
+
+        # Both commands end with the prompt
+        assert pi_cmd[-1] == "do something"
+        assert kimi_cmd[-1] == "do something"
+        # Neither contains --continue or --session
+        assert "--continue" not in pi_cmd
+        assert "--continue" not in kimi_cmd
+        assert "--session" not in pi_cmd
+        assert "--session" not in kimi_cmd
+
+
+# ─────────────────────────────────────────────────────────
+# A2.2 — _detect_tampered_tests reclassification (spec §10.1 A2)
+# ─────────────────────────────────────────────────────────
+
+
 class TestDetectTamperedTests:
     """A2.2: _detect_tampered_tests is now a sanity check, not a warning.
 
