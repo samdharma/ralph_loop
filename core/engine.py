@@ -2688,7 +2688,16 @@ def run_loop(auto_close: bool = False, single_issue: Optional[int] = None):
 # ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
+    # Subcommand dispatch (per plan §1.1 A-prelude): `python -m core.engine migrate`
+    # delegates to `core.migrate.main`. The default subcommand (no argv[1] or
+    # unknown subcommand) is the existing daemon entry point.
     import argparse
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "migrate":
+        from core.migrate import main as migrate_main
+
+        sys.exit(migrate_main(sys.argv[2:]))
 
     parser = argparse.ArgumentParser(description="Ralph v3 Daemon")
     parser.add_argument(
