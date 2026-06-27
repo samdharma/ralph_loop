@@ -710,85 +710,12 @@ def _parse_depends_on(body: str) -> list[int]:
 # ─────────────────────────────────────────────────────────
 # Item 4: Label Management
 # ─────────────────────────────────────────────────────────
-
-
-def transition_label(
-    issue_num: int,
-    add: str,
-    remove: Optional[str] = None,
-    retries: int = 3,
-    backoff: float = 2.0,
-    run_id: Optional[str] = None,
-):
-    """Update issue labels via `gh issue edit`. Retries on transient failures.
-
-    When ``run_id`` is provided the call is wrapped in an idempotency
-    check via :class:`GitHubClient`. The (run_id, action, issue_num,
-    label-pair-hash) tuple is recorded to ``.ralph/issues/<N>/idempotency.jsonl``
-    BEFORE invoking ``gh``. Subsequent calls with the same tuple
-    short-circuit and return without invoking ``gh``.
-
-    Per spec §10.2 B2 this is what makes the engine crash-restart
-    safe — a daemon SIGKILL followed by a restart must not
-    double-transition labels.
-    """
-    if run_id is not None:
-        gh_client = _build_github_client(run_id)
-        ok = gh_client.transition_label(
-            issue_num, [add] if add else [], [remove] if remove else []
-        )
-        if ok:
-            print(
-                f"[ralph] #{issue_num} labels: +{add}"
-                + (f" / -{remove}" if remove else "")
-            )
-            sync_status(issue_num, add)
-            _emit_trajectory(
-                issue_num,
-                run_id,
-                "label_transition",
-                added=[add] if add else [],
-                removed=[remove] if remove else [],
-            )
-        return
-
-    cmd = ["issue", "edit", str(issue_num), "--add-label", add]
-    if remove:
-        cmd += ["--remove-label", remove]
-
-    last_error = None
-    for attempt in range(1, retries + 1):
-        try:
-            gh(*cmd)
-            action = f"+{add}"
-            if remove:
-                action += f" / -{remove}"
-            print(f"[ralph] #{issue_num} labels: {action}")
-            # Mirror the new label to the GitHub Project board column.
-            sync_status(issue_num, add)
-            _emit_trajectory(
-                issue_num,
-                run_id,
-                "label_transition",
-                added=[add] if add else [],
-                removed=[remove] if remove else [],
-            )
-            return
-        except subprocess.CalledProcessError as e:
-            last_error = e
-            if attempt < retries:
-                wait = backoff**attempt
-                print(
-                    f"[ralph] Label transition failed (attempt {attempt}/{retries}), "
-                    f"retrying in {wait:.0f}s..."
-                )
-                _check_interrupt()
-                time.sleep(wait)
-    # All retries exhausted
-    if last_error is None:
-        raise RuntimeError("transition_label exhausted retries with no error")
-    raise last_error
-
+# transition_label lives at core.pipeline.github.labels (per
+# spec §6.1, §10.3 C1). It is re-imported here so existing
+# callers that ``from core.engine import transition_label``
+# continue to work. New code should import directly from
+# core.pipeline.github.labels.
+from core.pipeline.github.labels import transition_label  # noqa: E402,F401
 
 # ─────────────────────────────────────────────────────────
 # Item 3: Single-Stage Pipeline
