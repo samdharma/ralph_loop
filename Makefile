@@ -28,7 +28,7 @@ else
 INSTALL_PREFIX := $(HOME)/.local
 endif
 
-.PHONY: help install test test-unit test-integration lint format validate version-show version-bump clean
+.PHONY: help install test test-unit test-integration lint format validate version-show version-bump release clean
 
 help:  ## Show this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -88,6 +88,13 @@ version-show:  ## Print current version.
 version-bump:  ## Bump version. Usage: make version-bump PART=minor
 	@if [[ -z "$(PART)" ]]; then echo "Usage: make version-bump PART=<major|minor|patch>"; exit 1; fi
 	@$(PYTHON) scripts/version_bump.py $(PART)
+
+release:  ## Tag + push + gh release create. Usage: make release PART=patch
+	@if [[ -z "$(PART)" ]]; then echo "Usage: make release PART=<major|minor|patch>"; exit 1; fi
+	@$(PYTHON) scripts/version_bump.py $(PART)
+	@NEW_VERSION=$$(grep '^version = ' pyproject.toml | head -1 | sed 's/version = "\(.*\)"/\1/'); \
+	echo "==> Tagging ralph-v$$NEW_VERSION..."; \
+	./scripts/release.sh "$$NEW_VERSION"
 
 # ─────────────────────────────────────────────────────────
 # Misc
