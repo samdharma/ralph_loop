@@ -1014,3 +1014,77 @@ def test_run_loop_creates_project_issue_when_all_agents_exhausted():
         engine.run_loop()
 
     mock_create.assert_called_once()
+
+
+# ─────────────────────────────────────────────────────────
+# B2.3 — Idempotent wrappers for gh() and git() (spec §10.2 B2)
+# ─────────────────────────────────────────────────────────
+
+
+class TestIdempotentWrappers:
+    """B2.3: transition_label and gh_comment are idempotent when run_id is passed.
+
+    The engine's existing call sites for label transitions and comments
+    are wrapped to consult .ralph/issues/<N>/idempotency.jsonl. When
+    the same (run_id, action, target, body) tuple has already executed,
+    the wrapper short-circuits and does NOT invoke gh a second time.
+
+    Per spec §10.2 B2: idempotency survives daemon SIGKILL because the
+    log is persisted before invoking gh.
+    """
+
+    def test_transition_label_invokes_gh_once(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """transition_label with run_id invokes gh exactly once."""
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+
+        with mock.patch.object(engine, "gh") as run_gh:
+            engine.transition_label(
+                1, "status:design", "status:ready", run_id="X"
+            )
+
+        assert run_gh.call_count == 1
+
+    def test_transition_label_repeated_with_same_run_id_no_double_invoke(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Two transition_label calls with the same run_id invoke gh once."""
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+
+        with mock.patch.object(engine, "gh") as run_gh:
+            engine.transition_label(
+                1, "status:design", "status:ready", run_id="X"
+            )
+            engine.transition_label(
+                1, "status:design", "status:ready", run_id="X"
+            )
+
+        assert run_gh.call_count == 1
+
+    def test_gh_comment_repeated_with_same_run_id_no_double_invoke(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Two gh_comment calls with the same run_id + body invoke gh once."""
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+
+        with mock.patch.object(engine, "gh") as run_gh:
+            engine.gh_comment(1, "hello", run_id="X")
+            engine.gh_comment(1, "hello", run_id="X")
+
+        assert run_gh.call_count == 1
+
+    def test_idempotency_log_file_is_created(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """After a wrapped action, .ralph/issues/<N>/idempotency.jsonl exists."""
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+
+        with mock.patch.object(engine, "gh") as run_gh:
+            engine.transition_label(
+                1, "status:design", "status:ready", run_id="X"
+            )
+
+        log = tmp_path / ".ralph" / "issues" / "1" / "idempotency.jsonl"
+        assert log.exists()
+        assert log.stat().st_size > 0
