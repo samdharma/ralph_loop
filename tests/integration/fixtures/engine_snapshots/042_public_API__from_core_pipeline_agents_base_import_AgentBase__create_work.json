@@ -4,8 +4,8 @@
     "-c",
     "from core.pipeline.agents.base import AgentBase, create_worktree, remove_worktree; print('ok')"
   ],
-  "exit_code": 1,
-  "stdout_pattern": "",
-  "stderr_pattern": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    from core.pipeline.agents.base import AgentBase, create_worktree, remove_worktree; print('ok')\n    ^^^^^^^^^^^^^^^^^^^^^^^",
+  "exit_code": 0,
+  "stdout_pattern": "ok\n",
+  "stderr_pattern": "",
   "description": "public API: from core.pipeline.agents.base import AgentBase, create_work"
 }

@@ -35,6 +35,7 @@ import os
 import shutil
 import subprocess
 import sys
+from abc import ABC, abstractmethod
 from pathlib import Path
 
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
@@ -225,9 +226,33 @@ def remove_worktree(path: Path) -> None:
 
 
 __all__ = [
+    "AgentBase",
     "create_worktree",
     "remove_worktree",
     "PROJECT_ROOT",
     "_enforce_readonly_src",
     "_cleanup_readonly_src",
 ]
+
+
+# ─────────────────────────────────────────────────────────
+# C1.5a — AgentBase abstract class (per spec §6.1)
+# ─────────────────────────────────────────────────────────
+
+
+class AgentBase(ABC):
+    """Abstract base for agent wrappers.
+
+    Concrete subclasses (``PiAgent``, ``KimiAgent``) implement
+    ``invoke()`` to delegate to the engine's agent-invocation
+    machinery. Per spec §6.1, this is the type contract for the
+    agents/ subpackage; concrete implementations live in pi.py and
+    kimi.py respectively.
+    """
+
+    name: str = ""  # subclass sets; e.g. "pi" or "kimi"
+
+    @abstractmethod
+    def invoke(self, *args, **kwargs):
+        """Invoke the agent. Subclasses implement this."""
+        raise NotImplementedError
