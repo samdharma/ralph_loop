@@ -2221,16 +2221,19 @@ def invoke_agent(
     """
     Invoke the AI agent (pi or kimi) with the assembled prompt.
 
+    Per spec §10.1 A3 (R1) and plan §3 R-1: --continue and --session are NO LONGER
+    used. The session_file and continue_session parameters are kept as no-ops for
+    API compatibility with existing callers; both pi and kimi use the same
+    invocation path now. The IMPLEMENT sub-agent reads its inputs from the
+    artifact directory (`.ralph/issues/<N>/artifacts/`) instead of inheriting
+    session context.
+
     Args:
         prompt: The assembled prompt text.
         issue_num: GitHub issue number (for logging).
-        session_file: If set, save/use this session identifier.
-            pi: path to a session file created/continued by pi.
-            kimi: path to a text file containing the Kimi session UUID.
-        continue_session: If True, inherit prior session context (Mode B).
-            pi: uses --continue --session <file>.
-            kimi: reads the stored session UUID from session_file and passes
-                  --session <id> to resume DESIGN context explicitly.
+        session_file: Deprecated. Ignored. (Was the path to a session file
+            for pi; a text file containing a Kimi session UUID for kimi.)
+        continue_session: Deprecated. Ignored. (Was the Mode B flag.)
 
     Returns True if agent exits successfully.
     """
@@ -2243,56 +2246,26 @@ def invoke_agent(
         )
         return False
 
-    mode_str = " (continue)" if continue_session else ""
-    print(f"[ralph] Invoking {agent_bin} for #{issue_num}{mode_str}...")
+    print(f"[ralph] Invoking {agent_bin} for #{issue_num} (artifact-based handoff)...")
     log_metrics(
         "agent_invoke",
         issue=str(issue_num),
         agent=agent_bin,
-        continue_session=continue_session,
+        # No continue_session flag — always artifact-based per spec §10.1 A3.
     )
 
     try:
+        # Unified invocation path for pi and kimi. The only differences are
+        # the non-interactive flag (--print for pi, --prompt for kimi). The
+        # artifact directory carries the inputs between stages; session
+        # continuation is no longer used.
         if agent_bin == "pi":
             cmd = [agent_bin, "--print", "--no-skills"]
             if _PI_FLAGS:
                 cmd.extend(_PI_FLAGS)
-            if session_file:
-                cmd += ["--session", str(session_file)]
-            if continue_session:
-                cmd += ["--continue"]
             cmd.append(prompt)
         elif agent_bin == "kimi":
-            # kimi uses --prompt for non-interactive prompt mode (pi uses --print).
-            # --prompt mode already runs under the auto permission policy, so no -y/--yolo
-            # flag is needed (and kimi 0.16+ rejects combining --prompt with --yolo).
-            # Mode B must resume the DESIGN session explicitly. kimi --continue would
-            # resume the most recent session for the working directory, which after TEST
-            # is the TEST session, not DESIGN. We save the DESIGN session UUID after
-            # DESIGN completes and pass it via --session for IMPLEMENT.
-            if continue_session:
-                if not session_file:
-                    print(
-                        "[ralph] ERROR: kimi Mode B requires a session_file to resume DESIGN context."
-                    )
-                    return False
-                if not session_file.exists():
-                    print(
-                        f"[ralph] ERROR: No saved Kimi session to continue for #{issue_num}."
-                    )
-                    return False
-                design_session_id = session_file.read_text(encoding="utf-8").strip()
-                if not design_session_id:
-                    print(
-                        f"[ralph] ERROR: Saved Kimi session ID is empty for #{issue_num}."
-                    )
-                    return False
-                print(
-                    f"[ralph] Resuming Kimi session {design_session_id} for #{issue_num}..."
-                )
-                cmd = [agent_bin, "--prompt", prompt, "--session", design_session_id]
-            else:
-                cmd = [agent_bin, "--prompt", prompt]
+            cmd = [agent_bin, "--prompt", prompt]
         else:
             print(f"[ralph] ERROR: Unknown agent '{agent_bin}'")
             return False
