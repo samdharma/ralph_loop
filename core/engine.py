@@ -913,46 +913,14 @@ def run_pipeline(
 # ─────────────────────────────────────────────────────────
 
 
-def run_design_stage(issue: dict) -> bool:
-    """STAGE 1: Architect persona — reads issue + codebase, writes design spec.
-    Saves session file for Mode B sub-agent context inheritance."""
-    issue_num = issue["number"]
-    print(f"\n[ralph] STAGE 1/3: DESIGN for #{issue_num}")
-    gh_comment(issue_num, "🎨 DESIGN stage started.")
-    log_metrics("stage_start", issue=str(issue_num), stage="design")
-
-    # Create the per-issue design spec placeholder BEFORE the agent runs,
-    # so the agent sees the file exists and has a path to write to.
-    design_file = _design_spec_path(issue_num)
-    design_file.parent.mkdir(parents=True, exist_ok=True)
-    if not design_file.exists():
-        design_file.write_text(
-            f"# Design Spec: #{issue_num} <title>\n\n"
-            f"<!-- Engine-created placeholder. "
-            f"The DESIGN agent will overwrite this file. -->\n",
-            encoding="utf-8",
-        )
-        print(f"[ralph] Created placeholder {design_file}")
-
-    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
-    prompt = assemble_stage_prompt(issue, "design.md")
-    success = invoke_agent(prompt, issue_num, session_file=session_file)
-
-    if success:
-        if not design_file.exists():
-            print(f"[ralph] WARNING: DESIGN agent did not create {design_file}.")
-        else:
-            content = design_file.read_text(encoding="utf-8")
-            if "<!-- Engine-created placeholder" in content:
-                print(
-                    f"[ralph] WARNING: DESIGN agent left placeholder {design_file} "
-                    f"untouched. Design may not have been written."
-                )
-            else:
-                print(f"[ralph] Design spec written to {design_file}")
-
-    log_metrics("stage_complete", issue=str(issue_num), stage="design")
-    return success
+# ─────────────────────────────────────────────────────────
+# C1 step 10 — stages/design.py re-exports (per plan §1.1 C1)
+# ─────────────────────────────────────────────────────────
+# run_design_stage lives at core.pipeline.stages.design (per spec
+# §6.1, §10.3 C1). It is re-imported here so existing callers that
+# ``from core.engine import run_design_stage`` continue to work.
+# New code should import directly from core.pipeline.stages.design.
+from core.pipeline.stages.design import run_design_stage  # noqa: E402,F401
 
 
 def run_build_stage(issue: dict) -> bool:
