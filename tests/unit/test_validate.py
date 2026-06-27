@@ -1065,3 +1065,71 @@ class TestQuarantineIssuePost:
             failure_timestamps=["2026-06-27T10:00:00Z"],
         )
         assert result is None
+
+
+# ─────────────────────────────────────────────────────────
+# C4.1 — ralph validate --retry flag (spec §10.3 C4)
+# ─────────────────────────────────────────────────────────
+
+
+class TestRetryFlag:
+    """C4.1: ``--retry`` flag runs only pytest-paths tier; skips
+    integration/full/e2e.
+
+    Per spec §10.3 C4: ``ralph validate --retry`` runs only the
+    pytest-paths tier; integration/full/e2e tiers are skipped. The
+    flag is wired into BUILD's retry path (per B1.3) so retry
+    attempts on ``retry_l2`` use this flag.
+
+    This block is RED: ``should_skip_expensive_tiers`` /
+    ``is_retry_run`` / ``RETRY_MODE`` do not yet exist on
+    ``core.validate``.
+    """
+
+    def test_retry_flag_skips_expensive_tiers(self, monkeypatch) -> None:
+        """When --retry is in effect, expensive tiers (integration/full/e2e) are skipped."""
+        from core import validate
+
+        monkeypatch.setattr(validate, "RETRY_MODE", True)
+        assert validate.is_retry_run() is True
+        assert validate.should_skip_expensive_tiers("integration") is True
+        assert validate.should_skip_expensive_tiers("full") is True
+        assert validate.should_skip_expensive_tiers("e2e") is True
+        # Pytest-paths tier is NOT skipped.
+        assert validate.should_skip_expensive_tiers("targeted") is False
+        assert validate.should_skip_expensive_tiers("unit") is False
+
+    def test_default_runs_all_tiers(self, monkeypatch) -> None:
+        """Without --retry, all tiers run as before."""
+        from core import validate
+
+        monkeypatch.setattr(validate, "RETRY_MODE", False)
+        assert validate.is_retry_run() is False
+        for tier in ("targeted", "unit", "integration", "full", "e2e"):
+            assert validate.should_skip_expensive_tiers(tier) is False
+
+    def test_retry_exits_zero_on_pytest_path_only(self, tmp_path, monkeypatch) -> None:
+        """--retry exits 0 on pytest-path-only success even if integration tests would fail."""
+        from core import validate
+
+        monkeypatch.setattr(validate, "RETRY_MODE", True)
+        monkeypatch.setattr(validate, "PROJECT_ROOT", tmp_path)
+
+        # Mock run_pytest_invocation to succeed for pytest-path mode.
+        def fake_invocation(cmd, env=None):
+            return {
+                "exit_code": 0,
+                "classification": "success",
+                "action": "accept",
+                "stdout_tail": "",
+                "junitxml_path": None,
+            }
+
+        monkeypatch.setattr(validate, "run_pytest_invocation", fake_invocation)
+
+        # Validate with --retry and a pytest_path. Should NOT call
+        # run_pytest_invocation for non-pytest-path tiers.
+        exit_code = validate.validate_with_retry(
+            pytest_paths=["tests/unit/test_smoke.py"]
+        )
+        assert exit_code == 0
