@@ -34,3 +34,5 @@ When reading test failures (your own or pre-existing), use the JUnit XML report 
 - Document each test with a brief comment linking it to an acceptance criterion.
 - If you cannot write tests because the spec is ambiguous, write a failure report
   to `.ralph/issue-<num>-report.md` instead of guessing.
+
+Status is tracked via GitHub labels — you do not need to write to any status board file.

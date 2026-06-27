@@ -41,3 +41,5 @@ When reading test failures (if you run pytest for any reason), use the JUnit XML
 - Do NOT modify code, labels, or issues.
 - Treat tests added after the TEST stage with suspicion.
 - If any acceptance criterion fails, the overall result is FAIL.
+
+Status is tracked via GitHub labels — you do not need to write to any status board file.

@@ -40,3 +40,5 @@ When reading test failures (your own or pre-existing), use the JUnit XML report 
 - The QA tests are the verification truth.
 - If `ralph validate` fails, you MUST fix the issues before considering work done.
   Do NOT exit with a success code if validation fails.
+
+Status is tracked via GitHub labels — you do not need to write to any status board file.
