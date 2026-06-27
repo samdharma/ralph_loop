@@ -18,6 +18,7 @@ import signal
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -322,6 +323,68 @@ def _build_github_client(run_id: str):
     # so the idempotency log lands under the correct .ralph/ tree.
     _gh_client_mod.PROJECT_ROOT = PROJECT_ROOT
     return GitHubClient(run_id)
+
+
+# Per spec §7.2 — frozen dataclass for retry budget.
+@dataclass(frozen=True)
+class RetryBudget:
+    """Per-stage retry budget read from ``.ralph/config.toml [retry]``.
+
+    Per spec §10.2 B1 the engine consults this budget at each retry
+    decision. ``l1_max_attempts`` covers transient failures
+    (timeout/interrupted); ``l2_max_attempts`` covers test failures.
+    """
+
+    l1_max_attempts: int
+    l2_max_attempts: int
+
+
+# Per spec §10.2 B1 — defaults from plan §3 R-6 mitigation.
+_DEFAULT_RETRY_BUDGET = RetryBudget(l1_max_attempts=1, l2_max_attempts=2)
+
+
+def load_retry_config() -> RetryBudget:
+    """Load the retry budget from ``.ralph/config.toml [retry]``.
+
+    Per spec §10.2 B1 + plan §3 R-6:
+      - missing [retry] section → defaults (l1=1, l2=2)
+      - explicit values override defaults
+      - invalid (negative) values → defaults + WARNING
+
+    The config file is the engine's ``PROJECT_ROOT/.ralph/config.toml``;
+    it is read once per daemon startup. Pure function: tests can
+    monkeypatch ``engine.PROJECT_ROOT`` and re-call freely.
+    """
+    config_path = PROJECT_ROOT / ".ralph" / "config.toml"
+    if not config_path.exists():
+        return _DEFAULT_RETRY_BUDGET
+    try:
+        import tomllib  # type: ignore
+
+        with open(config_path, "rb") as f:
+            data = tomllib.load(f)
+    except Exception:
+        return _DEFAULT_RETRY_BUDGET
+
+    retry_cfg = data.get("retry", {}) or {}
+    l1 = retry_cfg.get("l1_max_attempts", _DEFAULT_RETRY_BUDGET.l1_max_attempts)
+    l2 = retry_cfg.get("l2_max_attempts", _DEFAULT_RETRY_BUDGET.l2_max_attempts)
+
+    # Per plan §3 R-6: invalid (negative) values fall back to defaults
+    # with a WARNING log. We don't raise because the engine must keep
+    # running even with a malformed config.
+    if not isinstance(l1, int) or l1 < 0:
+        print(
+            f"[ralph] WARNING: invalid [retry].l1_max_attempts={l1!r}; " "using default"
+        )
+        l1 = _DEFAULT_RETRY_BUDGET.l1_max_attempts
+    if not isinstance(l2, int) or l2 < 0:
+        print(
+            f"[ralph] WARNING: invalid [retry].l2_max_attempts={l2!r}; " "using default"
+        )
+        l2 = _DEFAULT_RETRY_BUDGET.l2_max_attempts
+
+    return RetryBudget(l1_max_attempts=l1, l2_max_attempts=l2)
 
 
 # ─────────────────────────────────────────────────────────
