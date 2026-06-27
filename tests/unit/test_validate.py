@@ -447,3 +447,70 @@ class TestCriticalPaths:
         monkeypatch.setattr(validate, "_CONFIG", {})
         is_critical = validate.is_critical_run(force=True)
         assert is_critical is True
+
+
+# ─────────────────────────────────────────────────────────
+# B1.2 — Retry classifier (spec §10.2 B1)
+# ─────────────────────────────────────────────────────────
+
+
+class TestRetryClassifier:
+    """B1.2: classify_pytest_exit_code's `action` drives retry-vs-block.
+
+    Per spec §10.2 B1:
+      - exit 124 (timeout)        → retry_transient (up to 1 retry)
+      - exit 1   (test failure)   → retry_l2 (up to 2 retries)
+      - exit 0   (success)        → accept
+      - DESIGN-stage failures     → block regardless of exit code
+
+    The retry classifier extends the existing Phase A1.1 classifier
+    with new action values: retry_l2 for test failures, and a stage-
+    aware block for DESIGN stage.
+    """
+
+    def test_exit_124_is_retry_transient(self) -> None:
+        """Exit 124 (timeout) maps to action=retry_transient."""
+        from core.validate import classify_pytest_exit_code
+
+        result = classify_pytest_exit_code(124)
+        assert result.action == "retry_transient"
+
+    def test_exit_1_is_retry_l2(self) -> None:
+        """Exit 1 (test failure) maps to action=retry_l2."""
+        from core.validate import classify_pytest_exit_code
+
+        result = classify_pytest_exit_code(1)
+        assert result.action == "retry_l2"
+
+    def test_exit_0_is_accept(self) -> None:
+        """Exit 0 (success) maps to action=accept."""
+        from core.validate import classify_pytest_exit_code
+
+        result = classify_pytest_exit_code(0)
+        assert result.action == "accept"
+
+    def test_design_stage_failure_blocks(self) -> None:
+        """Per spec §10.2 B1, DESIGN-stage failures block regardless of exit code.
+
+        A wrapper function (or post-classifier branch) maps the stage
+        context: when stage == 'design', the final action is 'block'
+        even if the classifier alone would suggest retry.
+        """
+        from core.validate import classify_pytest_exit_code, retry_action_for_stage
+
+        # Exit 1 alone would suggest retry_l2; in DESIGN stage it blocks.
+        classified = classify_pytest_exit_code(1)
+        final_action = retry_action_for_stage(classified.action, stage="design")
+        assert final_action == "block"
+
+    def test_retry_policy_dataclass_exists(self) -> None:
+        """Per spec §7.2 RetryPolicy is a frozen dataclass with max_attempts/backoff_seconds/applies_to."""
+        from core.validate import RetryPolicy
+
+        policy = RetryPolicy(
+            max_attempts=2,
+            backoff_seconds=0.0,
+            applies_to=frozenset({1}),
+        )
+        assert policy.max_attempts == 2
+        assert policy.applies_to == frozenset({1})
