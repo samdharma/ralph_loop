@@ -530,3 +530,166 @@ class TestRetryClassifier:
         )
         assert policy.max_attempts == 2
         assert policy.applies_to == frozenset({1})
+
+
+# ─────────────────────────────────────────────────────────
+# C3.1 — Quarantine schema (spec §10.3 C3)
+# ─────────────────────────────────────────────────────────
+
+
+class TestQuarantineSchema:
+    """C3.1: tests/quarantine.yaml schema and deselection.
+
+    Per spec §10.3 C3 and plan §3 R-7: quarantine entries follow the
+    schema ``{test_id, added_at, reason, auto_added}``. The validate
+    layer deselects listed tests via pytest's ``--deselect`` flag or
+    by passing deselected IDs into the invocation. Auto-added entries
+    (C3.2) include ``auto_added: true``.
+
+    This block is RED: the ``load_quarantine_entries`` /
+    ``is_quarantined`` / ``apply_quarantine_to_cmd`` functions don't
+    exist yet. Running this test file before C-002 must produce
+    ImportError failures for every TestQuarantineSchema test.
+    """
+
+    def _write_quarantine_yaml(
+        self, tmp_path: Path, entries: list[dict]
+    ) -> Path:
+        """Write a tests/quarantine.yaml with the given entries. Returns path.
+
+        Writes the constrained YAML format produced by the implementation
+        itself (and by ``--unquarantine-stale``). Format:
+            - test_id: <id>
+              added_at: <iso8601>
+              reason: <str>
+              auto_added: <bool>
+        """
+        lines: list[str] = []
+        for e in entries:
+            lines.append(f"- test_id: {e['test_id']}")
+            lines.append(f"  added_at: \"{e['added_at']}\"")
+            # Quote the reason if it contains characters that would break parsing.
+            reason = str(e["reason"])
+            if any(c in reason for c in [":", "#", "\n"]):
+                lines.append(f"  reason: \"{reason}\"")
+            else:
+                lines.append(f"  reason: {reason}")
+            lines.append(f"  auto_added: {'true' if e['auto_added'] else 'false'}")
+            lines.append("")
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir(parents=True, exist_ok=True)
+        path = tests_dir / "quarantine.yaml"
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
+
+    def test_empty_quarantine_yaml_runs_all_tests(self, tmp_path, monkeypatch) -> None:
+        """An empty tests/quarantine.yaml → no tests are deselected."""
+        from core import validate
+
+        path = self._write_quarantine_yaml(tmp_path, [])
+        monkeypatch.setattr(validate, "QUARANTINE_FILE", path)
+
+        entries = validate.load_quarantine_entries()
+        assert entries == []
+
+        # is_quarantined returns False for any test_id when there are no entries.
+        assert validate.is_quarantined("tests/unit/x.py::test_y") is False
+
+    def test_single_entry_deselects_listed_test(self, tmp_path, monkeypatch) -> None:
+        """A quarantine entry causes that test to be deselected from pytest invocation."""
+        from core import validate
+
+        entry = {
+            "test_id": "tests/unit/x.py::test_y",
+            "added_at": "2026-06-27T12:00:00Z",
+            "reason": "flaky in CI",
+            "auto_added": False,
+        }
+        path = self._write_quarantine_yaml(tmp_path, [entry])
+        monkeypatch.setattr(validate, "QUARANTINE_FILE", path)
+
+        entries = validate.load_quarantine_entries()
+        assert len(entries) == 1
+        assert entries[0]["test_id"] == "tests/unit/x.py::test_y"
+        assert validate.is_quarantined("tests/unit/x.py::test_y") is True
+        assert validate.is_quarantined("tests/unit/x.py::test_other") is False
+
+    def test_multiple_entries_all_deselected(self, tmp_path, monkeypatch) -> None:
+        """Multiple entries → all listed tests are deselected; non-listed are not."""
+        from core import validate
+
+        entries = [
+            {
+                "test_id": "tests/unit/a.py::test_one",
+                "added_at": "2026-06-27T12:00:00Z",
+                "reason": "flaky 1",
+                "auto_added": False,
+            },
+            {
+                "test_id": "tests/unit/b.py::test_two",
+                "added_at": "2026-06-27T12:01:00Z",
+                "reason": "flaky 2",
+                "auto_added": True,
+            },
+            {
+                "test_id": "tests/integration/c.py::test_three",
+                "added_at": "2026-06-27T12:02:00Z",
+                "reason": "flaky 3",
+                "auto_added": False,
+            },
+        ]
+        path = self._write_quarantine_yaml(tmp_path, entries)
+        monkeypatch.setattr(validate, "QUARANTINE_FILE", path)
+
+        loaded = validate.load_quarantine_entries()
+        assert len(loaded) == 3
+
+        for e in entries:
+            assert validate.is_quarantined(e["test_id"]) is True
+
+        # Unrelated test_id is NOT deselected.
+        assert validate.is_quarantined("tests/unit/d.py::test_four") is False
+
+    def test_auto_added_flag_preserved_in_schema(self, tmp_path, monkeypatch) -> None:
+        """The ``auto_added: True`` flag is preserved through read cycles."""
+        from core import validate
+
+        entries = [
+            {
+                "test_id": "tests/unit/x.py::test_y",
+                "added_at": "2026-06-27T12:00:00Z",
+                "reason": "two consecutive failures",
+                "auto_added": True,
+            },
+            {
+                "test_id": "tests/unit/a.py::test_b",
+                "added_at": "2026-06-27T12:01:00Z",
+                "reason": "manually marked",
+                "auto_added": False,
+            },
+        ]
+        path = self._write_quarantine_yaml(tmp_path, entries)
+        monkeypatch.setattr(validate, "QUARANTINE_FILE", path)
+
+        loaded = validate.load_quarantine_entries()
+        assert loaded[0]["auto_added"] is True
+        assert loaded[1]["auto_added"] is False
+
+    def test_apply_quarantine_to_pytest_cmd(self, tmp_path, monkeypatch) -> None:
+        """apply_quarantine_to_cmd(cmd) returns a new cmd with --deselect entries appended."""
+        from core import validate
+
+        entry = {
+            "test_id": "tests/unit/x.py::test_y",
+            "added_at": "2026-06-27T12:00:00Z",
+            "reason": "flaky",
+            "auto_added": True,
+        }
+        path = self._write_quarantine_yaml(tmp_path, [entry])
+        monkeypatch.setattr(validate, "QUARANTINE_FILE", path)
+
+        base_cmd = ["python", "-m", "pytest", "tests/unit/", "-q"]
+        result_cmd = validate.apply_quarantine_to_cmd(base_cmd)
+        # --deselect appears with the test_id.
+        assert "--deselect" in result_cmd
+        assert "tests/unit/x.py::test_y" in result_cmd
