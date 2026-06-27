@@ -5,7 +5,7 @@
     "version"
   ],
   "exit_code": 0,
-  "stdout_pattern": "ralph v3.1.1\n",
+  "stdout_pattern": "ralph v3.1.2\n",
   "stderr_pattern": "",
   "description": "bin/ralph version (bash dispatcher)"
 }
