@@ -65,6 +65,7 @@ def test_remove_worktree_invokes_git_worktree_remove(
 
     fake_result = mock.Mock(returncode=0, stdout=b"", stderr=b"")
     wt_path = tmp_path / ".ralph" / "worktrees" / "1"
+    wt_path.mkdir(parents=True)
 
     with mock.patch.object(base, "_run_git", return_value=fake_result) as run_git:
         base.remove_worktree(wt_path)
