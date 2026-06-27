@@ -1,3 +1,11 @@
+[project]
+name = "ralph"
+version = "3.1.0-dev"
+description = "Ralph — Automated AI build system driven by GitHub Issues"
+requires-python = ">=3.10"
+# Phase A stays free of new dependencies (per plan §3 R-4 mitigation).
+# Pydantic lands in Phase B (task B-001) per spec §4.2.
+
 [tool.mypy]
 explicit_package_bases = true
 mypy_path = "core"
