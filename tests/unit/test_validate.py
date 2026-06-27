@@ -552,9 +552,7 @@ class TestQuarantineSchema:
     ImportError failures for every TestQuarantineSchema test.
     """
 
-    def _write_quarantine_yaml(
-        self, tmp_path: Path, entries: list[dict]
-    ) -> Path:
+    def _write_quarantine_yaml(self, tmp_path: Path, entries: list[dict]) -> Path:
         """Write a tests/quarantine.yaml with the given entries. Returns path.
 
         Writes the constrained YAML format produced by the implementation
@@ -571,7 +569,7 @@ class TestQuarantineSchema:
             # Quote the reason if it contains characters that would break parsing.
             reason = str(e["reason"])
             if any(c in reason for c in [":", "#", "\n"]):
-                lines.append(f"  reason: \"{reason}\"")
+                lines.append(f'  reason: "{reason}"')
             else:
                 lines.append(f"  reason: {reason}")
             lines.append(f"  auto_added: {'true' if e['auto_added'] else 'false'}")
