@@ -34,11 +34,9 @@ PID_FILE = Path("/tmp") / f"ralph_daemon_{PROJECT_ROOT.name}.pid"
 LOG_DIR = PROJECT_ROOT / "logs"
 METRICS_FILE = LOG_DIR / "ralph_metrics.jsonl"
 PROMPT_FILE = PROJECT_ROOT / "docs" / "agent" / "PROMPT.md"
-PROGRESS_FILE = PROJECT_ROOT / "docs" / "agent" / "PROGRESS.md"
 PROMPTS_DIR = PROJECT_ROOT / "docs" / "agent" / "prompts"
 
 # Per-issue design specs live in docs/designs/<N>.md (one file per issue).
-# These are project content, separate from PROGRESS.md (the ralph queue).
 DESIGN_SPEC_DIR = PROJECT_ROOT / "docs" / "designs"
 PREFLIGHT_SCRIPT = PROJECT_ROOT / "config" / "ralph_preflight.sh"
 
@@ -579,7 +577,6 @@ def run_pipeline(
             "Using existing design spec.",
         )
     else:
-        _update_progress_board(issue_num, "design", "🎨")
         save_checkpoint(issue_num, "design")
         try:
             design_ok = run_design_stage(issue)
@@ -592,7 +589,6 @@ def run_pipeline(
             partial_spec = _read_partial_design_spec(issue_num)
             detail = _format_stage_failure("DESIGN", partial_spec=partial_spec)
             gh_comment(issue_num, detail)
-            _update_progress_board(issue_num, "design", "🛑")
             transition_label(issue_num, "status:blocked", "status:design")
             log_metrics(
                 "pipeline_complete",
@@ -607,7 +603,6 @@ def run_pipeline(
             clear_checkpoint()
             _cleanup_issue_artifacts(issue_num)
             gh_comment(issue_num, "💥 DESIGN commit/push failed. Blocking issue.")
-            _update_progress_board(issue_num, "design", "🛑")
             transition_label(issue_num, "status:blocked", "status:design")
             log_metrics(
                 "pipeline_complete",
@@ -622,7 +617,6 @@ def run_pipeline(
         design_summary = _summarize_design_spec(issue_num)
         if design_summary:
             gh_comment(issue_num, design_summary)
-        _update_progress_board(issue_num, "build", "🔨")
         transition_label(issue_num, "status:build", "status:design")
 
     # ── STAGE 2: BUILD ──
@@ -652,7 +646,6 @@ def run_pipeline(
                     f"`.ralph/blocked/issue-{issue_num}/issue-{issue_num}-report.md` "
                     f"(also visible in `.ralph/issue-{issue_num}-report.md`).",
                 )
-            _update_progress_board(issue_num, "build", "🛑")
             transition_label(issue_num, "status:blocked", "status:build")
             log_metrics(
                 "pipeline_complete",
@@ -667,7 +660,6 @@ def run_pipeline(
             clear_checkpoint()
             _cleanup_issue_artifacts(issue_num)
             gh_comment(issue_num, "💥 BUILD commit/push failed. Blocking issue.")
-            _update_progress_board(issue_num, "build", "🛑")
             transition_label(issue_num, "status:blocked", "status:build")
             log_metrics(
                 "pipeline_complete",
@@ -678,7 +670,6 @@ def run_pipeline(
             )
             return False
         gh_comment(issue_num, "✅ BUILD stage completed and committed.")
-        _update_progress_board(issue_num, "verify", "🔍")
         transition_label(issue_num, "status:verify", "status:build")
 
     # ── STAGE 3: VERIFY ──
@@ -704,7 +695,7 @@ def run_pipeline(
                 issue_num,
                 "✅ VERIFY passed. Handing off for review — external tools and reviewers may now update labels on this issue. Ralph will not touch this issue again unless a retry label is set.",
             )
-            _update_progress_board(issue_num, "review", "✅")
+            transition_label(issue_num, "status:review", "status:verify")
             transition_label(issue_num, "status:review", "status:verify")
             log_metrics("pipeline_complete", issue=str(issue_num), result="review")
     else:
@@ -718,7 +709,7 @@ def run_pipeline(
                 f"📋 Full VERIFY failure report at "
                 f"`.ralph/blocked/issue-{issue_num}/issue-{issue_num}-report.md`.",
             )
-        _update_progress_board(issue_num, "verify", "🛑")
+        transition_label(issue_num, "status:blocked", "status:verify")
         transition_label(issue_num, "status:blocked", "status:verify")
         log_metrics(
             "pipeline_complete", issue=str(issue_num), result="blocked", stage="verify"
@@ -753,26 +744,14 @@ def run_design_stage(issue: dict) -> bool:
         )
         print(f"[ralph] Created placeholder {design_file}")
 
-    # Snapshot PROGRESS.md BEFORE the agent runs so we can strip any
-    # design content the agent may append (the engine manages the status
-    # board below "# Ralph Queue"; legacy design content stays untouched).
-    progress_snapshot: Optional[str] = None
-    if PROGRESS_FILE.exists():
-        progress_snapshot = PROGRESS_FILE.read_text(encoding="utf-8")
-
     session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
     prompt = assemble_stage_prompt(issue, "design.md")
     success = invoke_agent(prompt, issue_num, session_file=session_file)
 
-    # Post-DESIGN cleanup: restore PROGRESS.md to its pre-agent content
-    # (the engine manages the status board via _update_progress_board).
-    # This prevents the DESIGN agent from appending design content into
-    # PROGRESS.md — the design spec goes in docs/designs/<N>.md only.
     if success:
         if not design_file.exists():
             print(
-                f"[ralph] WARNING: DESIGN agent did not create {design_file}. "
-                f"Falling back to PROGRESS.md."
+                f"[ralph] WARNING: DESIGN agent did not create {design_file}."
             )
         else:
             content = design_file.read_text(encoding="utf-8")
@@ -783,12 +762,6 @@ def run_design_stage(issue: dict) -> bool:
                 )
             else:
                 print(f"[ralph] Design spec written to {design_file}")
-
-        # Restore PROGRESS.md to pre-agent state (keeps legacy content intact).
-        # If the agent appended design content, it gets removed here.
-        if progress_snapshot is not None:
-            PROGRESS_FILE.write_text(progress_snapshot, encoding="utf-8")
-            print("[ralph] Restored PROGRESS.md to pre-DESIGN state")
 
     log_metrics("stage_complete", issue=str(issue_num), stage="design")
     return success
@@ -1217,104 +1190,14 @@ def _write_stage_report(issue_num: int, stage: str, failed_step: str, output: st
         f"See the output above for the specific test/lint failures.\n\n"
         f"## What to Check\n"
         f"- The full report is at `.ralph/issue-{issue_num}-report.md`\n"
-        f"- Design spec: `docs/designs/{issue_num}.md` (or `docs/agent/PROGRESS.md` legacy)\n"
+        f"- Design spec: `docs/designs/{issue_num}.md`\n"
         f"- QA-written tests: `.ralph/issue-{issue_num}-tests.json`\n"
     )
     report_path.write_text(report, encoding="utf-8")
     print(f"[ralph] Failure report written to {report_path}")
 
 
-def _fetch_issue_title(issue_num: int) -> Optional[str]:
-    """Fetch the issue title from GitHub via gh CLI.
-    Returns None on failure (offline, rate-limit, etc.)."""
-    try:
-        result = gh("issue", "view", str(issue_num), "--json", "title", "-q", ".title")
-        return result.stdout.strip()
-    except Exception:
-        return None
 
-
-def _update_progress_board(issue_num: int, stage: str, status: str) -> None:
-    """Append/update a single status-board entry in PROGRESS.md.
-
-    PROGRESS.md preserves any legacy design-spec content (historical artifact)
-    above the `# Ralph Queue` divider. The engine-managed status board table
-    lives under that divider and is fully replaced on each call.
-
-    The DESIGN agent no longer writes here (it writes to docs/designs/<N>.md).
-    The engine maintains this file.
-
-    Format (Markdown table):
-
-        | # | Title | Stage | Status |
-        | --- | ----- | ----- | ------ |
-        | 72 | [RISK-4] PositionSizer... | build | \U0001f6a8 |
-    """
-    PROGRESS_FILE.parent.mkdir(parents=True, exist_ok=True)
-
-    # Load: preserve everything before "# Ralph Queue" (legacy design content),
-    # and parse existing table rows from the engine-managed section.
-    legacy_lines: list[str] = []
-    existing_rows: list[tuple[str, str, str, str]] = []
-    in_engine_section = False
-    in_table = False
-
-    if PROGRESS_FILE.exists():
-        for line in PROGRESS_FILE.read_text(encoding="utf-8").splitlines():
-            if line.startswith("# Ralph Queue"):
-                in_engine_section = True
-                continue
-            if not in_engine_section:
-                legacy_lines.append(line)
-                continue
-            # Engine-managed section: parse table rows
-            if line.startswith("| # |"):
-                in_table = True
-                continue
-            if line.startswith("| --- |"):
-                continue
-            if line.startswith("| ") and in_table:
-                parts = [p.strip() for p in line.split("|")]
-                if len(parts) >= 5:
-                    existing_rows.append((parts[1], parts[2], parts[3], parts[4]))
-            if not line.startswith("|"):
-                in_table = False
-
-    # Ensure legacy content ends with a blank line before the engine section.
-    if legacy_lines and legacy_lines[-1] != "":
-        legacy_lines.append("")
-
-    # Fetch title from gh (or fall back to existing row).
-    title = _fetch_issue_title(issue_num)
-    if title is None:
-        for n, t, _, _ in existing_rows:
-            if n == str(issue_num):
-                title = t
-                break
-    title = title or f"#{issue_num}"
-
-    # Replace or append the current issue's row.
-    existing_rows = [
-        (n, t, s, st) for (n, t, s, st) in existing_rows if n != str(issue_num)
-    ]
-    existing_rows.append((str(issue_num), title, stage, status))
-
-    # Build the engine-managed status board.
-    board_lines = [
-        "# Ralph Queue",
-        "",
-        "Auto-generated status board. Per-issue design specs live in `docs/designs/<N>.md`.",
-        "Detailed stage history lives in the GitHub issue comments.",
-        "",
-        "| # | Title | Stage | Status |",
-        "| --- | ----- | ----- | ------ |",
-    ]
-    for n, t, s, st in sorted(existing_rows, key=lambda r: int(r[0])):
-        board_lines.append(f"| {n} | {t} | {s} | {st} |")
-    board_lines.append("")
-
-    text = "\n".join(legacy_lines) + "\n".join(board_lines)
-    PROGRESS_FILE.write_text(text, encoding="utf-8")
 
 
 def _extract_failure_summary(stdout: str, stderr: str) -> str:
@@ -1586,17 +1469,14 @@ def _summarize_design_spec(issue_num: int) -> Optional[str]:
     """Read the per-issue design spec and return a condensed design summary
     for posting as a GitHub issue comment.
 
-    Reads from docs/designs/<issue_num>.md (preferred).
-    Falls back to docs/agent/PROGRESS.md if the per-issue file is missing
-    (backward compat for projects mid-migration).
+    Reads from docs/designs/<issue_num>.md only. After A7.1, the legacy
+    fallback is removed; v3 projects must run `ralph migrate`
+    to convert their legacy design content.
     """
     design_file = _design_spec_path(issue_num)
-    if design_file.exists():
-        text = design_file.read_text(encoding="utf-8")
-    elif PROGRESS_FILE.exists():
-        text = PROGRESS_FILE.read_text(encoding="utf-8")
-    else:
+    if not design_file.exists():
         return None
+    text = design_file.read_text(encoding="utf-8")
     lines = text.splitlines()
 
     title = ""
@@ -1650,7 +1530,7 @@ def _summarize_design_spec(issue_num: int) -> Optional[str]:
         )
     else:
         out.append(
-            "**Files:** See [`docs/agent/PROGRESS.md`](docs/agent/PROGRESS.md) (legacy)"
+            f"**Files:** See [`docs/designs/{issue_num}.md`](docs/designs/{issue_num}.md) (legacy fallback removed in A7.1)"
         )
     if decisions:
         out.append("")
@@ -1668,21 +1548,20 @@ def _summarize_design_spec(issue_num: int) -> Optional[str]:
     if design_file.exists():
         out.append(f"Full design spec committed to `docs/designs/{issue_num}.md`.")
     else:
-        out.append("Full design spec committed to `docs/agent/PROGRESS.md` (legacy).")
+        out.append(f"Full design spec expected at `docs/designs/{issue_num}.md` (not yet written).")
     return "\n".join(out)
 
 
 def _read_partial_design_spec(issue_num: int, max_chars: int = 2000) -> Optional[str]:
-    """Read the per-issue design spec (or PROGRESS.md fallback) if it exists.
-    Returns truncated content or None if neither file exists."""
+    """Read the per-issue design spec if it exists.
+
+    Returns truncated content or None if the file is missing. The legacy
+    fallback is removed in A7.1; v3 projects must run `ralph migrate`.
+    """
     design_file = _design_spec_path(issue_num)
-    text: Optional[str] = None
-    if design_file.exists():
-        text = design_file.read_text(encoding="utf-8")
-    elif PROGRESS_FILE.exists():
-        text = PROGRESS_FILE.read_text(encoding="utf-8")
-    if text is None:
+    if not design_file.exists():
         return None
+    text = design_file.read_text(encoding="utf-8")
     try:
         text = text.strip()
         if not text:
@@ -1717,7 +1596,7 @@ def _format_stage_failure(
     """
     lines = [f"❌ {stage} stage failed.", ""]
     lines.append(
-        "See the design spec for this issue (at `docs/designs/<N>.md` or `docs/agent/PROGRESS.md` legacy)."
+        "See the design spec for this issue (at `docs/designs/<N>.md`)."
     )
     if partial_spec:
         lines.append("")
@@ -1906,7 +1785,7 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
         f"{body}"
     )
 
-    # Design spec — read per-issue file (preferred) with PROGRESS.md fallback.
+    # Design spec — read per-issue file. Legacy fallback removed in A7.1.
     # Injected in both Mode A and Mode B so the prompt is self-contained.
     design_file = _design_spec_path(issue["number"])
     if design_file.exists():
@@ -1916,15 +1795,6 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
             f"{design_spec}\n\n"
             f"_Source: `docs/designs/{issue['number']}.md` — "
             f"this is the design for the current issue only._"
-        )
-    elif PROGRESS_FILE.exists():
-        design_spec = PROGRESS_FILE.read_text(encoding="utf-8")
-        prompt += (
-            f"\n\n## Design Spec (from DESIGN stage)\n\n"
-            f"{design_spec}\n\n"
-            f"_Source: `docs/agent/PROGRESS.md` (legacy location) — "
-            f"may contain designs for other issues; use the section that "
-            f"matches issue #{issue['number']}._"
         )
 
     # A3.2: artifact-based handoff for IMPLEMENT sub-agent (Mode B).
