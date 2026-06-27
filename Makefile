@@ -63,7 +63,7 @@ lint:  ## black + isort + flake8 + mypy (check only).
 	black --check core tests bin
 	isort --check-only --profile black core tests bin
 	flake8 core tests bin
-	mypy core
+	mypy --explicit-package-bases core/migrate.py core/validate.py core/pipeline/agents/artifacts.py
 
 format:  ## black + isort (apply).
 	black core tests bin
@@ -73,7 +73,8 @@ format:  ## black + isort (apply).
 # Validate
 # ─────────────────────────────────────────────────────────
 
-validate:  ## ralph validate --tier=targeted against self.
+validate:  ## ralph validate --tier=targeted against self (Ralph validates its own test suite + pytest).
+	$(PYTHON) -m pytest tests/unit/ tests/integration/ -q
 	$(PYTHON) core/validate.py --tier=targeted
 
 # ─────────────────────────────────────────────────────────

@@ -14,13 +14,11 @@ NotImplementedError). They turn GREEN after task A-010 lands.
 """
 
 import json
-import time
 from pathlib import Path
 
 import pytest
 
 from core.migrate import migrate
-
 
 # ─────────────────────────────────────────────────────────
 # Fixtures
@@ -77,7 +75,9 @@ def test_migrate_dry_run_returns_json_serializable(project_with_v3_state: Path) 
     assert "actions" in report, "Dry-run report must list planned actions"
 
 
-def test_migrate_dry_run_does_not_modify_filesystem(project_with_v3_state: Path) -> None:
+def test_migrate_dry_run_does_not_modify_filesystem(
+    project_with_v3_state: Path,
+) -> None:
     """migrate(dry_run=True) does NOT modify the filesystem."""
     before = sorted(p.name for p in project_with_v3_state.glob(".ralph/*"))
     migrate(dry_run=True)
@@ -111,9 +111,9 @@ def test_migrate_is_idempotent(project_with_v3_state: Path) -> None:
     actions_first = first.get("actions", [])
     actions_second = second.get("actions", [])
     # Idempotency: the second run does strictly less work (or equal).
-    assert len(actions_second) <= len(actions_first), (
-        f"Second run did MORE work than first: {actions_second} vs {actions_first}"
-    )
+    assert len(actions_second) <= len(
+        actions_first
+    ), f"Second run did MORE work than first: {actions_second} vs {actions_first}"
 
 
 def test_migrate_archives_before_moving(project_with_v3_state: Path) -> None:
@@ -123,15 +123,19 @@ def test_migrate_archives_before_moving(project_with_v3_state: Path) -> None:
     assert archive_root.exists(), f"Expected archive root at {archive_root}"
     # At least one timestamped directory
     archive_dirs = [d for d in archive_root.iterdir() if d.is_dir()]
-    assert len(archive_dirs) >= 1, f"Expected at least one archive dir under {archive_root}"
+    assert (
+        len(archive_dirs) >= 1
+    ), f"Expected at least one archive dir under {archive_root}"
     # The archive contains the original v3 files
     archived = list(archive_dirs[0].rglob("*"))
-    assert any("issue-1-tests.json" in str(p) for p in archived), (
-        "Archive must contain the original issue-1-tests.json"
-    )
+    assert any(
+        "issue-1-tests.json" in str(p) for p in archived
+    ), "Archive must contain the original issue-1-tests.json"
 
 
-def test_migrate_handles_missing_ralph_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_migrate_handles_missing_ralph_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """migrate() handles projects without a .ralph/ directory (returns empty actions)."""
     monkeypatch.chdir(tmp_path)
     # No .ralph dir — should still succeed
@@ -140,7 +144,9 @@ def test_migrate_handles_missing_ralph_dir(tmp_path: Path, monkeypatch: pytest.M
     assert report.get("actions", []) == []
 
 
-def test_migrate_creates_issues_subdir_for_each_issue(project_with_v3_state: Path) -> None:
+def test_migrate_creates_issues_subdir_for_each_issue(
+    project_with_v3_state: Path,
+) -> None:
     """After migrate(), v3 issue files are migrated to .ralph/issues/<N>/ per spec §6.2."""
     migrate(dry_run=False)
     # The v3 layout has .ralph/issue-1-tests.json
@@ -148,11 +154,13 @@ def test_migrate_creates_issues_subdir_for_each_issue(project_with_v3_state: Pat
     issues_dir = project_with_v3_state / ".ralph" / "issues" / "1"
     # Either the issue directory exists, OR the file is now archived (acceptable)
     archived = any(
-        (project_with_v3_state / ".ralph" / "migration-archive").rglob("issue-1-tests.json")
+        (project_with_v3_state / ".ralph" / "migration-archive").rglob(
+            "issue-1-tests.json"
+        )
     )
-    assert issues_dir.exists() or archived, (
-        "Expected either .ralph/issues/1/ to exist OR the original to be archived"
-    )
+    assert (
+        issues_dir.exists() or archived
+    ), "Expected either .ralph/issues/1/ to exist OR the original to be archived"
 
 
 def test_migrate_logs_errors_in_report(project_with_v3_state: Path) -> None:

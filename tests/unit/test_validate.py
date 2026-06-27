@@ -9,7 +9,7 @@ from unittest import mock
 # Make core/ importable without installing Ralph.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "core"))
 
-import validate
+import validate  # noqa: E402
 
 
 def test_detect_collisions_no_collision():
@@ -55,7 +55,13 @@ def test_run_pytest_split_by_directory_runs_per_directory():
 
     def fake_invocation(cmd, env=None):
         calls.append((cmd, env))
-        return {"exit_code": 0, "classification": "success", "action": "accept", "stdout_tail": "", "junitxml_path": None}
+        return {
+            "exit_code": 0,
+            "classification": "success",
+            "action": "accept",
+            "stdout_tail": "",
+            "junitxml_path": None,
+        }
 
     with mock.patch.object(validate, "run_pytest_invocation", fake_invocation):
         exit_code = validate.run_pytest_split_by_directory(
@@ -95,8 +101,20 @@ def test_run_pytest_split_by_directory_returns_worst_exit_code():
     def fake_invocation(cmd, env=None):
         # Return 1 for unit, 0 for integration (alphabetical order)
         if any("unit" in part for part in cmd):
-            return {"exit_code": 1, "classification": "test_failure", "action": "block", "stdout_tail": "", "junitxml_path": None}
-        return {"exit_code": 0, "classification": "success", "action": "accept", "stdout_tail": "", "junitxml_path": None}
+            return {
+                "exit_code": 1,
+                "classification": "test_failure",
+                "action": "block",
+                "stdout_tail": "",
+                "junitxml_path": None,
+            }
+        return {
+            "exit_code": 0,
+            "classification": "success",
+            "action": "accept",
+            "stdout_tail": "",
+            "junitxml_path": None,
+        }
 
     with mock.patch.object(validate, "run_pytest_invocation", fake_invocation):
         exit_code = validate.run_pytest_split_by_directory(
@@ -233,7 +251,13 @@ class TestRunPytestInvocation:
         self._mock_subprocess(monkeypatch, returncode=0, stdout="1 passed")
         result = validate.run_pytest_invocation(["pytest", "tests/"])
         assert isinstance(result, dict)
-        for key in ("exit_code", "classification", "action", "stdout_tail", "junitxml_path"):
+        for key in (
+            "exit_code",
+            "classification",
+            "action",
+            "stdout_tail",
+            "junitxml_path",
+        ):
             assert key in result, f"Missing key: {key}"
 
     def test_classification_matches_classifier(self, monkeypatch) -> None:
@@ -279,7 +303,7 @@ class TestJunitxmlFlag:
             '<testsuite name="pytest">\n'
             '  <testcase classname="tests.unit.test_x" name="test_a" time="0.001"/>\n'
             '  <testcase classname="tests.unit.test_x" name="test_b" time="0.001"/>\n'
-            '</testsuite>\n'
+            "</testsuite>\n"
         )
 
         from unittest import mock
@@ -307,7 +331,7 @@ class TestJunitxmlFlag:
             '<testsuite name="pytest" tests="2" failures="0" errors="0">\n'
             '  <testcase classname="tests.unit.test_x" name="test_a" time="0.001"/>\n'
             '  <testcase classname="tests.unit.test_x" name="test_b" time="0.001"/>\n'
-            '</testsuite>\n'
+            "</testsuite>\n"
         )
         tree = ET.parse(str(junit_path))
         root = tree.getroot()
@@ -324,7 +348,7 @@ class TestJunitxmlFlag:
             '  <testcase classname="tests.unit.test_x" name="test_a" time="0.001"/>\n'
             '  <testcase classname="tests.unit.test_x" name="test_b" time="0.001"/>\n'
             '  <testcase classname="tests.unit.test_y" name="test_c" time="0.002"/>\n'
-            '</testsuite>\n'
+            "</testsuite>\n"
         )
         tree = ET.parse(str(junit_path))
         cases = tree.findall(".//testcase")
@@ -345,8 +369,8 @@ class TestJunitxmlFlag:
             '  <testcase classname="tests.unit.test_x" name="test_a" time="0.001"/>\n'
             '  <testcase classname="tests.unit.test_x" name="test_b" time="0.001">\n'
             '    <failure message="AssertionError: assert False">Traceback...</failure>\n'
-            '  </testcase>\n'
-            '</testsuite>\n'
+            "  </testcase>\n"
+            "</testsuite>\n"
         )
         tree = ET.parse(str(junit_path))
         cases = tree.findall(".//testcase")
@@ -387,7 +411,9 @@ class TestCriticalPaths:
 
     def test_critical_paths_loaded_from_config(self, tmp_path, monkeypatch) -> None:
         """Non-empty critical_paths from config are loaded correctly."""
-        config_path = self._write_config(tmp_path, ["tests/unit/core/test_smoke.py::test_x"])
+        config_path = self._write_config(
+            tmp_path, ["tests/unit/core/test_smoke.py::test_x"]
+        )
         monkeypatch.setattr(validate, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(validate, "CONFIG_FILE", config_path)
         new_config = validate._load_config()  # type: ignore[attr-defined]

@@ -750,9 +750,7 @@ def run_design_stage(issue: dict) -> bool:
 
     if success:
         if not design_file.exists():
-            print(
-                f"[ralph] WARNING: DESIGN agent did not create {design_file}."
-            )
+            print(f"[ralph] WARNING: DESIGN agent did not create {design_file}.")
         else:
             content = design_file.read_text(encoding="utf-8")
             if "<!-- Engine-created placeholder" in content:
@@ -806,7 +804,6 @@ def run_build_stage(issue: dict) -> bool:
         t for t in qa_test_paths_before if t.endswith(".py") and "__pycache__" not in t
     ]
     qa_test_paths_before = _resolve_existing_test_paths(qa_test_paths_before)
-    qa_hashes_before = _snapshot_file_hashes(qa_test_paths_before)
 
     if not _run_implement_subagent(issue):
         _write_stage_report(
@@ -836,7 +833,9 @@ def run_build_stage(issue: dict) -> bool:
             f"🚫 IMPLEMENT sub-agent tampered with QA-written test files: {e}. "
             "Build blocked. Manual operator review required.",
         )
-        log_metrics("stage_complete", issue=str(issue_num), stage="build", result="tampering")
+        log_metrics(
+            "stage_complete", issue=str(issue_num), stage="build", result="tampering"
+        )
         return False
 
     # ── Validation gate (only tests written by the independent QA session) ──
@@ -1088,7 +1087,11 @@ def _run_test_subagent(issue: dict) -> bool:
         # to 0o444 so the IMPLEMENT sub-agent cannot modify them. Idempotent.
         if new_tests:
             for rel_path in new_tests:
-                abs_path = PROJECT_ROOT / rel_path if not Path(rel_path).is_absolute() else Path(rel_path)
+                abs_path = (
+                    PROJECT_ROOT / rel_path
+                    if not Path(rel_path).is_absolute()
+                    else Path(rel_path)
+                )
                 if abs_path.exists():
                     try:
                         os.chmod(abs_path, 0o444)
@@ -1197,9 +1200,6 @@ def _write_stage_report(issue_num: int, stage: str, failed_step: str, output: st
     print(f"[ralph] Failure report written to {report_path}")
 
 
-
-
-
 def _extract_failure_summary(stdout: str, stderr: str) -> str:
     """Extract the most relevant failure lines from validation output."""
     combined = (stdout + "\n" + stderr).strip()
@@ -1210,9 +1210,7 @@ def _extract_failure_summary(stdout: str, stderr: str) -> str:
     summary_lines: list[str] = []
 
     # Determine what failed — add a header line for clarity
-    has_test_failure = any(
-        "pytest" in l and "FAILED" in l for l in lines
-    )
+    has_test_failure = any("pytest" in l and "FAILED" in l for l in lines)
     has_lint_failure = any(
         f"{tool} FAILED" in l for tool in ["black", "isort", "flake8", "ruff", "mypy"]
     )
@@ -1224,9 +1222,7 @@ def _extract_failure_summary(stdout: str, stderr: str) -> str:
         )
         summary_lines.append("")
     elif has_test_failure and has_lint_failure:
-        summary_lines.append(
-            "═══ Validation failed: TESTS and LINT both failed ═══"
-        )
+        summary_lines.append("═══ Validation failed: TESTS and LINT both failed ═══")
         summary_lines.append("")
     elif has_lint_failure:
         summary_lines.append(
@@ -1301,8 +1297,7 @@ def _rollback_working_tree():
             # Remove untracked files and directories
             run(["git", "clean", "-fd"], check=False, capture=True)
             print(
-                f"[ralph] Working tree rolled back to checkpoint "
-                f"SHA {pre_sha[:8]}."
+                f"[ralph] Working tree rolled back to checkpoint " f"SHA {pre_sha[:8]}."
             )
         else:
             # Fallback: restore tracked files to HEAD
@@ -1385,7 +1380,11 @@ def _detect_tampered_tests(test_paths: list[str]) -> bool:
     """
     tampered: list[str] = []
     for path_str in test_paths:
-        full = PROJECT_ROOT / path_str if not Path(path_str).is_absolute() else Path(path_str)
+        full = (
+            PROJECT_ROOT / path_str
+            if not Path(path_str).is_absolute()
+            else Path(path_str)
+        )
         if not full.exists():
             tampered.append(path_str)
             continue
@@ -1548,7 +1547,9 @@ def _summarize_design_spec(issue_num: int) -> Optional[str]:
     if design_file.exists():
         out.append(f"Full design spec committed to `docs/designs/{issue_num}.md`.")
     else:
-        out.append(f"Full design spec expected at `docs/designs/{issue_num}.md` (not yet written).")
+        out.append(
+            f"Full design spec expected at `docs/designs/{issue_num}.md` (not yet written)."
+        )
     return "\n".join(out)
 
 
@@ -1595,9 +1596,7 @@ def _format_stage_failure(
     the same body.
     """
     lines = [f"❌ {stage} stage failed.", ""]
-    lines.append(
-        "See the design spec for this issue (at `docs/designs/<N>.md`)."
-    )
+    lines.append("See the design spec for this issue (at `docs/designs/<N>.md`).")
     if partial_spec:
         lines.append("")
         lines.append("## Partial Design Spec")
@@ -1631,7 +1630,9 @@ def _format_stage_failure(
 
     # A5.1: Trajectory file link when present (issue_num and file must be set).
     if issue_num is not None:
-        traj_path = PROJECT_ROOT / ".ralph" / "issues" / str(issue_num) / "trajectory.jsonl"
+        traj_path = (
+            PROJECT_ROOT / ".ralph" / "issues" / str(issue_num) / "trajectory.jsonl"
+        )
         if traj_path.exists():
             rel = traj_path.relative_to(PROJECT_ROOT)
             lines.append("")
@@ -1800,7 +1801,9 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
     # A3.2: artifact-based handoff for IMPLEMENT sub-agent (Mode B).
     # The IMPLEMENT agent reads its inputs from disk, not from session context.
     if mode == "B":
-        artifact_dir = PROJECT_ROOT / ".ralph" / "issues" / str(issue["number"]) / "artifacts"
+        artifact_dir = (
+            PROJECT_ROOT / ".ralph" / "issues" / str(issue["number"]) / "artifacts"
+        )
         if not artifact_dir.is_dir():
             # Per task A-021 acceptance criteria: fail fast, no silent fallback.
             raise FileNotFoundError(
@@ -1837,7 +1840,9 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
             acs = _json.loads(acceptance_criteria_artifact.read_text(encoding="utf-8"))
             prompt += "\n### Acceptance Criteria\n\n"
             for idx, ac in enumerate(acs, 1):
-                prompt += f"{idx}. **[{ac.get('id', 'AC')}]** {ac.get('criterion', '')}\n"
+                prompt += (
+                    f"{idx}. **[{ac.get('id', 'AC')}]** {ac.get('criterion', '')}\n"
+                )
 
         if qa_tests_artifact.exists():
             import json as _json
@@ -2677,7 +2682,6 @@ if __name__ == "__main__":
     # delegates to `core.migrate.main`. The default subcommand (no argv[1] or
     # unknown subcommand) is the existing daemon entry point.
     import argparse
-    import sys
 
     if len(sys.argv) > 1 and sys.argv[1] == "migrate":
         from core.migrate import main as migrate_main
