@@ -188,6 +188,53 @@ class TestAssembleImplementPrompt:
 # ─────────────────────────────────────────────────────────
 
 
+class TestEnrichedFailureComments:
+    """A5.1: _format_stage_failure includes stdout tail, trajectory link, failure-report link."""
+
+    def test_comment_contains_stdout_tail_section(self) -> None:
+        """Comment body contains an 'Agent stdout' / 'last 50 lines' section with ≥ 1 line."""
+        report_content = (
+            "## What Was Attempted\nDid a thing.\n\n"
+            "## What Failed\nSomething.\n"
+            "stdout line 1\nstdout line 2\nstdout line 3\n"
+        )
+        body = engine._format_stage_failure("BUILD", report_content=report_content)
+        assert "Agent stdout" in body or "last 50 lines" in body.lower()
+        # At least one stdout line is preserved in the comment.
+        assert "stdout line 1" in body
+
+    def test_comment_links_to_trajectory_when_present(self, tmp_path, monkeypatch) -> None:
+        """Comment contains a Markdown link to .ralph/issues/<N>/trajectory.jsonl when present."""
+        # Create the trajectory file
+        traj_dir = tmp_path / ".ralph" / "issues" / "1"
+        traj_dir.mkdir(parents=True)
+        (traj_dir / "trajectory.jsonl").write_text('{"event": "stage_complete"}\n')
+
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        body = engine._format_stage_failure("BUILD", report_content="some failure")
+        assert "trajectory.jsonl" in body
+        # Markdown link format: should contain .ralph/issues/<N>/trajectory.jsonl
+        assert ".ralph/issues/1/trajectory.jsonl" in body
+
+    def test_comment_omits_trajectory_link_when_absent(self, tmp_path, monkeypatch) -> None:
+        """Comment does NOT include a trajectory link when trajectory.jsonl does not exist."""
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        body = engine._format_stage_failure("BUILD", report_content="some failure")
+        assert ".ralph/issues/1/trajectory.jsonl" not in body
+
+    def test_comment_links_to_failure_report(self, tmp_path, monkeypatch) -> None:
+        """Comment contains a Markdown link to .ralph/issue-<N>-report.md."""
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        body = engine._format_stage_failure("BUILD", report_content="some failure")
+        # Should reference the failure report file path
+        assert "issue-1-report.md" in body or "issue-<N>-report.md" in body
+
+
+# ─────────────────────────────────────────────────────────
+# A2.2 — _detect_tampered_tests reclassification (spec §10.1 A2)
+# ─────────────────────────────────────────────────────────
+
+
 class TestInvokeAgentNoContinue:
     """A3.3: invoke_agent never passes --continue or --session (artifact-based handoff).
 
