@@ -1302,3 +1302,119 @@ class _FakeResult:
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
+
+
+# ─────────────────────────────────────────────────────────
+# B3.3 — TEST + VERIFY using worktree (spec §10.2 B3)
+# ─────────────────────────────────────────────────────────
+
+
+class TestSubagentsUseWorktree:
+    """B3.3: _run_test_subagent and run_verify_stage wrap agents in worktrees.
+
+    Per spec §10.2 B3:
+      - Both TEST and VERIFY sub-agents run inside a worktree.
+      - create_worktree is called before invoke_agent.
+      - remove_worktree is called in finally (cleanup survives agent failure).
+      - Agent's CWD is the worktree path, not the repo root.
+
+    Tests patch ``core.pipeline.agents.base.create_worktree`` and
+    ``core.pipeline.agents.base.remove_worktree`` (the seam the engine
+    uses per B3.1) and assert the lifecycle.
+    """
+
+    def test_test_subagent_creates_and_removes_worktree(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """_run_test_subagent calls create_worktree and remove_worktree."""
+        from core.pipeline.agents import base as agents_base
+
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
+        # Disable the pre-flight check so we don't need a real git repo.
+        monkeypatch.setattr(agents_base, "_preflight_check", lambda: None)
+
+        wt_path = tmp_path / ".ralph" / "worktrees" / "1"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        with (
+            mock.patch.object(
+                agents_base, "create_worktree", return_value=wt_path
+            ) as create_wt,
+            mock.patch.object(
+                agents_base, "remove_worktree"
+            ) as remove_wt,
+            mock.patch.object(engine, "invoke_agent", return_value=True),
+            mock.patch.object(engine, "gh_comment"),
+            mock.patch.object(engine, "log_metrics"),
+            mock.patch.object(engine, "_snapshot_tests_dir", return_value=set()),
+            mock.patch.object(engine, "_detect_new_tests", return_value=[]),
+            mock.patch.object(engine, "_save_test_tracking"),
+        ):
+            engine._run_test_subagent({"number": 1, "title": "Test issue"})
+
+        assert create_wt.call_count == 1
+        assert remove_wt.call_count == 1
+
+    def test_test_subagent_cleans_up_on_agent_failure(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """remove_worktree runs in finally — survives agent failure."""
+        from core.pipeline.agents import base as agents_base
+
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(agents_base, "_preflight_check", lambda: None)
+
+        wt_path = tmp_path / ".ralph" / "worktrees" / "1"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        with (
+            mock.patch.object(
+                agents_base, "create_worktree", return_value=wt_path
+            ),
+            mock.patch.object(
+                agents_base, "remove_worktree"
+            ) as remove_wt,
+            mock.patch.object(engine, "invoke_agent", return_value=False),
+            mock.patch.object(engine, "gh_comment"),
+            mock.patch.object(engine, "log_metrics"),
+            mock.patch.object(engine, "_snapshot_tests_dir", return_value=set()),
+            mock.patch.object(engine, "_detect_new_tests", return_value=[]),
+            mock.patch.object(engine, "_save_test_tracking"),
+        ):
+            engine._run_test_subagent({"number": 1, "title": "Test issue"})
+
+        # Cleanup must have run despite the agent failing.
+        assert remove_wt.call_count == 1
+
+    def test_verify_stage_creates_and_removes_worktree(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """run_verify_stage calls create_worktree and remove_worktree."""
+        from core.pipeline.agents import base as agents_base
+
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(agents_base, "_preflight_check", lambda: None)
+
+        wt_path = tmp_path / ".ralph" / "worktrees" / "1"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        with (
+            mock.patch.object(
+                agents_base, "create_worktree", return_value=wt_path
+            ) as create_wt,
+            mock.patch.object(
+                agents_base, "remove_worktree"
+            ) as remove_wt,
+            mock.patch.object(engine, "invoke_agent", return_value=True),
+            mock.patch.object(engine, "gh_comment"),
+            mock.patch.object(engine, "log_metrics"),
+            mock.patch.object(engine, "git"),
+            mock.patch.object(engine, "_has_commits", return_value=False),
+        ):
+            engine.run_verify_stage({"number": 1, "title": "Test issue"})
+
+        assert create_wt.call_count == 1
+        assert remove_wt.call_count == 1
