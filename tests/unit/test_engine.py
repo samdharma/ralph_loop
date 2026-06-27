@@ -842,27 +842,37 @@ def test_classify_provider_error_returns_none_for_normal_failure():
 def test_invoke_agent_raises_rate_limit_error_on_kimi_429():
     """invoke_agent raises ProviderRateLimitError when output contains 429."""
     fake_result = mock.Mock(
-        returncode=1, stdout="", stderr="APIProviderRateLimitError: 429"
+        returncode=1, stdout=b"", stderr=b"APIProviderRateLimitError: 429"
     )
     with (
-        mock.patch.object(engine, "_resolve_agent_binary", return_value="kimi"),
-        mock.patch.object(engine, "run", return_value=fake_result),
+        mock.patch(
+            "core.pipeline.agents.pi._resolve_agent_binary", return_value="kimi"
+        ),
+        mock.patch("core.pipeline.agents.pi._run_agent", return_value=fake_result),
     ):
-        with pytest.raises(engine.ProviderRateLimitError):
+        # The implementation now lives in core.pipeline.agents.pi, which
+        # raises the core.engine package-module exception class. This test
+        # file imports engine.py as a standalone module, so the class
+        # identity differs; verify by class name instead of identity.
+        with pytest.raises(Exception) as exc_info:
             engine.invoke_agent("prompt", 42)
+        assert exc_info.value.__class__.__name__ == "ProviderRateLimitError"
 
 
 def test_invoke_agent_raises_quota_error_on_pi_limit():
     """invoke_agent raises ProviderQuotaError when output contains quota message."""
     fake_result = mock.Mock(
-        returncode=1, stdout="", stderr="FreeUsageLimitError: quota exceeded"
+        returncode=1, stdout=b"", stderr=b"FreeUsageLimitError: quota exceeded"
     )
     with (
-        mock.patch.object(engine, "_resolve_agent_binary", return_value="pi"),
-        mock.patch.object(engine, "run", return_value=fake_result),
+        mock.patch(
+            "core.pipeline.agents.pi._resolve_agent_binary", return_value="pi"
+        ),
+        mock.patch("core.pipeline.agents.pi._run_agent", return_value=fake_result),
     ):
-        with pytest.raises(engine.ProviderQuotaError):
+        with pytest.raises(Exception) as exc_info:
             engine.invoke_agent("prompt", 42)
+        assert exc_info.value.__class__.__name__ == "ProviderQuotaError"
 
 
 def test_find_alternate_agent_returns_other_available_agent():

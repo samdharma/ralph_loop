@@ -19,7 +19,6 @@ for p in (str(_PROJECT_ROOT), str(_CORE_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from core.engine import invoke_agent as _engine_invoke_agent  # noqa: E402
 from core.pipeline.agents.base import AgentBase  # noqa: E402
 
 
@@ -35,6 +34,11 @@ class KimiAgent(AgentBase):
 
     def invoke(self, *args: Any, **kwargs: Any) -> Any:
         """Delegate to engine.invoke_agent with binary='kimi'."""
+        # Lazy import to avoid a circular import when core.engine is
+        # imported as a package module (engine.py imports core.pipeline.state,
+        # whose package init loads this module).
+        from core.engine import invoke_agent as _engine_invoke_agent
+
         kwargs.setdefault("binary", "kimi")
         return _engine_invoke_agent(*args, **kwargs)
 
