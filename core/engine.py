@@ -1702,8 +1702,19 @@ def _format_stage_failure(
     partial_spec: Optional[str] = None,
     report_content: Optional[str] = None,
     fallback: str = "Blocking issue.",
+    issue_num: Optional[int] = None,
+    agent_stdout: Optional[str] = None,
 ) -> str:
-    """Build a detailed stage-failure comment with pointers to artifacts."""
+    """Build a detailed stage-failure comment with pointers to artifacts.
+
+    Per spec §10.1 A5: the failure comment includes:
+    - Last 50 lines of agent stdout (when available)
+    - Link to trajectory file (when present)
+    - Link to failure report file
+
+    The function is idempotent: re-formatting the same failure produces
+    the same body.
+    """
     lines = [f"❌ {stage} stage failed.", ""]
     lines.append(
         "See the design spec for this issue (at `docs/designs/<N>.md` or `docs/agent/PROGRESS.md` legacy)."
@@ -1728,6 +1739,34 @@ def _format_stage_failure(
     else:
         lines.append("")
         lines.append(fallback)
+
+    # A5.1: Agent stdout (last 50 lines) when provided.
+    if agent_stdout:
+        lines.append("")
+        lines.append("## Agent stdout (last 50 lines)")
+        lines.append("")
+        tail = "\n".join(agent_stdout.splitlines()[-50:])
+        lines.append("```")
+        lines.append(tail)
+        lines.append("```")
+
+    # A5.1: Trajectory file link when present (issue_num and file must be set).
+    if issue_num is not None:
+        traj_path = PROJECT_ROOT / ".ralph" / "issues" / str(issue_num) / "trajectory.jsonl"
+        if traj_path.exists():
+            rel = traj_path.relative_to(PROJECT_ROOT)
+            lines.append("")
+            lines.append(f"## Trajectory")
+            lines.append("")
+            lines.append(f"Full trajectory: [`{rel}`]({rel})")
+
+        # A5.1: Failure report link (always — the report is written by _write_stage_report).
+        rel_report = Path(f".ralph/issue-{issue_num}-report.md")
+        lines.append("")
+        lines.append("## Failure report")
+        lines.append("")
+        lines.append(f"Full report: [`{rel_report}`]({rel_report})")
+
     return "\n".join(lines)
 
 

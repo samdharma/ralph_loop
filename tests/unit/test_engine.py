@@ -198,10 +198,15 @@ class TestEnrichedFailureComments:
             "## What Failed\nSomething.\n"
             "stdout line 1\nstdout line 2\nstdout line 3\n"
         )
-        body = engine._format_stage_failure("BUILD", report_content=report_content)
+        body = engine._format_stage_failure(
+            "BUILD",
+            report_content=report_content,
+            agent_stdout="agent line A\nagent line B\n",
+            issue_num=1,
+        )
         assert "Agent stdout" in body or "last 50 lines" in body.lower()
-        # At least one stdout line is preserved in the comment.
-        assert "stdout line 1" in body
+        # At least one agent stdout line is preserved in the comment.
+        assert "agent line A" in body
 
     def test_comment_links_to_trajectory_when_present(self, tmp_path, monkeypatch) -> None:
         """Comment contains a Markdown link to .ralph/issues/<N>/trajectory.jsonl when present."""
@@ -211,7 +216,7 @@ class TestEnrichedFailureComments:
         (traj_dir / "trajectory.jsonl").write_text('{"event": "stage_complete"}\n')
 
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        body = engine._format_stage_failure("BUILD", report_content="some failure")
+        body = engine._format_stage_failure("BUILD", report_content="some failure", issue_num=1)
         assert "trajectory.jsonl" in body
         # Markdown link format: should contain .ralph/issues/<N>/trajectory.jsonl
         assert ".ralph/issues/1/trajectory.jsonl" in body
@@ -219,15 +224,15 @@ class TestEnrichedFailureComments:
     def test_comment_omits_trajectory_link_when_absent(self, tmp_path, monkeypatch) -> None:
         """Comment does NOT include a trajectory link when trajectory.jsonl does not exist."""
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        body = engine._format_stage_failure("BUILD", report_content="some failure")
+        body = engine._format_stage_failure("BUILD", report_content="some failure", issue_num=1)
         assert ".ralph/issues/1/trajectory.jsonl" not in body
 
     def test_comment_links_to_failure_report(self, tmp_path, monkeypatch) -> None:
         """Comment contains a Markdown link to .ralph/issue-<N>-report.md."""
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        body = engine._format_stage_failure("BUILD", report_content="some failure")
+        body = engine._format_stage_failure("BUILD", report_content="some failure", issue_num=1)
         # Should reference the failure report file path
-        assert "issue-1-report.md" in body or "issue-<N>-report.md" in body
+        assert "issue-1-report.md" in body
 
 
 # ─────────────────────────────────────────────────────────
