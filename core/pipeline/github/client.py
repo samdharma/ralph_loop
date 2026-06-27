@@ -33,7 +33,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 
@@ -51,9 +51,15 @@ def _run_gh(argv: list[str]) -> "subprocess.CompletedProcess[bytes]":
     )
 
 
-def _idempotency_path(issue_num: int) -> Path:
-    """Return the on-disk path for issue ``issue_num``'s idempotency log."""
-    return PROJECT_ROOT / ".ralph" / "issues" / str(issue_num) / "idempotency.jsonl"
+def _idempotency_path(issue_num: int, project_root: Optional[Path] = None) -> Path:
+    """Return the on-disk path for issue ``issue_num``'s idempotency log.
+
+    ``project_root`` defaults to the module-level :data:`PROJECT_ROOT`
+    constant but may be overridden by callers (e.g. the engine
+    monkeypatches ``PROJECT_ROOT`` per-test).
+    """
+    root = project_root if project_root is not None else PROJECT_ROOT
+    return root / ".ralph" / "issues" / str(issue_num) / "idempotency.jsonl"
 
 
 def _body_hash(body: str) -> str:
@@ -121,7 +127,7 @@ class GitHubClient:
 
     def _already_executed(self, key: tuple[str, str, str, str]) -> bool:
         """Return True if ``key`` was already recorded in this ``run_id``."""
-        path = _idempotency_path(int(key[2]))
+        path = _idempotency_path(int(key[2]), project_root=PROJECT_ROOT)
         if not path.exists():
             return False
         for raw_line in path.read_text(encoding="utf-8").splitlines():
@@ -144,7 +150,7 @@ class GitHubClient:
         returncode: int,
     ) -> None:
         """Append one record to the issue's idempotency log."""
-        path = _idempotency_path(int(key[2]))
+        path = _idempotency_path(int(key[2]), project_root=PROJECT_ROOT)
         path.parent.mkdir(parents=True, exist_ok=True)
         record: dict[str, Any] = {
             "timestamp": datetime.now(timezone.utc).isoformat(),

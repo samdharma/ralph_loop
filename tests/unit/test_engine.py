@@ -1031,59 +1031,68 @@ class TestIdempotentWrappers:
 
     Per spec §10.2 B2: idempotency survives daemon SIGKILL because the
     log is persisted before invoking gh.
+
+    These tests patch ``core.pipeline.github.client._run_gh`` because
+    that is the single seam the GitHubClient uses to invoke subprocess.
     """
 
-    def test_transition_label_invokes_gh_once(
+    def test_transition_label_invokes_subprocess_once(
         self, tmp_path, monkeypatch
     ) -> None:
-        """transition_label with run_id invokes gh exactly once."""
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        """transition_label with run_id invokes subprocess exactly once."""
+        from core.pipeline.github import client as gh_client_mod
 
-        with mock.patch.object(engine, "gh") as run_gh:
-            engine.transition_label(
-                1, "status:design", "status:ready", run_id="X"
-            )
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(gh_client_mod, "PROJECT_ROOT", tmp_path)
+
+        with mock.patch.object(gh_client_mod, "_run_gh") as run_gh:
+            run_gh.return_value = mock.Mock(returncode=0, stdout=b"", stderr=b"")
+            engine.transition_label(1, "status:design", "status:ready", run_id="X")
 
         assert run_gh.call_count == 1
 
     def test_transition_label_repeated_with_same_run_id_no_double_invoke(
         self, tmp_path, monkeypatch
     ) -> None:
-        """Two transition_label calls with the same run_id invoke gh once."""
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        """Two transition_label calls with the same run_id invoke subprocess once."""
+        from core.pipeline.github import client as gh_client_mod
 
-        with mock.patch.object(engine, "gh") as run_gh:
-            engine.transition_label(
-                1, "status:design", "status:ready", run_id="X"
-            )
-            engine.transition_label(
-                1, "status:design", "status:ready", run_id="X"
-            )
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(gh_client_mod, "PROJECT_ROOT", tmp_path)
+
+        with mock.patch.object(gh_client_mod, "_run_gh") as run_gh:
+            run_gh.return_value = mock.Mock(returncode=0, stdout=b"", stderr=b"")
+            engine.transition_label(1, "status:design", "status:ready", run_id="X")
+            engine.transition_label(1, "status:design", "status:ready", run_id="X")
 
         assert run_gh.call_count == 1
 
     def test_gh_comment_repeated_with_same_run_id_no_double_invoke(
         self, tmp_path, monkeypatch
     ) -> None:
-        """Two gh_comment calls with the same run_id + body invoke gh once."""
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        """Two gh_comment calls with the same run_id + body invoke subprocess once."""
+        from core.pipeline.github import client as gh_client_mod
 
-        with mock.patch.object(engine, "gh") as run_gh:
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(gh_client_mod, "PROJECT_ROOT", tmp_path)
+
+        with mock.patch.object(gh_client_mod, "_run_gh") as run_gh:
+            run_gh.return_value = mock.Mock(returncode=0, stdout=b"", stderr=b"")
             engine.gh_comment(1, "hello", run_id="X")
             engine.gh_comment(1, "hello", run_id="X")
 
         assert run_gh.call_count == 1
 
-    def test_idempotency_log_file_is_created(
-        self, tmp_path, monkeypatch
-    ) -> None:
+    def test_idempotency_log_file_is_created(self, tmp_path, monkeypatch) -> None:
         """After a wrapped action, .ralph/issues/<N>/idempotency.jsonl exists."""
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        from core.pipeline.github import client as gh_client_mod
 
-        with mock.patch.object(engine, "gh") as run_gh:
-            engine.transition_label(
-                1, "status:design", "status:ready", run_id="X"
-            )
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(gh_client_mod, "PROJECT_ROOT", tmp_path)
+
+        with mock.patch.object(gh_client_mod, "_run_gh") as run_gh:
+            run_gh.return_value = mock.Mock(returncode=0, stdout=b"", stderr=b"")
+            engine.transition_label(1, "status:design", "status:ready", run_id="X")
 
         log = tmp_path / ".ralph" / "issues" / "1" / "idempotency.jsonl"
         assert log.exists()

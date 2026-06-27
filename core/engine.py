@@ -278,8 +278,21 @@ def gh(*args: str) -> subprocess.CompletedProcess:
     return run(["gh", *args])
 
 
-def gh_comment(issue_num: int, body: str) -> bool:
-    """Post a comment on the GitHub issue. Fail-soft."""
+def gh_comment(issue_num: int, body: str, run_id: Optional[str] = None) -> bool:
+    """Post a comment on the GitHub issue. Fail-soft.
+
+    When ``run_id`` is provided the call is wrapped in an idempotency
+    check: the (run_id, "comment", issue_num, body_hash) tuple is
+    recorded to ``.ralph/issues/<N>/idempotency.jsonl`` BEFORE invoking
+    ``gh``. Subsequent calls with the same tuple short-circuit.
+
+    Per spec §10.2 B2, this is what makes the engine crash-restart
+    safe — a daemon SIGKILL followed by a restart must not
+    double-post comments.
+    """
+    if run_id is not None:
+        gh_client = _build_github_client(run_id)
+        return gh_client.comment(issue_num, body)
     try:
         gh("issue", "comment", str(issue_num), "--body", body)
         return True
@@ -291,6 +304,24 @@ def gh_comment(issue_num: int, body: str) -> bool:
 def git(*args: str) -> subprocess.CompletedProcess:
     """Run `git` command. Raises on failure."""
     return run(["git", *args])
+
+
+def _build_github_client(run_id: str):
+    """Return a GitHubClient wired to the engine's PROJECT_ROOT.
+
+    The client's ``PROJECT_ROOT`` module attribute is patched so the
+    idempotency log lands under the same ``.ralph/`` tree the rest
+    of the engine writes to. Tests that monkeypatch
+    ``core.pipeline.github.client.PROJECT_ROOT`` after this call will
+    not be affected (the patch here is per-call).
+    """
+    from core.pipeline.github import client as _gh_client_mod
+    from core.pipeline.github.client import GitHubClient
+
+    # Sync the client's module-level PROJECT_ROOT with the engine's
+    # so the idempotency log lands under the correct .ralph/ tree.
+    _gh_client_mod.PROJECT_ROOT = PROJECT_ROOT
+    return GitHubClient(run_id)
 
 
 # ─────────────────────────────────────────────────────────
@@ -494,8 +525,33 @@ def transition_label(
     remove: Optional[str] = None,
     retries: int = 3,
     backoff: float = 2.0,
+    run_id: Optional[str] = None,
 ):
-    """Update issue labels via `gh issue edit`. Retries on transient failures."""
+    """Update issue labels via `gh issue edit`. Retries on transient failures.
+
+    When ``run_id`` is provided the call is wrapped in an idempotency
+    check via :class:`GitHubClient`. The (run_id, action, issue_num,
+    label-pair-hash) tuple is recorded to ``.ralph/issues/<N>/idempotency.jsonl``
+    BEFORE invoking ``gh``. Subsequent calls with the same tuple
+    short-circuit and return without invoking ``gh``.
+
+    Per spec §10.2 B2 this is what makes the engine crash-restart
+    safe — a daemon SIGKILL followed by a restart must not
+    double-transition labels.
+    """
+    if run_id is not None:
+        gh_client = _build_github_client(run_id)
+        ok = gh_client.transition_label(
+            issue_num, [add] if add else [], [remove] if remove else []
+        )
+        if ok:
+            print(
+                f"[ralph] #{issue_num} labels: +{add}"
+                + (f" / -{remove}" if remove else "")
+            )
+            sync_status(issue_num, add)
+        return
+
     cmd = ["issue", "edit", str(issue_num), "--add-label", add]
     if remove:
         cmd += ["--remove-label", remove]
