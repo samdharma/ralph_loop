@@ -134,3 +134,65 @@ def test_distinct_issues_get_distinct_directories(project_root: Path) -> None:
     assert (
         project_root / ".ralph" / "issues" / "2" / "artifacts" / "design.md"
     ).exists()
+
+
+# ─────────────────────────────────────────────────────────
+# C1.5d — artifacts at new path (spec §6.1, §6.2, §10.3 C1)
+# ─────────────────────────────────────────────────────────
+
+
+class TestArtifactsAtNewPath:
+    """C1.5d: artifacts module is at core/pipeline/agents/artifacts.py
+    (created in A-020) and the engine wires through it.
+
+    These tests verify the module is at the new path AND that all
+    four write_* functions continue to work. (Idempotency is
+    covered by the A-020 tests above.)
+    """
+
+    def test_write_design_at_new_path(self, project_root: Path) -> None:
+        """write_design creates the file at the new path."""
+        from core.pipeline.agents.artifacts import write_design
+
+        write_design(99, "design text for issue 99")
+        assert (
+            project_root / ".ralph" / "issues" / "99" / "artifacts" / "design.md"
+        ).exists()
+
+    def test_write_files_in_scope_at_new_path(self, project_root: Path) -> None:
+        """write_files_in_scope creates files_in_scope.json."""
+        from core.pipeline.agents.artifacts import write_files_in_scope
+
+        write_files_in_scope(99, ["a.py", "b.py"])
+        path = project_root / ".ralph" / "issues" / "99" / "artifacts" / "files_in_scope.json"
+        assert path.exists()
+
+    def test_write_acceptance_criteria_at_new_path(self, project_root: Path) -> None:
+        """write_acceptance_criteria creates acceptance_criteria.json."""
+        from core.pipeline.agents.artifacts import write_acceptance_criteria
+
+        write_acceptance_criteria(99, [{"id": "AC1", "criterion": "x"}])
+        path = (
+            project_root
+            / ".ralph"
+            / "issues"
+            / "99"
+            / "artifacts"
+            / "acceptance_criteria.json"
+        )
+        assert path.exists()
+
+    def test_write_qa_tests_at_new_path(self, project_root: Path) -> None:
+        """write_qa_tests creates qa_tests_to_pass.json."""
+        from core.pipeline.agents.artifacts import write_qa_tests
+
+        write_qa_tests(99, ["tests/unit/test_x.py"])
+        path = (
+            project_root
+            / ".ralph"
+            / "issues"
+            / "99"
+            / "artifacts"
+            / "qa_tests_to_pass.json"
+        )
+        assert path.exists()
