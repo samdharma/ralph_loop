@@ -1,14 +1,24 @@
 #!/usr/bin/env bash
-# Ralph v3 — One-Line Installer
+# Ralph v3.1 — Installer
 #
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
+# Usage (new in v3.1, replaces the v3 curl|bash flow):
+#   git clone https://github.com/samdharma/Ralph_loop
+#   cd Ralph_loop
+#   git checkout ralph-v3.1
+#   ./scripts/install.sh
 #
 # Or from a local clone:
-#   bash scripts/install.sh
+#   bash scripts/install.sh [--help]
 #
 # Installs ralph CLI to /usr/local/bin (or ~/.local/bin) and sets RALPH_HOME.
+# Preserves the bash dispatcher bin/ralph per spec §3.7 (only v3.2 may drop it).
 # Validates all prerequisites before installation.
+#
+# Prerequisites (per spec §4.1):
+#   - git 2.30+
+#   - gh 2.0+ (GitHub CLI)
+#   - python 3.10+
+#   - pi or kimi (one of the AI agent CLIs)
 
 set -euo pipefail
 
@@ -40,10 +50,16 @@ else
 fi
 
 echo "╔══════════════════════════════════════════╗"
-echo "║   Ralph v3 — Automated Build System      ║"
+echo "║   Ralph v3.1 — Automated Build System    ║"
 echo "║   Installer v${RALPH_VERSION}                     ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
+
+# --help prints usage and exits 0.
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    sed -n '2,30p' "$0"
+    exit 0
+fi
 
 # ──────────────────────────────────────────────────────────────
 # Step 1: Prerequisite Checks
