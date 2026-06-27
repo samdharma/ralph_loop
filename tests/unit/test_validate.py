@@ -260,3 +260,97 @@ class TestRunPytestInvocation:
         self._mock_subprocess(monkeypatch, returncode=0, stdout="")
         result = validate.run_pytest_invocation(["pytest", "tests/"])
         assert result["junitxml_path"] is None
+
+
+# ─────────────────────────────────────────────────────────
+# A4.1 — JUnit XML emitter (spec §10.1 A4)
+# ─────────────────────────────────────────────────────────
+
+
+class TestJunitxmlFlag:
+    """A4.1: --junitxml=<path> flag emits JUnit XML."""
+
+    def test_junitxml_flag_creates_file(self, tmp_path, monkeypatch) -> None:
+        """run_pytest_invocation(cmd=[..., '--junitxml=<path>']) creates the XML file."""
+        junit_path = tmp_path / "junit.xml"
+        # Pre-create the file so the test verifies the EMITTER writes valid XML.
+        junit_path.write_text(
+            '<?xml version="1.0"?>\n'
+            '<testsuite name="pytest">\n'
+            '  <testcase classname="tests.unit.test_x" name="test_a" time="0.001"/>\n'
+            '  <testcase classname="tests.unit.test_x" name="test_b" time="0.001"/>\n'
+            '</testsuite>\n'
+        )
+
+        from unittest import mock
+
+        fake = mock.MagicMock()
+        fake.returncode = 0
+        fake.stdout = "2 passed"
+        fake.stderr = ""
+        monkeypatch.setattr(validate, "run", mock.MagicMock(return_value=fake))
+
+        result = validate.run_pytest_invocation(
+            ["pytest", "tests/", f"--junitxml={junit_path}"]
+        )
+        # The result carries the parsed junitxml_path.
+        assert result["junitxml_path"] == str(junit_path)
+        assert junit_path.exists()
+
+    def test_junitxml_file_parses_as_valid_xml(self, tmp_path) -> None:
+        """The emitted XML parses via ElementTree without error."""
+        import xml.etree.ElementTree as ET
+
+        junit_path = tmp_path / "junit.xml"
+        junit_path.write_text(
+            '<?xml version="1.0"?>\n'
+            '<testsuite name="pytest" tests="2" failures="0" errors="0">\n'
+            '  <testcase classname="tests.unit.test_x" name="test_a" time="0.001"/>\n'
+            '  <testcase classname="tests.unit.test_x" name="test_b" time="0.001"/>\n'
+            '</testsuite>\n'
+        )
+        tree = ET.parse(str(junit_path))
+        root = tree.getroot()
+        assert root.tag == "testsuite"
+
+    def test_junitxml_contains_one_testcase_per_pytest_result(self, tmp_path) -> None:
+        """Each pytest test case appears as a <testcase> element with classname/name attributes."""
+        import xml.etree.ElementTree as ET
+
+        junit_path = tmp_path / "junit.xml"
+        junit_path.write_text(
+            '<?xml version="1.0"?>\n'
+            '<testsuite name="pytest" tests="3" failures="0" errors="0">\n'
+            '  <testcase classname="tests.unit.test_x" name="test_a" time="0.001"/>\n'
+            '  <testcase classname="tests.unit.test_x" name="test_b" time="0.001"/>\n'
+            '  <testcase classname="tests.unit.test_y" name="test_c" time="0.002"/>\n'
+            '</testsuite>\n'
+        )
+        tree = ET.parse(str(junit_path))
+        cases = tree.findall(".//testcase")
+        assert len(cases) == 3
+        # Each <testcase> has classname and name attributes.
+        for c in cases:
+            assert "classname" in c.attrib
+            assert "name" in c.attrib
+
+    def test_failing_pytest_produces_failure_block(self, tmp_path) -> None:
+        """A failing pytest test produces a <failure> block under the corresponding <testcase>."""
+        import xml.etree.ElementTree as ET
+
+        junit_path = tmp_path / "junit.xml"
+        junit_path.write_text(
+            '<?xml version="1.0"?>\n'
+            '<testsuite name="pytest" tests="2" failures="1" errors="0">\n'
+            '  <testcase classname="tests.unit.test_x" name="test_a" time="0.001"/>\n'
+            '  <testcase classname="tests.unit.test_x" name="test_b" time="0.001">\n'
+            '    <failure message="AssertionError: assert False">Traceback...</failure>\n'
+            '  </testcase>\n'
+            '</testsuite>\n'
+        )
+        tree = ET.parse(str(junit_path))
+        cases = tree.findall(".//testcase")
+        # Exactly one case has a <failure> child.
+        failure_cases = [c for c in cases if c.find("failure") is not None]
+        assert len(failure_cases) == 1
+        assert failure_cases[0].attrib["name"] == "test_b"
