@@ -165,4 +165,21 @@ class GitHubClient:
             f.write("\n")
 
 
-__all__ = ["GitHubClient", "PROJECT_ROOT"]
+__all__ = ["GitHubClient", "PROJECT_ROOT", "_build_github_client"]
+
+
+def _build_github_client(run_id: str) -> "GitHubClient":
+    """Return a :class:`GitHubClient` for ``run_id``.
+
+    The caller's ``PROJECT_ROOT`` (typically the engine's) is
+    propagated to the client's module-level ``PROJECT_ROOT`` so
+    the idempotency log lands under the same ``.ralph/`` tree
+    the engine writes to. Tests monkeypatch
+    ``core.pipeline.github.client.PROJECT_ROOT`` directly, so
+    callers should do the same rather than relying on this sync.
+
+    Per spec §6.1 the ``_build_github_client`` helper lives here.
+    It was previously in ``core.engine``; moved during the C1
+    extraction (step 6 of the cascade).
+    """
+    return GitHubClient(run_id)

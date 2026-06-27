@@ -312,46 +312,14 @@ def gh(*args: str) -> subprocess.CompletedProcess:
     return run(["gh", *args])
 
 
-def gh_comment(issue_num: int, body: str, run_id: Optional[str] = None) -> bool:
-    """Post a comment on the GitHub issue. Fail-soft.
-
-    When ``run_id`` is provided the call is wrapped in an idempotency
-    check: the (run_id, "comment", issue_num, body_hash) tuple is
-    recorded to ``.ralph/issues/<N>/idempotency.jsonl`` BEFORE invoking
-    ``gh``. Subsequent calls with the same tuple short-circuit.
-
-    Per spec §10.2 B2, this is what makes the engine crash-restart
-    safe — a daemon SIGKILL followed by a restart must not
-    double-post comments.
-
-    Per spec §10.2 B4.3, every successful comment also emits a
-    ``TrajectoryEvent`` (specifically, a SubagentInvocation-shaped
-    record is emitted via ``_emit_trajectory`` so the trajectory file
-    remains the canonical log of engine side effects).
-    """
-    ok: bool
-    if run_id is not None:
-        gh_client = _build_github_client(run_id)
-        ok = gh_client.comment(issue_num, body)
-    else:
-        try:
-            gh("issue", "comment", str(issue_num), "--body", body)
-            ok = True
-        except subprocess.CalledProcessError as e:
-            print(f"[ralph] WARNING: could not comment on #{issue_num}: {e}")
-            ok = False
-    # Trajectory: emit a SubagentInvocation-shaped event for the gh CLI.
-    # Comments don't have a dedicated TrajectoryEvent variant; reusing
-    # SubagentInvocation with agent_binary='gh' is the documented
-    # mapping per spec §10.2 B4.
-    _emit_trajectory(
-        issue_num,
-        run_id,
-        "subagent_invocation",
-        agent_binary="gh",
-        prompt_size_bytes=len(body),
-    )
-    return ok
+# ─────────────────────────────────────────────────────────
+# C1 step 4 — github/comments.py re-exports (per plan §1.1 C1)
+# ─────────────────────────────────────────────────────────
+# gh_comment lives at core.pipeline.github.comments (per spec §6.1,
+# §10.3 C1). It is re-imported here so existing callers that
+# ``from core.engine import gh_comment`` continue to work. New code
+# should import directly from core.pipeline.github.comments.
+from core.pipeline.github.comments import gh_comment  # noqa: E402,F401
 
 
 def git(*args: str) -> subprocess.CompletedProcess:
@@ -359,22 +327,15 @@ def git(*args: str) -> subprocess.CompletedProcess:
     return run(["git", *args])
 
 
-def _build_github_client(run_id: str):
-    """Return a GitHubClient wired to the engine's PROJECT_ROOT.
-
-    The client's ``PROJECT_ROOT`` module attribute is patched so the
-    idempotency log lands under the same ``.ralph/`` tree the rest
-    of the engine writes to. Tests that monkeypatch
-    ``core.pipeline.github.client.PROJECT_ROOT`` after this call will
-    not be affected (the patch here is per-call).
-    """
-    from core.pipeline.github import client as _gh_client_mod
-    from core.pipeline.github.client import GitHubClient
-
-    # Sync the client's module-level PROJECT_ROOT with the engine's
-    # so the idempotency log lands under the correct .ralph/ tree.
-    _gh_client_mod.PROJECT_ROOT = PROJECT_ROOT
-    return GitHubClient(run_id)
+# ─────────────────────────────────────────────────────────
+# C1 step 6 — github/client.py re-exports (per plan §1.1 C1)
+# ─────────────────────────────────────────────────────────
+# _build_github_client lives at core.pipeline.github.client (per
+# spec §6.1, §10.3 C1). It is re-imported here so existing callers
+# that ``from core.engine import _build_github_client`` continue
+# to work. New code should import directly from
+# core.pipeline.github.client.
+from core.pipeline.github.client import _build_github_client  # noqa: E402,F401
 
 
 # Per spec §7.2 — frozen dataclass for retry budget.
