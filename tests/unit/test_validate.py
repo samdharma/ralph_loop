@@ -55,7 +55,7 @@ def test_run_pytest_split_by_directory_runs_per_directory():
 
     def fake_invocation(cmd, env=None):
         calls.append((cmd, env))
-        return 0
+        return {"exit_code": 0, "classification": "success", "action": "accept", "stdout_tail": "", "junitxml_path": None}
 
     with mock.patch.object(validate, "run_pytest_invocation", fake_invocation):
         exit_code = validate.run_pytest_split_by_directory(
@@ -95,8 +95,8 @@ def test_run_pytest_split_by_directory_returns_worst_exit_code():
     def fake_invocation(cmd, env=None):
         # Return 1 for unit, 0 for integration (alphabetical order)
         if any("unit" in part for part in cmd):
-            return 1
-        return 0
+            return {"exit_code": 1, "classification": "test_failure", "action": "block", "stdout_tail": "", "junitxml_path": None}
+        return {"exit_code": 0, "classification": "success", "action": "accept", "stdout_tail": "", "junitxml_path": None}
 
     with mock.patch.object(validate, "run_pytest_invocation", fake_invocation):
         exit_code = validate.run_pytest_split_by_directory(

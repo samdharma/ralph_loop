@@ -207,20 +207,49 @@ def classify_pytest_exit_code(exit_code: int) -> Classification:
     return Classification(exit_code, "unknown", "block")
 
 
-def run_pytest_invocation(cmd: list[str], env: dict[str, str] | None = None) -> int:
-    """Run a single pytest invocation. Returns exit code.
+_STDOUT_TAIL_LINES = 50  # Spec §10.1 A5: tail of agent stdout in failure reports
+
+
+def run_pytest_invocation(cmd: list[str], env: dict[str, str] | None = None) -> dict:
+    """Run a single pytest invocation. Returns a structured result dict.
+
+    Per spec §10.1 A1 (A1.2 emitter), the result dict has keys:
+      - exit_code: int
+      - classification: str (from classify_pytest_exit_code)
+      - action: str (from classify_pytest_exit_code)
+      - stdout_tail: str (last 50 lines of pytest stdout)
+      - junitxml_path: str | None (path to JUnit XML if --junitxml was passed)
 
     Returns 124 on timeout (mimics `timeout` command convention) so the
     caller can distinguish a hung test from a genuine failure.
     """
     print(f"[ralph] pytest invocation: {' '.join(cmd)}")
     timeout = PYTEST_TIMEOUT if PYTEST_TIMEOUT > 0 else None
+
+    # Detect --junitxml=<path> in the command line for the structured result.
+    junitxml_path: str | None = None
+    for arg in cmd:
+        if isinstance(arg, str) and arg.startswith("--junitxml="):
+            junitxml_path = arg.split("=", 1)[1]
+
     try:
         result = run(cmd, check=False, env=env, timeout=timeout)
-        return result.returncode
+        exit_code = result.returncode
+        stdout = result.stdout or ""
     except subprocess.TimeoutExpired:
         print(f"[ralph] pytest timed out after {PYTEST_TIMEOUT}s")
-        return 124
+        exit_code = 124
+        stdout = ""
+
+    classification = classify_pytest_exit_code(exit_code)
+    stdout_tail = "\n".join(stdout.splitlines()[-_STDOUT_TAIL_LINES:])
+    return {
+        "exit_code": exit_code,
+        "classification": classification.classification,
+        "action": classification.action,
+        "stdout_tail": stdout_tail,
+        "junitxml_path": junitxml_path,
+    }
 
 
 def run_pytest_split_by_directory(
@@ -243,7 +272,8 @@ def run_pytest_split_by_directory(
     for dir_path in sorted(by_dir):
         dir_paths = sorted(by_dir[dir_path])
         cmd = base + dir_paths + suffix
-        exit_code = run_pytest_invocation(cmd, env=env)
+        result = run_pytest_invocation(cmd, env=env)
+        exit_code = result["exit_code"]
         if exit_code > max_exit:
             max_exit = exit_code
     return max_exit
@@ -325,7 +355,8 @@ def run_pytest(tier: str, pytest_paths: list[str] | None = None) -> int:
         return run_pytest_split_by_directory(base, paths, suffix, env=env)
 
     cmd = base + paths + suffix
-    return run_pytest_invocation(cmd, env=env)
+    # Internal callers (run_pytest, validate) consume only exit_code.
+    return run_pytest_invocation(cmd, env=env)["exit_code"]
 
 
 def run_lint(tool: str, files: list[str]) -> bool:
