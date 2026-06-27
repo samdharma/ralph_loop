@@ -641,6 +641,12 @@ def main() -> int:
         help="Run critical-path tests first (per [validate] critical_paths "
         "in .ralph/config.toml or this flag). Failure blocks BUILD.",
     )
+    parser.add_argument(
+        "--unquarantine-stale",
+        action="store_true",
+        help="Remove quarantine.yaml entries older than 7 days "
+        "(per spec §10.3 C3). Prints the count of removed entries.",
+    )
     args = parser.parse_args()
 
     # Also support --tier=value from the old bash CLI style
@@ -648,6 +654,10 @@ def main() -> int:
         os.environ["RALPH_JUNITXML"] = args.junitxml
     if args.critical:
         os.environ["RALPH_CRITICAL"] = "1"
+    if args.unquarantine_stale:
+        removed = unquarantine_stale_entries()
+        print(f"[ralph] Removed {removed} stale quarantine entries.")
+        return 0
     return validate(args.tier, pytest_paths=args.pytest_paths)
 
 
@@ -880,3 +890,61 @@ def auto_quarantine_test(
     entries.append(entry)
     save_quarantine_entries(entries)
     return True
+
+
+# ─────────────────────────────────────────────────────────
+# C3.3 — Auto-unquarantine after 7 days (spec §10.3 C3)
+# ─────────────────────────────────────────────────────────
+#
+# Per spec §10.3 C3: entries older than 7 days are auto-removed by the
+# ``--unquarantine-stale`` CLI flag (or a scheduled sweep). The cutoff
+# is configurable via the ``now`` parameter (defaults to "now in UTC")
+# so tests can pin a specific moment in time.
+
+_STALE_DAYS = 7
+
+
+def _parse_isoformat(s: str) -> datetime:
+    """Parse an ISO 8601 timestamp. Accepts trailing 'Z' as UTC."""
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    return datetime.fromisoformat(s)
+
+
+def unquarantine_stale_entries(now: str | None = None) -> int:
+    """Remove entries with ``added_at`` older than 7 days from quarantine.
+
+    Returns the count of removed entries. Idempotent on re-run.
+    The ``now`` parameter accepts an ISO 8601 timestamp string;
+    defaults to current UTC.
+    """
+    entries = load_quarantine_entries()
+    if not entries:
+        return 0
+    if now is None:
+        cutoff = datetime.now(timezone.utc)
+    else:
+        cutoff = _parse_isoformat(now)
+        if cutoff.tzinfo is None:
+            cutoff = cutoff.replace(tzinfo=timezone.utc)
+
+    kept: list[dict] = []
+    removed = 0
+    for entry in entries:
+        added_at_raw = entry.get("added_at", "")
+        try:
+            added_at = _parse_isoformat(added_at_raw)
+            if added_at.tzinfo is None:
+                added_at = added_at.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            # Malformed timestamp — keep the entry (don't lose data).
+            kept.append(entry)
+            continue
+        age = cutoff - added_at
+        if age.days >= _STALE_DAYS:
+            removed += 1
+        else:
+            kept.append(entry)
+    if removed > 0:
+        save_quarantine_entries(kept)
+    return removed
