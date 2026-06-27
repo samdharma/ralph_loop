@@ -24,8 +24,6 @@ import re
 import sys
 from pathlib import Path
 
-import pytest
-
 # Make core/ importable without installing Ralph.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "core"))
 
