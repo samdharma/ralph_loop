@@ -211,10 +211,18 @@ class Classification:
 
 # Pytest exit codes and their meaning.
 # Reference: pytest docs + POSIX signal conventions.
+#
+# Per spec §10.2 B1, the `action` field drives retry-vs-block:
+#   - exit 0   → accept
+#   - exit 1-2 → test_failure / retry_l2 (up to 2 retries)
+#   - exit 3-5 → internal_error / block
+#   - exit 124 → timeout / retry_transient (up to 1 retry)
+#   - exit 137, 143 → interrupted / retry_transient (DISTINCT from timeout)
+#   - other   → unknown / block
 _PYTEST_EXIT_TABLE: dict[int, Classification] = {
     0: Classification(0, "success", "accept"),
-    1: Classification(1, "test_failure", "block"),
-    2: Classification(2, "test_failure", "block"),  # test execution interrupted
+    1: Classification(1, "test_failure", "retry_l2"),
+    2: Classification(2, "test_failure", "retry_l2"),  # test execution interrupted
     3: Classification(3, "internal_error", "block"),  # internal error
     4: Classification(4, "test_failure", "block"),  # pytest usage error
     5: Classification(
@@ -227,9 +235,10 @@ _PYTEST_EXIT_TABLE: dict[int, Classification] = {
 def classify_pytest_exit_code(exit_code: int) -> Classification:
     """Classify a pytest exit code into a structured Classification.
 
-    Per spec §10.1 A1:
+    Per spec §10.1 A1 + §10.2 B1:
     - exit 0   → success / accept
-    - exit 1-5 → test_failure or internal_error / block
+    - exit 1-2 → test_failure / retry_l2 (up to 2 retries)
+    - exit 3-5 → internal_error / block
     - exit 124 → timeout / retry_transient
     - exit 137 → interrupted (SIGKILL) / retry_transient (DISTINCT from timeout)
     - exit 143 → interrupted (SIGTERM) / retry_transient (DISTINCT from timeout)
@@ -242,6 +251,36 @@ def classify_pytest_exit_code(exit_code: int) -> Classification:
     if exit_code in _PYTEST_EXIT_TABLE:
         return _PYTEST_EXIT_TABLE[exit_code]
     return Classification(exit_code, "unknown", "block")
+
+
+# Per spec §7.2 — frozen dataclass for retry policy lookup tables.
+@dataclass(frozen=True)
+class RetryPolicy:
+    """Retry policy keyed by action and exit code.
+
+    Per spec §10.2 B1 the engine consults the policy at each retry
+    decision. ``applies_to`` is a frozenset of pytest exit codes that
+    the policy applies to (used by ``B1.1 retry_budget_config``).
+    """
+
+    max_attempts: int
+    backoff_seconds: float
+    applies_to: frozenset[int]
+
+
+# Per spec §10.2 B1 — DESIGN-stage failures block regardless of exit
+# code, even when the classifier alone would suggest retry. This is
+# enforced via :func:`retry_action_for_stage` below.
+def retry_action_for_stage(classified_action: str, stage: str) -> str:
+    """Return the effective action for a stage.
+
+    Per spec §10.2 B1, the DESIGN stage is fail-fast: any failure —
+    even one the classifier labels as retryable — is final and blocks
+    the pipeline. All other stages honour the classifier's decision.
+    """
+    if stage == "design" and classified_action != "accept":
+        return "block"
+    return classified_action
 
 
 _STDOUT_TAIL_LINES = 50  # Spec §10.1 A5: tail of agent stdout in failure reports
