@@ -1105,6 +1105,17 @@ def _run_test_subagent(issue: dict) -> bool:
         )
 
     if success:
+        # A2.1: hard-block test tampering — chmod the QA-written test files
+        # to 0o444 so the IMPLEMENT sub-agent cannot modify them. Idempotent.
+        if new_tests:
+            for rel_path in new_tests:
+                abs_path = PROJECT_ROOT / rel_path if not Path(rel_path).is_absolute() else Path(rel_path)
+                if abs_path.exists():
+                    try:
+                        os.chmod(abs_path, 0o444)
+                        print(f"[ralph] Locked QA test: {rel_path} (mode 0o444)")
+                    except OSError as e:
+                        print(f"[ralph] WARNING: failed to chmod {rel_path}: {e}")
         gh_comment(issue_num, "✅ TEST sub-agent completed.")
     else:
         gh_comment(
