@@ -691,3 +691,135 @@ class TestQuarantineSchema:
         # --deselect appears with the test_id.
         assert "--deselect" in result_cmd
         assert "tests/unit/x.py::test_y" in result_cmd
+
+
+# ─────────────────────────────────────────────────────────
+# C3.2 — Quarantine auto-add on 2 consecutive failures (spec §10.3 C3)
+# ─────────────────────────────────────────────────────────
+
+
+class TestAutoQuarantine:
+    """C3.2: auto-add a test to quarantine.yaml after 2 consecutive failures.
+
+    Per spec §10.3 C3 and plan §3 R-7: state file at
+    ``.ralph/test-failure-history.jsonl`` tracks per-test failure
+    timestamps. On each validate run, the engine scans the last 2
+    runs; if a test_id appears in both with no intervening pass, it is
+    auto-added to ``tests/quarantine.yaml`` with ``auto_added: true``.
+
+    This block is RED: ``record_test_result``, ``should_auto_quarantine``,
+    ``auto_quarantine_test``, and ``TEST_FAILURE_HISTORY_FILE`` do not
+    exist yet.
+    """
+
+    def _write_history_jsonl(self, tmp_path: Path, history: list[dict]) -> Path:
+        """Write a .ralph/test-failure-history.jsonl with the given runs."""
+        import json
+
+        ralph_dir = tmp_path / ".ralph"
+        ralph_dir.mkdir(parents=True, exist_ok=True)
+        path = ralph_dir / "test-failure-history.jsonl"
+        with path.open("w", encoding="utf-8") as f:
+            for run in history:
+                f.write(json.dumps(run) + "\n")
+        return path
+
+    def test_single_failure_no_auto_add(self, tmp_path, monkeypatch) -> None:
+        """A single failure does NOT trigger auto-quarantine."""
+        from core import validate
+
+        # History has one run with one failure for test_x.
+        history = [
+            {
+                "run_at": "2026-06-27T12:00:00Z",
+                "failures": ["tests/unit/x.py::test_x"],
+                "passes": [],
+            }
+        ]
+        history_path = self._write_history_jsonl(tmp_path, history)
+        monkeypatch.setattr(validate, "TEST_FAILURE_HISTORY_FILE", history_path)
+
+        assert validate.should_auto_quarantine("tests/unit/x.py::test_x") is False
+
+    def test_two_consecutive_failures_auto_adds(self, tmp_path, monkeypatch) -> None:
+        """2 consecutive failures (no intervening pass) → auto-quarantine."""
+        from core import validate
+
+        history = [
+            {
+                "run_at": "2026-06-27T12:00:00Z",
+                "failures": ["tests/unit/x.py::test_y"],
+                "passes": [],
+            },
+            {
+                "run_at": "2026-06-27T13:00:00Z",
+                "failures": ["tests/unit/x.py::test_y"],
+                "passes": [],
+            },
+        ]
+        history_path = self._write_history_jsonl(tmp_path, history)
+        monkeypatch.setattr(validate, "TEST_FAILURE_HISTORY_FILE", history_path)
+        quarantine_path = self._write_quarantine_yaml(tmp_path, [])
+        monkeypatch.setattr(validate, "QUARANTINE_FILE", quarantine_path)
+
+        assert validate.should_auto_quarantine("tests/unit/x.py::test_y") is True
+        added = validate.auto_quarantine_test(
+            "tests/unit/x.py::test_y", reason="two consecutive failures"
+        )
+        assert added is True
+
+        # The entry is now in tests/quarantine.yaml with auto_added=True.
+        entries = validate.load_quarantine_entries()
+        assert len(entries) == 1
+        assert entries[0]["test_id"] == "tests/unit/x.py::test_y"
+        assert entries[0]["auto_added"] is True
+
+    def test_failure_passed_failure_no_auto_add(self, tmp_path, monkeypatch) -> None:
+        """2 failures separated by a passing run → no auto-quarantine."""
+        from core import validate
+
+        history = [
+            {
+                "run_at": "2026-06-27T12:00:00Z",
+                "failures": ["tests/unit/x.py::test_z"],
+                "passes": [],
+            },
+            {
+                "run_at": "2026-06-27T13:00:00Z",
+                "failures": [],
+                "passes": ["tests/unit/x.py::test_z"],
+            },
+            {
+                "run_at": "2026-06-27T14:00:00Z",
+                "failures": ["tests/unit/x.py::test_z"],
+                "passes": [],
+            },
+        ]
+        history_path = self._write_history_jsonl(tmp_path, history)
+        monkeypatch.setattr(validate, "TEST_FAILURE_HISTORY_FILE", history_path)
+
+        assert validate.should_auto_quarantine("tests/unit/x.py::test_z") is False
+
+    def test_record_test_result_appends_to_history(self, tmp_path, monkeypatch) -> None:
+        """record_test_result appends a single run entry to the JSONL."""
+        from core import validate
+
+        history_path = self._write_history_jsonl(tmp_path, [])
+        monkeypatch.setattr(validate, "TEST_FAILURE_HISTORY_FILE", history_path)
+
+        validate.record_test_result(
+            failures=["tests/unit/a.py::test_b"],
+            passes=["tests/unit/c.py::test_d"],
+            run_at="2026-06-27T15:00:00Z",
+        )
+
+        # History now has one run.
+        assert history_path.exists()
+        lines = history_path.read_text(encoding="utf-8").strip().splitlines()
+        assert len(lines) == 1
+        import json
+
+        run = json.loads(lines[0])
+        assert run["failures"] == ["tests/unit/a.py::test_b"]
+        assert run["passes"] == ["tests/unit/c.py::test_d"]
+        assert run["run_at"] == "2026-06-27T15:00:00Z"
