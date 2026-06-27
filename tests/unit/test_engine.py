@@ -1341,9 +1341,7 @@ class TestSubagentsUseWorktree:
             mock.patch.object(
                 agents_base, "create_worktree", return_value=wt_path
             ) as create_wt,
-            mock.patch.object(
-                agents_base, "remove_worktree"
-            ) as remove_wt,
+            mock.patch.object(agents_base, "remove_worktree") as remove_wt,
             mock.patch.object(engine, "invoke_agent", return_value=True),
             mock.patch.object(engine, "gh_comment"),
             mock.patch.object(engine, "log_metrics"),
@@ -1370,12 +1368,8 @@ class TestSubagentsUseWorktree:
         wt_path.mkdir(parents=True, exist_ok=True)
 
         with (
-            mock.patch.object(
-                agents_base, "create_worktree", return_value=wt_path
-            ),
-            mock.patch.object(
-                agents_base, "remove_worktree"
-            ) as remove_wt,
+            mock.patch.object(agents_base, "create_worktree", return_value=wt_path),
+            mock.patch.object(agents_base, "remove_worktree") as remove_wt,
             mock.patch.object(engine, "invoke_agent", return_value=False),
             mock.patch.object(engine, "gh_comment"),
             mock.patch.object(engine, "log_metrics"),
@@ -1405,9 +1399,7 @@ class TestSubagentsUseWorktree:
             mock.patch.object(
                 agents_base, "create_worktree", return_value=wt_path
             ) as create_wt,
-            mock.patch.object(
-                agents_base, "remove_worktree"
-            ) as remove_wt,
+            mock.patch.object(agents_base, "remove_worktree") as remove_wt,
             mock.patch.object(engine, "invoke_agent", return_value=True),
             mock.patch.object(engine, "gh_comment"),
             mock.patch.object(engine, "log_metrics"),

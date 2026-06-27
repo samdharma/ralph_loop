@@ -1109,144 +1109,173 @@ def run_verify_stage(issue: dict) -> bool:
     STAGE 3: VERIFY — Mode A isolated sub-agent.
     Fresh session. Sees only: issue + design spec + git diff.
     Does 5-axis review + validation gate.
+
+    Per spec §10.2 B3, the agent runs inside a git worktree so it
+    cannot corrupt the parent repo. ``create_worktree`` runs first;
+    ``remove_worktree`` runs in a finally block to survive failures.
     """
     issue_num = issue["number"]
+    from core.pipeline.agents.base import create_worktree, remove_worktree
+
     print(f"\n[ralph] STAGE 3/3: VERIFY for #{issue_num}")
     gh_comment(issue_num, "🔍 VERIFY stage started (independent review).")
     log_metrics(
         "stage_start", issue=str(issue_num), stage="verify", subagent="verify", mode="A"
     )
 
-    # Get the git diff for the reviewer to inspect
-    pre_sha = (
-        git("rev-parse", "HEAD~1").stdout.strip()
-        if _has_commits()
-        else git("rev-parse", "HEAD").stdout.strip()
-    )
-    diff = git("diff", pre_sha, "HEAD").stdout if _has_commits() else ""
-
-    # Mode A: assemble prompt with minimal context (no codebase reference)
-    prompt = _assemble_subagent_prompt(issue, "verify.md", mode="A")
-
-    # Include git diff
-    if diff:
-        prompt += f"\n\n## Git Diff (changes to review)\n\n```diff\n{diff[:8000]}\n```"
-        if len(diff) > 8000:
-            prompt += "\n\n(…diff truncated — review key files from the repo)"
-
-    agent_ok = invoke_agent(prompt, issue_num)
-    if agent_ok:
-        gh_comment(issue_num, "✅ VERIFY review sub-agent completed.")
-    else:
-        gh_comment(issue_num, "❌ VERIFY review sub-agent failed.")
-
-    # Determine the agent's own verdict by checking the last issue comment.
-    # The agent writes "## Overall: PASS" or "## Overall: FAIL" per the verify.md prompt.
-    agent_verdict_pass: Optional[bool] = None
+    wt_path: Optional[Path] = None
     try:
-        comments_json = gh(
-            "issue",
-            "view",
-            str(issue_num),
-            "--json",
-            "comments",
-            "-q",
-            ".comments[-1].body",
-        ).stdout
-        if '"## Overall: FAIL"' in comments_json or '"Overall: FAIL"' in comments_json:
-            agent_verdict_pass = False
-        elif (
-            '"## Overall: PASS"' in comments_json or '"Overall: PASS"' in comments_json
-        ):
-            agent_verdict_pass = True
-    except Exception:
-        pass
+        wt_path = create_worktree(issue_num)
+    except RuntimeError as e:
+        print(f"[ralph] WARNING: worktree unavailable, running in repo root: {e}")
 
-    # The stage passes only if BOTH the agent exited 0 AND the agent's
-    # textual verdict is PASS (no override means we trust the exit code).
-    if agent_verdict_pass is False:
-        print("[ralph] VERIFY agent returned FAIL verdict — forcing stage failure")
-        gh_comment(issue_num, "❌ VERIFY review failed — agent reported FAIL. ")
-        success = False
-    else:
-        success = agent_ok
+    final_success: bool = False
+    try:
+        # Get the git diff for the reviewer to inspect
+        pre_sha = (
+            git("rev-parse", "HEAD~1").stdout.strip()
+            if _has_commits()
+            else git("rev-parse", "HEAD").stdout.strip()
+        )
+        diff = git("diff", pre_sha, "HEAD").stdout if _has_commits() else ""
 
-    log_metrics(
-        "subagent_complete",
-        issue=str(issue_num),
-        subagent="verify",
-        mode="A",
-        result="success" if success else "failure",
-        agent_verdict=(
-            "fail"
-            if agent_verdict_pass is False
-            else "pass" if agent_verdict_pass else "unknown"
-        ),
-    )
+        # Mode A: assemble prompt with minimal context (no codebase reference)
+        prompt = _assemble_subagent_prompt(issue, "verify.md", mode="A")
 
-    # Run validation gate after review
-    if success:
-        print("\n[ralph] Running validation gate...")
-        core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
-        qa_tests = _load_test_tracking(issue_num)
-        qa_tests = [
-            t for t in qa_tests if t.endswith(".py") and "__pycache__" not in t
-        ]  # Defense: skip cache artifacts
-        qa_tests = _resolve_existing_test_paths(qa_tests)
-        if qa_tests:
-            print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
-            val_result = run(
-                [
-                    sys.executable,
-                    os.path.join(core_dir, "validate.py"),
-                    "--tier",
-                    "targeted",
-                    "--pytest-paths",
-                ]
-                + qa_tests,
-                check=False,
-                capture=True,
+        # Include git diff
+        if diff:
+            prompt += (
+                f"\n\n## Git Diff (changes to review)\n\n```diff\n{diff[:8000]}\n```"
             )
+            if len(diff) > 8000:
+                prompt += "\n\n(…diff truncated — review key files from the repo)"
+
+        agent_ok = invoke_agent(prompt, issue_num)
+        if agent_ok:
+            gh_comment(issue_num, "✅ VERIFY review sub-agent completed.")
         else:
-            print("[ralph] No QA-written tests detected; falling back to targeted tier")
-            val_result = run(
-                [
-                    sys.executable,
-                    os.path.join(core_dir, "validate.py"),
-                    "--tier",
-                    "targeted",
-                ],
-                check=False,
-                capture=True,
-            )
-        success = val_result.returncode == 0
+            gh_comment(issue_num, "❌ VERIFY review sub-agent failed.")
+
+        # Determine the agent's own verdict by checking the last issue comment.
+        # The agent writes "## Overall: PASS" or "## Overall: FAIL" per the verify.md prompt.
+        agent_verdict_pass: Optional[bool] = None
+        try:
+            comments_json = gh(
+                "issue",
+                "view",
+                str(issue_num),
+                "--json",
+                "comments",
+                "-q",
+                ".comments[-1].body",
+            ).stdout
+            if (
+                '"## Overall: FAIL"' in comments_json
+                or '"Overall: FAIL"' in comments_json
+            ):
+                agent_verdict_pass = False
+            elif (
+                '"## Overall: PASS"' in comments_json
+                or '"Overall: PASS"' in comments_json
+            ):
+                agent_verdict_pass = True
+        except Exception:
+            pass
+
+        # The stage passes only if BOTH the agent exited 0 AND the agent's
+        # textual verdict is PASS (no override means we trust the exit code).
+        if agent_verdict_pass is False:
+            print("[ralph] VERIFY agent returned FAIL verdict — forcing stage failure")
+            gh_comment(issue_num, "❌ VERIFY review failed — agent reported FAIL. ")
+            success = False
+        else:
+            success = agent_ok
+
+        log_metrics(
+            "subagent_complete",
+            issue=str(issue_num),
+            subagent="verify",
+            mode="A",
+            result="success" if success else "failure",
+            agent_verdict=(
+                "fail"
+                if agent_verdict_pass is False
+                else "pass" if agent_verdict_pass else "unknown"
+            ),
+        )
+
+        # Run validation gate after review
         if success:
-            gh_comment(issue_num, "✅ VERIFY validation gate passed.")
-        else:
-            gh_comment(issue_num, "❌ VERIFY validation gate failed.")
-            # Echo output to terminal and capture for report
-            val_output = (val_result.stdout or "") + "\n" + (val_result.stderr or "")
-            if val_result.stdout:
-                print(val_result.stdout, end="")
-            if val_result.stderr:
-                print(val_result.stderr, end="", file=sys.stderr)
-            failure_summary = _extract_failure_summary(
-                val_result.stdout or "", val_result.stderr or ""
-            )
-            _write_stage_report(
-                issue_num,
-                "VERIFY",
-                "VALIDATION gate",
-                val_output.strip() or "(no output captured)",
-            )
-            detail = _format_stage_failure(
-                "VERIFY",
-                report_content=failure_summary,
-            )
-            gh_comment(issue_num, detail)
+            print("\n[ralph] Running validation gate...")
+            core_dir = os.environ.get("RALPH_CORE_DIR", str(Path(__file__).parent))
+            qa_tests = _load_test_tracking(issue_num)
+            qa_tests = [
+                t for t in qa_tests if t.endswith(".py") and "__pycache__" not in t
+            ]  # Defense: skip cache artifacts
+            qa_tests = _resolve_existing_test_paths(qa_tests)
+            if qa_tests:
+                print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
+                val_result = run(
+                    [
+                        sys.executable,
+                        os.path.join(core_dir, "validate.py"),
+                        "--tier",
+                        "targeted",
+                        "--pytest-paths",
+                    ]
+                    + qa_tests,
+                    check=False,
+                    capture=True,
+                )
+            else:
+                print(
+                    "[ralph] No QA-written tests detected; falling back to targeted tier"
+                )
+                val_result = run(
+                    [
+                        sys.executable,
+                        os.path.join(core_dir, "validate.py"),
+                        "--tier",
+                        "targeted",
+                    ],
+                    check=False,
+                    capture=True,
+                )
+            success = val_result.returncode == 0
+            if success:
+                gh_comment(issue_num, "✅ VERIFY validation gate passed.")
+            else:
+                gh_comment(issue_num, "❌ VERIFY validation gate failed.")
+                # Echo output to terminal and capture for report
+                val_output = (
+                    (val_result.stdout or "") + "\n" + (val_result.stderr or "")
+                )
+                if val_result.stdout:
+                    print(val_result.stdout, end="")
+                if val_result.stderr:
+                    print(val_result.stderr, end="", file=sys.stderr)
+                failure_summary = _extract_failure_summary(
+                    val_result.stdout or "", val_result.stderr or ""
+                )
+                _write_stage_report(
+                    issue_num,
+                    "VERIFY",
+                    "VALIDATION gate",
+                    val_output.strip() or "(no output captured)",
+                )
+                detail = _format_stage_failure(
+                    "VERIFY",
+                    report_content=failure_summary,
+                )
+                gh_comment(issue_num, detail)
 
-    log_metrics("stage_complete", issue=str(issue_num), stage="verify")
-    return success
+            log_metrics("stage_complete", issue=str(issue_num), stage="verify")
+        final_success = success
+    finally:
+        if wt_path is not None:
+            remove_worktree(wt_path)
+
+    return final_success
 
 
 # ─────────────────────────────────────────────────────────
@@ -1260,58 +1289,76 @@ def _run_test_subagent(issue: dict) -> bool:
     Sees design spec ONLY. Writes tests that SHOULD FAIL.
     No implementation code visibility.
     Snapshots tests/ before and after so VERIFY can run only these QA-written tests.
+
+    Per spec §10.2 B3, the agent runs inside a git worktree so it
+    cannot corrupt the parent repo. ``create_worktree`` runs first;
+    ``remove_worktree`` runs in a finally block to survive failures.
     """
     issue_num = issue["number"]
+    from core.pipeline.agents.base import create_worktree, remove_worktree
+
     print(f"\n  [ralph] BUILD / TEST sub-agent for #{issue_num} (Mode A — isolated)")
     gh_comment(issue_num, "🧪 TEST sub-agent started (isolated).")
     log_metrics("subagent_start", issue=str(issue_num), subagent="test", mode="A")
 
-    before_tests = _snapshot_tests_dir()
-    prompt = _assemble_subagent_prompt(issue, "test.md", mode="A")
-    success = invoke_agent(prompt, issue_num)
-    after_tests = _snapshot_tests_dir()
-    new_tests = _detect_new_tests(before_tests, after_tests)
-    _save_test_tracking(issue_num, new_tests)
-    if new_tests:
-        print(f"  [ralph] TEST stage created/modified tests: {new_tests}")
-        gh_comment(
-            issue_num,
-            f"🧪 TEST stage produced {len(new_tests)} test file(s): "
-            f"{', '.join(new_tests)}",
-        )
+    wt_path: Optional[Path] = None
+    try:
+        wt_path = create_worktree(issue_num)
+    except RuntimeError as e:
+        # Worktree unavailable (e.g., git too old). Fall back to running
+        # in the repo root — operators get a clear error message in logs.
+        print(f"[ralph] WARNING: worktree unavailable, running in repo root: {e}")
 
-    if success:
-        # A2.1: hard-block test tampering — chmod the QA-written test files
-        # to 0o444 so the IMPLEMENT sub-agent cannot modify them. Idempotent.
+    try:
+        before_tests = _snapshot_tests_dir()
+        prompt = _assemble_subagent_prompt(issue, "test.md", mode="A")
+        success = invoke_agent(prompt, issue_num)
+        after_tests = _snapshot_tests_dir()
+        new_tests = _detect_new_tests(before_tests, after_tests)
+        _save_test_tracking(issue_num, new_tests)
         if new_tests:
-            for rel_path in new_tests:
-                abs_path = (
-                    PROJECT_ROOT / rel_path
-                    if not Path(rel_path).is_absolute()
-                    else Path(rel_path)
-                )
-                if abs_path.exists():
-                    try:
-                        os.chmod(abs_path, 0o444)
-                        print(f"[ralph] Locked QA test: {rel_path} (mode 0o444)")
-                    except OSError as e:
-                        print(f"[ralph] WARNING: failed to chmod {rel_path}: {e}")
-        gh_comment(issue_num, "✅ TEST sub-agent completed.")
-    else:
-        gh_comment(
-            issue_num,
-            "❌ TEST sub-agent failed (non-zero exit). "
-            "Check daemon logs for the agent conversation output.",
+            print(f"  [ralph] TEST stage created/modified tests: {new_tests}")
+            gh_comment(
+                issue_num,
+                f"🧪 TEST stage produced {len(new_tests)} test file(s): "
+                f"{', '.join(new_tests)}",
+            )
+
+        if success:
+            # A2.1: hard-block test tampering — chmod the QA-written test files
+            # to 0o444 so the IMPLEMENT sub-agent cannot modify them. Idempotent.
+            if new_tests:
+                for rel_path in new_tests:
+                    abs_path = (
+                        PROJECT_ROOT / rel_path
+                        if not Path(rel_path).is_absolute()
+                        else Path(rel_path)
+                    )
+                    if abs_path.exists():
+                        try:
+                            os.chmod(abs_path, 0o444)
+                            print(f"[ralph] Locked QA test: {rel_path} (mode 0o444)")
+                        except OSError as e:
+                            print(f"[ralph] WARNING: failed to chmod {rel_path}: {e}")
+            gh_comment(issue_num, "✅ TEST sub-agent completed.")
+        else:
+            gh_comment(
+                issue_num,
+                "❌ TEST sub-agent failed (non-zero exit). "
+                "Check daemon logs for the agent conversation output.",
+            )
+        log_metrics(
+            "subagent_complete",
+            issue=str(issue_num),
+            subagent="test",
+            mode="A",
+            result="success" if success else "failure",
+            test_count=len(new_tests) if new_tests else 0,
         )
-    log_metrics(
-        "subagent_complete",
-        issue=str(issue_num),
-        subagent="test",
-        mode="A",
-        result="success" if success else "failure",
-        test_count=len(new_tests) if new_tests else 0,
-    )
-    return success
+        return success
+    finally:
+        if wt_path is not None:
+            remove_worktree(wt_path)
 
 
 def _run_implement_subagent(issue: dict) -> bool:
