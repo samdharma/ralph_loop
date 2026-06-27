@@ -1,8 +1,15 @@
 name: e2e
 
 # Per docs/IMPROVEMENT_ROADMAP_SPEC.md §8.5 and §10.
-# Runs the E2E test against samdharma/ralph-e2e-test, gated on RALPH_E2E=1.
-# Triggers: workflow_dispatch (manual) or push to ralph-v3.1.
+# Runs the E2E test against samdharma/ralph-e2e-test (private repo),
+# gated on RALPH_E2E=1.
+#
+# Auth note: the E2E test repo is PRIVATE. The default GITHUB_TOKEN has
+# no cross-repo access, so we use a PAT stored as the E2E_VALIDATION
+# secret. The PAT must have `repo` scope (or be fine-grained with
+# Contents: Read + Issues: Write on samdharma/ralph-e2e-test).
+#
+# Triggers: workflow_dispatch (manual), push to ralph-v3.1, PR to ralph-v3.1.
 
 on:
   workflow_dispatch:
@@ -13,9 +20,11 @@ on:
     branches:
       - ralph-v3.1
 
+# permissions: minimal; the actual cross-repo auth is via E2E_VALIDATION.
+# We drop `issues: write` from the GITHUB_TOKEN block because we no longer
+# rely on GITHUB_TOKEN for issue creation on the E2E repo.
 permissions:
   contents: read
-  issues: write   # E2E creates issues on samdharma/ralph-e2e-test
 
 jobs:
   e2e:
@@ -36,13 +45,28 @@ jobs:
       - name: Install Ralph dependencies
         run: |
           python -m pip install --upgrade pip
-          # Pinned dependencies that the test suite needs.
           pip install pytest pyyaml ghapi
+
+      - name: Configure git to use E2E_VALIDATION PAT
+        # Rewrite any https://github.com/... clone URL to embed the PAT, so
+        # subsequent `git clone` of samdharma/ralph-e2e-test authenticates.
+        # Tests also use `gh` for issue read/write; the GH_TOKEN env var
+        # below makes `gh` use the PAT.
+        env:
+          GH_TOKEN: ${{ secrets.E2E_VALIDATION }}
+        run: |
+          if [[ -z "$GH_TOKEN" ]]; then
+            echo "::error::E2E_VALIDATION secret is not set. Configure a PAT with repo scope at https://github.com/samdharma/Ralph_loop/settings/secrets/actions"
+            exit 1
+          fi
+          git config --global url."https://x-access-token:${GH_TOKEN}@github.com/".insteadOf "https://github.com/"
+          # Sanity check: verify the PAT can see the target repo.
+          gh api repos/samdharma/ralph-e2e-test --jq .name
 
       - name: Run E2E tests
         env:
           RALPH_E2E: "1"
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.E2E_VALIDATION }}
         run: |
           pytest tests/e2e/test_ralph_e2e_repo.py -v --tb=short
         continue-on-error: false
