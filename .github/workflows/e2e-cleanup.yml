@@ -1,0 +1,43 @@
+name: e2e-cleanup
+
+# Per docs/IMPROVEMENT_ROADMAP_SPEC.md §14.3.
+# Auto-closes failed E2E issues older than 30 days.
+# Runs daily via cron; can also be invoked manually.
+
+on:
+  schedule:
+    - cron: "17 6 * * *"   # Daily at 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write   # closes issues on samdharma/ralph-e2e-test
+
+jobs:
+  cleanup:
+    name: Close stale failed E2E issues (>30d)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Find and close stale E2E failures
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          REPO=samdharma/ralph-e2e-test
+          CUTOFF=$(date -u -d '30 days ago' +%Y-%m-%dT%H:%M:%SZ)
+          echo "Closing failed E2E issues older than $CUTOFF"
+          # Find open issues with status:blocked in body whose [e2e-phase-] prefix
+          # indicates they are E2E issues, older than 30 days.
+          gh issue list --repo "$REPO" \
+            --state open \
+            --search "[e2e-phase- in:title status:blocked in:body" \
+            --json number,title,createdAt \
+            --jq ".[] | select(.createdAt < \"$CUTOFF\") | .number" \
+            | while read -r issue_num; do
+                echo "Closing stale E2E failure: #$issue_num"
+                gh issue close "$issue_num" --repo "$REPO" \
+                  --comment "Auto-closed: stale E2E failure (>30 days old)."
+              done
+          echo "Cleanup complete."
