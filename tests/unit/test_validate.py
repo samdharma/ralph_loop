@@ -939,3 +939,117 @@ class TestUnquarantineStale:
         entries = validate.load_quarantine_entries()
         assert len(entries) == 1
         assert entries[0]["test_id"] == "tests/unit/b.py::test_new"
+
+
+# ─────────────────────────────────────────────────────────
+# C3.4 — 🦠 Flake quarantined: GitHub issue post (spec §10.3 C3)
+# ─────────────────────────────────────────────────────────
+
+
+class TestQuarantineIssuePost:
+    """C3.4: post a GitHub issue when a test is auto-quarantined.
+
+    Per spec §10.3 C3: a fresh auto-quarantine triggers a GitHub
+    issue with title ``🦠 Flake quarantined: <test_id>`` whose body
+    contains the two failure timestamps and a link to the failure
+    history. Re-running the same auto-quarantine does NOT create a
+    duplicate (idempotency via the engine's idempotency.jsonl).
+
+    This block is RED: ``post_flake_quarantined_issue`` does not
+    exist yet on ``core.validate``.
+    """
+
+    def test_fresh_quarantine_creates_issue_with_correct_title(
+        self, monkeypatch
+    ) -> None:
+        """A fresh auto-quarantine invokes gh issue create with title 🦠 Flake quarantined: <test_id>."""
+        from core import validate
+
+        recorded_cmds: list[list[str]] = []
+
+        def fake_run(cmd, *args, **kwargs):
+            recorded_cmds.append(cmd)
+            from unittest import mock
+
+            return mock.MagicMock(
+                returncode=0, stdout="https://github.com/...", stderr=""
+            )
+
+        monkeypatch.setattr(validate, "run", fake_run)
+
+        test_id = "tests/unit/x.py::test_y"
+        # Capture both timestamps from the failure history.
+        timestamps = ["2026-06-27T10:00:00Z", "2026-06-27T11:00:00Z"]
+        issue_url = validate.post_flake_quarantined_issue(
+            test_id=test_id, failure_timestamps=timestamps
+        )
+
+        # Exactly one gh call was made.
+        assert len(recorded_cmds) == 1
+        cmd = recorded_cmds[0]
+        # `gh issue create --title <title> --body <body>`.
+        assert cmd[0] == "gh"
+        assert "issue" in cmd
+        assert "create" in cmd
+
+        # Find --title and --body values.
+        title_idx = cmd.index("--title")
+        body_idx = cmd.index("--body")
+        title = cmd[title_idx + 1]
+        body = cmd[body_idx + 1]
+        assert title == f"🦠 Flake quarantined: {test_id}"
+        # Both timestamps appear in the body.
+        for ts in timestamps:
+            assert ts in body
+        # A link to the failure history is included.
+        assert "test-failure-history.jsonl" in body
+        assert issue_url  # non-empty
+
+    def test_idempotent_no_duplicate_issue(self, monkeypatch) -> None:
+        """A second auto-quarantine for the same test_id does NOT create a second issue."""
+        from core import validate
+
+        recorded_cmds: list[list[str]] = []
+
+        def fake_run(cmd, *args, **kwargs):
+            recorded_cmds.append(cmd)
+            from unittest import mock
+
+            return mock.MagicMock(
+                returncode=0, stdout="https://github.com/...", stderr=""
+            )
+
+        monkeypatch.setattr(validate, "run", fake_run)
+
+        test_id = "tests/unit/x.py::test_y"
+        timestamps = ["2026-06-27T10:00:00Z", "2026-06-27T11:00:00Z"]
+
+        # First call: creates the issue, returns URL.
+        url1 = validate.post_flake_quarantined_issue(
+            test_id=test_id, failure_timestamps=timestamps, run_id="run-A"
+        )
+        assert len(recorded_cmds) == 1
+
+        # Second call with same test_id and run_id: idempotent — NO new gh call.
+        url2 = validate.post_flake_quarantined_issue(
+            test_id=test_id, failure_timestamps=timestamps, run_id="run-A"
+        )
+        assert len(recorded_cmds) == 1  # still 1
+        assert url2 == url1  # same URL returned
+
+    def test_gh_failure_does_not_raise(self, monkeypatch) -> None:
+        """If gh issue create fails, the function returns None and does not raise."""
+        from core import validate
+
+        def fake_run(cmd, *args, **kwargs):
+            from unittest import mock
+
+            return mock.MagicMock(returncode=1, stdout="", stderr="auth error")
+
+        monkeypatch.setattr(validate, "run", fake_run)
+
+        result = validate.post_flake_quarantined_issue(
+            test_id="tests/unit/x.py::test_y",
+            failure_timestamps=["2026-06-27T10:00:00Z"],
+        )
+        assert result is None
