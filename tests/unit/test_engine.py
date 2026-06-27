@@ -1143,45 +1143,50 @@ class TestRetryBudgetConfig:
 
     def test_no_retry_section_uses_defaults(self, tmp_path, monkeypatch) -> None:
         """Missing [retry] section → defaults: l1=1, l2=2."""
-        from engine import load_retry_config
+        # load_retry_config lives at core.pipeline.retry now (C1 step 14b).
+        from core.pipeline import retry as retry_mod
+        from core.pipeline.retry import load_retry_config
 
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(retry_mod, "PROJECT_ROOT", tmp_path)
         budget = load_retry_config()
         assert budget.l1_max_attempts == 1
         assert budget.l2_max_attempts == 2
 
     def test_l1_max_attempts_zero_disables_l1(self, tmp_path, monkeypatch) -> None:
         """[retry] l1_max_attempts = 0 → no L1 retry."""
-        from engine import load_retry_config
+        from core.pipeline import retry as retry_mod
+        from core.pipeline.retry import load_retry_config
 
         config_dir = tmp_path / ".ralph"
         config_dir.mkdir(parents=True)
         (config_dir / "config.toml").write_text("[retry]\nl1_max_attempts = 0\n")
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(retry_mod, "PROJECT_ROOT", tmp_path)
         budget = load_retry_config()
         assert budget.l1_max_attempts == 0
         assert budget.l2_max_attempts == 2  # default
 
     def test_l2_max_attempts_three(self, tmp_path, monkeypatch) -> None:
         """[retry] l2_max_attempts = 3 → L2 retries up to 3 times."""
-        from engine import load_retry_config
+        from core.pipeline import retry as retry_mod
+        from core.pipeline.retry import load_retry_config
 
         config_dir = tmp_path / ".ralph"
         config_dir.mkdir(parents=True)
         (config_dir / "config.toml").write_text("[retry]\nl2_max_attempts = 3\n")
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(retry_mod, "PROJECT_ROOT", tmp_path)
         budget = load_retry_config()
         assert budget.l1_max_attempts == 1  # default
         assert budget.l2_max_attempts == 3
 
     def test_invalid_negative_value_uses_defaults(self, tmp_path, monkeypatch) -> None:
         """Invalid (negative) value → defaults."""
-        from engine import load_retry_config
+        from core.pipeline import retry as retry_mod
+        from core.pipeline.retry import load_retry_config
 
         config_dir = tmp_path / ".ralph"
         config_dir.mkdir(parents=True)
         (config_dir / "config.toml").write_text("[retry]\nl1_max_attempts = -1\n")
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(retry_mod, "PROJECT_ROOT", tmp_path)
         budget = load_retry_config()
         assert budget.l1_max_attempts == 1  # default
         assert budget.l2_max_attempts == 2  # default
@@ -1212,9 +1217,14 @@ class TestAgentReinvocation:
 
     def test_retry_l2_triggers_reinvocation(self, tmp_path, monkeypatch) -> None:
         """retry_l2 action → second invocation up to l2_max_attempts."""
-        from engine import RetryBudget, _invoke_with_retry
+        # _invoke_with_retry lives at core.pipeline.retry now (C1 step 14b)
+        # and lazy-imports invoke_agent_with_output from core.pipeline.agents.pi,
+        # so both PROJECT_ROOT and the agent mock must target the new homes.
+        from core.pipeline import retry as retry_mod
+        from core.pipeline.agents import pi as pi_mod
+        from core.pipeline.retry import RetryBudget, _invoke_with_retry
 
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(retry_mod, "PROJECT_ROOT", tmp_path)
 
         # First call returns exit 1 (test_failure / retry_l2).
         # Second call returns exit 0 (success / accept).
@@ -1232,7 +1242,7 @@ class TestAgentReinvocation:
             return (result.returncode == 0, result.stdout.decode())
 
         with mock.patch.object(
-            engine, "invoke_agent_with_output", side_effect=fake_invoke_agent
+            pi_mod, "invoke_agent_with_output", side_effect=fake_invoke_agent
         ):
             budget = RetryBudget(l1_max_attempts=1, l2_max_attempts=2)
             # First attempt: classify returns retry_l2.
@@ -1250,9 +1260,11 @@ class TestAgentReinvocation:
         self, tmp_path, monkeypatch
     ) -> None:
         """Each retry's prompt contains the previous stdout tail."""
-        from engine import RetryBudget, _invoke_with_retry
+        from core.pipeline import retry as retry_mod
+        from core.pipeline.agents import pi as pi_mod
+        from core.pipeline.retry import RetryBudget, _invoke_with_retry
 
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(retry_mod, "PROJECT_ROOT", tmp_path)
 
         captured_prompts: list[str] = []
 
@@ -1265,7 +1277,7 @@ class TestAgentReinvocation:
             return (True, "now succeeds")
 
         with mock.patch.object(
-            engine, "invoke_agent_with_output", side_effect=fake_invoke_agent
+            pi_mod, "invoke_agent_with_output", side_effect=fake_invoke_agent
         ):
             budget = RetryBudget(l1_max_attempts=1, l2_max_attempts=2)
             actions = iter(["retry_l2", "accept"])
@@ -1281,11 +1293,13 @@ class TestAgentReinvocation:
 
     def test_max_attempts_exhausted_blocks(self, tmp_path, monkeypatch) -> None:
         """After max attempts the wrapper returns blocked status."""
-        from engine import RetryBudget, _invoke_with_retry
+        from core.pipeline import retry as retry_mod
+        from core.pipeline.agents import pi as pi_mod
+        from core.pipeline.retry import RetryBudget, _invoke_with_retry
 
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(retry_mod, "PROJECT_ROOT", tmp_path)
 
-        with mock.patch.object(engine, "invoke_agent_with_output") as fake:
+        with mock.patch.object(pi_mod, "invoke_agent_with_output") as fake:
             fake.return_value = (False, "still failing")
             budget = RetryBudget(l1_max_attempts=1, l2_max_attempts=2)
             # Always returns retry_l2 → eventually exhausted.
@@ -1303,11 +1317,13 @@ class TestAgentReinvocation:
         self, tmp_path, monkeypatch
     ) -> None:
         """retry_transient triggers at most l1_max_attempts (default 1)."""
-        from engine import RetryBudget, _invoke_with_retry
+        from core.pipeline import retry as retry_mod
+        from core.pipeline.agents import pi as pi_mod
+        from core.pipeline.retry import RetryBudget, _invoke_with_retry
 
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(retry_mod, "PROJECT_ROOT", tmp_path)
 
-        with mock.patch.object(engine, "invoke_agent_with_output") as fake:
+        with mock.patch.object(pi_mod, "invoke_agent_with_output") as fake:
             fake.return_value = (False, "still failing")
             budget = RetryBudget(l1_max_attempts=1, l2_max_attempts=2)
 

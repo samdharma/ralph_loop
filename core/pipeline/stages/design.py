@@ -57,8 +57,8 @@ def run_design_stage(issue: dict) -> bool:
     from core.pipeline.github.comments import gh_comment
 
     gh_comment(issue_num, "🎨 DESIGN stage started.")
-    # Lazy import — log_metrics still lives in core.engine at this point
-    # in the cascade (will move to retry.py in step 14).
+    # Lazy import — log_metrics lives at core.pipeline.retry as of
+    # C1 step 14b; core.engine still re-exports it for back-compat.
     from core.engine import log_metrics
 
     log_metrics("stage_start", issue=str(issue_num), stage="design")

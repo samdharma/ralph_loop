@@ -156,8 +156,10 @@ def recover_from_crash() -> Optional[dict]:
             f"[ralph] Resuming #{issue_num} at stage: {stage} (label: {target_label})"
         )
 
-        # Lazy import — log_metrics still lives in core.engine at
-        # this point in the cascade (it will move to retry.py later).
+        # Lazy import — log_metrics lives at core.pipeline.retry as
+        # of C1 step 14b. We keep the core.engine re-export import
+        # here so crash recovery keeps working if the cascade order
+        # ever changes.
         from core.engine import log_metrics as _engine_log_metrics
 
         _engine_log_metrics("crash_recovery", issue=str(issue_num), stage=stage)

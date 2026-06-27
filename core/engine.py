@@ -17,8 +17,6 @@ import signal
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -166,200 +164,25 @@ def git(*args: str) -> subprocess.CompletedProcess:
 from core.pipeline.github.client import _build_github_client  # noqa: E402,F401
 
 
-# Per spec §7.2 — frozen dataclass for retry budget.
-@dataclass(frozen=True)
-class RetryBudget:
-    """Per-stage retry budget read from ``.ralph/config.toml [retry]``.
-
-    Per spec §10.2 B1 the engine consults this budget at each retry
-    decision. ``l1_max_attempts`` covers transient failures
-    (timeout/interrupted); ``l2_max_attempts`` covers test failures.
-    """
-
-    l1_max_attempts: int
-    l2_max_attempts: int
-
-
-# Per spec §10.2 B1 — defaults from plan §3 R-6 mitigation.
-_DEFAULT_RETRY_BUDGET = RetryBudget(l1_max_attempts=1, l2_max_attempts=2)
-
-
-def load_retry_config() -> RetryBudget:
-    """Load the retry budget from ``.ralph/config.toml [retry]``.
-
-    Per spec §10.2 B1 + plan §3 R-6:
-      - missing [retry] section → defaults (l1=1, l2=2)
-      - explicit values override defaults
-      - invalid (negative) values → defaults + WARNING
-
-    The config file is the engine's ``PROJECT_ROOT/.ralph/config.toml``;
-    it is read once per daemon startup. Pure function: tests can
-    monkeypatch ``engine.PROJECT_ROOT`` and re-call freely.
-    """
-    config_path = PROJECT_ROOT / ".ralph" / "config.toml"
-    if not config_path.exists():
-        return _DEFAULT_RETRY_BUDGET
-    try:
-        import tomllib  # type: ignore
-
-        with open(config_path, "rb") as f:
-            data = tomllib.load(f)
-    except Exception:
-        return _DEFAULT_RETRY_BUDGET
-
-    retry_cfg = data.get("retry", {}) or {}
-    l1 = retry_cfg.get("l1_max_attempts", _DEFAULT_RETRY_BUDGET.l1_max_attempts)
-    l2 = retry_cfg.get("l2_max_attempts", _DEFAULT_RETRY_BUDGET.l2_max_attempts)
-
-    # Per plan §3 R-6: invalid (negative) values fall back to defaults
-    # with a WARNING log. We don't raise because the engine must keep
-    # running even with a malformed config.
-    if not isinstance(l1, int) or l1 < 0:
-        print(
-            f"[ralph] WARNING: invalid [retry].l1_max_attempts={l1!r}; " "using default"
-        )
-        l1 = _DEFAULT_RETRY_BUDGET.l1_max_attempts
-    if not isinstance(l2, int) or l2 < 0:
-        print(
-            f"[ralph] WARNING: invalid [retry].l2_max_attempts={l2!r}; " "using default"
-        )
-        l2 = _DEFAULT_RETRY_BUDGET.l2_max_attempts
-
-    return RetryBudget(l1_max_attempts=l1, l2_max_attempts=l2)
-
-
 # ─────────────────────────────────────────────────────────
-# B1.3 — Agent re-invocation helper (spec §10.2 B1)
+# C1 step 14b — retry.py re-exports (per plan §1.1 C1)
 # ─────────────────────────────────────────────────────────
-
-
-def _max_attempts_for_action(action: str, budget: RetryBudget) -> int:
-    """Return the maximum number of invocations allowed for ``action``.
-
-    Per spec §10.2 B1:
-      - retry_transient → ``l1_max_attempts`` (default 1)
-      - retry_l2       → ``l2_max_attempts`` (default 2)
-      - accept / block → 1 (single invocation, no retry)
-    """
-    if action == "retry_transient":
-        return budget.l1_max_attempts
-    if action == "retry_l2":
-        return budget.l2_max_attempts
-    return 1
-
-
-# ─────────────────────────────────────────────────────────
-# B4.3 — Trajectory event emission helper (spec §10.2 B4)
-# ─────────────────────────────────────────────────────────
-
-
-def _emit_trajectory(
-    issue_num: int,
-    run_id: Optional[str],
-    event_type: str,
-    **payload: object,
-) -> None:
-    """Append a ``TrajectoryEvent`` to ``.ralph/issues/<N>/trajectory.jsonl``.
-
-    Per spec §10.2 B4.3 every engine side effect (transition_label,
-    comment, validate, etc.) emits an event. The helper is wrapped in
-    a try/except so trajectory emission failures do not break the
-    pipeline — the operator's experience is more important than the
-    log.
-    """
-    try:
-        from datetime import datetime, timezone
-
-        from core.pipeline import metrics as _metrics
-        from core.schemas.events import TrajectoryEvent
-
-        base: dict[str, object] = {
-            "timestamp": datetime.now(timezone.utc),
-            "issue_num": issue_num,
-            "run_id": run_id or "",
-            "event_type": event_type,
-            **payload,
-        }
-        evt = TrajectoryEvent.model_validate(base)
-        _metrics.append_trajectory_event(issue_num, evt)
-    except Exception as e:  # noqa: BLE001
-        print(f"[ralph] WARNING: trajectory emission failed: {e}")
-
-
-def _invoke_with_retry(
-    prompt: str,
-    issue_num: int,
-    classify_fn,
-    budget: RetryBudget,
-) -> tuple[bool, str]:
-    """Invoke the agent with retry-policy enforcement.
-
-    Loops until either:
-      - the classifier returns ``accept`` (success), or
-      - the maximum attempts for the classifier's action are exhausted.
-
-    On each retry, the previous invocation's ``stdout`` is appended
-    to the prompt under a "## Previous failure output" header so the
-    agent can react to it.
-
-    Args:
-        prompt: initial prompt to send to the agent.
-        issue_num: GitHub issue number (forwarded to the agent).
-        classify_fn: ``callable(str, int) -> str`` mapping
-            ``(stdout, returncode)`` to an action
-            (``accept | retry_l2 | retry_transient | block``).
-        budget: ``RetryBudget`` from :func:`load_retry_config`.
-
-    Returns:
-        ``(success, last_stdout)`` — success is True iff the final
-        action is ``accept``.
-    """
-    current_prompt = prompt
-    last_stdout = ""
-    # Upper bound: the largest budget dimension. Per-action limits
-    # are enforced via ``_max_attempts_for_action``.
-    upper_bound = max(budget.l1_max_attempts, budget.l2_max_attempts, 1)
-    for attempt in range(1, upper_bound + 1):
-        ok, last_stdout = invoke_agent_with_output(current_prompt, issue_num)
-        action = classify_fn(last_stdout, 0 if ok else 1)
-        if action == "accept":
-            return True, last_stdout
-        if action == "block":
-            return False, last_stdout
-        # Determine max invocations for this action.
-        max_for_action = _max_attempts_for_action(action, budget)
-        if attempt >= max_for_action:
-            # Exhausted.
-            print(
-                f"[ralph] Retry budget exhausted for #{issue_num} "
-                f"(action={action}, attempt={attempt}/{max_for_action})"
-            )
-            return False, last_stdout
-        # Build a retry prompt that inlines the previous output.
-        current_prompt = (
-            f"{prompt}\n\n"
-            f"## Previous failure output (attempt {attempt}, "
-            f"action={action})\n\n"
-            f"```\n{last_stdout}\n```\n"
-        )
-    return False, last_stdout
-
-
-# ─────────────────────────────────────────────────────────
-# Metrics logging
-# ─────────────────────────────────────────────────────────
-
-
-def log_metrics(event: str, **kwargs):
-    """Append a structured metrics event to ralph_metrics.jsonl."""
-    entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "event": event,
-        **kwargs,
-    }
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
-    with open(METRICS_FILE, "a") as f:
-        f.write(json.dumps(entry) + "\n")
+# RetryBudget, _DEFAULT_RETRY_BUDGET, load_retry_config,
+# _max_attempts_for_action, _invoke_with_retry, log_metrics,
+# and _emit_trajectory all live at core.pipeline.retry (per spec
+# §6.1, §10.3 C1, §10.2 B1, B4). They are re-imported here so
+# existing callers that ``from core.engine import RetryBudget``
+# (or any of the others) continue to work. New code should
+# import directly from core.pipeline.retry.
+from core.pipeline.retry import (  # noqa: E402,F401
+    RetryBudget,
+    _DEFAULT_RETRY_BUDGET,
+    _emit_trajectory,
+    _invoke_with_retry,
+    _max_attempts_for_action,
+    load_retry_config,
+    log_metrics,
+)
 
 
 # ─────────────────────────────────────────────────────────
