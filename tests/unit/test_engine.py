@@ -16,6 +16,92 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "core"))
 import engine  # noqa: E402
 
 
+# ─────────────────────────────────────────────────────────
+# A2.1 — QA-test permission lock (spec §10.1 A2)
+# ─────────────────────────────────────────────────────────
+
+
+class TestRunTestSubagent:
+    """A2.1: after _run_test_subagent returns, QA-written test files have mode 0o444."""
+
+    def _setup_qa_test_file(self, tmp_path: Path) -> Path:
+        """Create a QA test file in a tests/ subdir. Returns its absolute path."""
+        tests_dir = tmp_path / "tests" / "unit"
+        tests_dir.mkdir(parents=True)
+        test_file = tests_dir / "test_qa_written.py"
+        test_file.write_text("def test_qa():\n    assert True\n")
+        return test_file
+
+    def test_qa_test_files_have_mode_0444_after_subagent_returns(self, tmp_path, monkeypatch) -> None:
+        """After _run_test_subagent returns successfully, every file in QA test dir has mode 0o444."""
+        qa_file = self._setup_qa_test_file(tmp_path)
+
+        # Force PROJECT_ROOT to tmp_path so .ralph/ and tests/ resolve correctly.
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+
+        # Mock all side-effecting helpers + the agent invocation.
+        with mock.patch.object(engine, "invoke_agent", return_value=True), \
+             mock.patch.object(engine, "gh_comment"), \
+             mock.patch.object(engine, "log_metrics"), \
+             mock.patch.object(engine, "_snapshot_tests_dir") as mock_snap, \
+             mock.patch.object(engine, "_detect_new_tests", return_value=[str(qa_file.relative_to(tmp_path))]), \
+             mock.patch.object(engine, "_save_test_tracking"):
+            issue = {"number": 1, "title": "Test issue"}
+            ok = engine._run_test_subagent(issue)
+
+        assert ok is True
+        mode = qa_file.stat().st_mode & 0o777
+        assert mode == 0o444, f"Expected mode 0o444, got {oct(mode)}"
+
+    def test_implement_cannot_write_to_locked_qa_test(self, tmp_path, monkeypatch) -> None:
+        """IMPLEMENT sub-agent attempting to write to a QA test file raises PermissionError."""
+        qa_file = self._setup_qa_test_file(tmp_path)
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+
+        with mock.patch.object(engine, "invoke_agent", return_value=True), \
+             mock.patch.object(engine, "gh_comment"), \
+             mock.patch.object(engine, "log_metrics"), \
+             mock.patch.object(engine, "_snapshot_tests_dir"), \
+             mock.patch.object(engine, "_detect_new_tests", return_value=[str(qa_file.relative_to(tmp_path))]), \
+             mock.patch.object(engine, "_save_test_tracking"):
+            engine._run_test_subagent({"number": 1, "title": "Test issue"})
+
+        # After lock, attempting to write must raise PermissionError on POSIX.
+        # On platforms without strict POSIX permission enforcement (Windows),
+        # the test is best-effort and may pass without raising.
+        if os.name == "posix":
+            with pytest.raises((PermissionError, OSError)):
+                qa_file.write_text("def test_qa():\n    assert False\n")
+
+    def test_chmod_happens_after_subagent_returns(self, tmp_path, monkeypatch) -> None:
+        """Test files are NOT chmod'd before the TEST sub-agent returns. Ordering matters."""
+        qa_file = self._setup_qa_test_file(tmp_path)
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+
+        observed_modes: list[int] = []
+
+        def fake_invoke_agent(prompt, issue_num):
+            # Snapshot the file mode WHILE the agent is running.
+            observed_modes.append(qa_file.stat().st_mode & 0o777)
+            return True
+
+        with mock.patch.object(engine, "invoke_agent", side_effect=fake_invoke_agent), \
+             mock.patch.object(engine, "gh_comment"), \
+             mock.patch.object(engine, "log_metrics"), \
+             mock.patch.object(engine, "_snapshot_tests_dir"), \
+             mock.patch.object(engine, "_detect_new_tests", return_value=[str(qa_file.relative_to(tmp_path))]), \
+             mock.patch.object(engine, "_save_test_tracking"):
+            engine._run_test_subagent({"number": 1, "title": "Test issue"})
+
+        # During the agent run, the file should NOT yet be locked.
+        assert len(observed_modes) == 1
+        assert observed_modes[0] != 0o444, "File was locked BEFORE agent returned"
+
+        # After the agent returned, the file IS locked.
+        final_mode = qa_file.stat().st_mode & 0o777
+        assert final_mode == 0o444
+
+
 def _make_gh_response(number=42, state="OPEN", body=""):
     return json.dumps(
         {"number": number, "title": "Test issue", "body": body, "state": state}
