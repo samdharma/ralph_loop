@@ -107,6 +107,87 @@ class TestRunTestSubagent:
 # ─────────────────────────────────────────────────────────
 
 
+class TestAssembleImplementPrompt:
+    """A3.2: _assemble_subagent_prompt reads from .ralph/issues/<N>/artifacts/."""
+
+    def _setup_artifacts(self, tmp_path: Path, issue_num: int = 1) -> None:
+        """Create the artifact directory layout for issue_num under tmp_path/.ralph/."""
+        from core.pipeline.agents.artifacts import (  # type: ignore[import-not-found]
+            write_acceptance_criteria,
+            write_design,
+            write_files_in_scope,
+            write_qa_tests,
+        )
+
+        write_design(issue_num, "# Design for issue 1\n\nApproach: TDD.", project_root=tmp_path)
+        write_files_in_scope(issue_num, ["src/foo.py", "tests/unit/test_foo.py"], project_root=tmp_path)
+        write_acceptance_criteria(
+            issue_num,
+            [
+                {"id": "AC1", "criterion": "tests pass"},
+                {"id": "AC2", "criterion": "lint clean"},
+            ],
+            project_root=tmp_path,
+        )
+        write_qa_tests(issue_num, ["tests/unit/test_foo.py::test_a"], project_root=tmp_path)
+
+    def test_prompt_contains_verbatim_design_text(self, tmp_path, monkeypatch) -> None:
+        """Assembled IMPLEMENT prompt contains the verbatim design text."""
+        self._setup_artifacts(tmp_path, issue_num=1)
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(engine, "PROMPT_FILE", tmp_path / "docs" / "agent" / "PROMPT.md", raising=False)
+        monkeypatch.setattr(engine, "PROMPTS_DIR", tmp_path / "docs" / "agent" / "prompts", raising=False)
+
+        issue = {"number": 1, "title": "Test issue", "body": "Implement X."}
+        prompt = engine._assemble_subagent_prompt(issue, "implement.md", mode="B")
+
+        assert "Design for issue 1" in prompt
+        assert "Approach: TDD." in prompt
+
+    def test_prompt_lists_every_in_scope_path(self, tmp_path, monkeypatch) -> None:
+        """Assembled IMPLEMENT prompt lists every path from files_in_scope.json."""
+        self._setup_artifacts(tmp_path, issue_num=1)
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(engine, "PROMPT_FILE", tmp_path / "docs" / "agent" / "PROMPT.md", raising=False)
+        monkeypatch.setattr(engine, "PROMPTS_DIR", tmp_path / "docs" / "agent" / "prompts", raising=False)
+
+        issue = {"number": 1, "title": "Test issue", "body": "Implement X."}
+        prompt = engine._assemble_subagent_prompt(issue, "implement.md", mode="B")
+
+        assert "src/foo.py" in prompt
+        assert "tests/unit/test_foo.py" in prompt
+
+    def test_prompt_lists_every_acceptance_criterion(self, tmp_path, monkeypatch) -> None:
+        """Assembled IMPLEMENT prompt lists every acceptance criterion as a numbered item."""
+        self._setup_artifacts(tmp_path, issue_num=1)
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(engine, "PROMPT_FILE", tmp_path / "docs" / "agent" / "PROMPT.md", raising=False)
+        monkeypatch.setattr(engine, "PROMPTS_DIR", tmp_path / "docs" / "agent" / "prompts", raising=False)
+
+        issue = {"number": 1, "title": "Test issue", "body": "Implement X."}
+        prompt = engine._assemble_subagent_prompt(issue, "implement.md", mode="B")
+
+        assert "AC1" in prompt
+        assert "tests pass" in prompt
+        assert "AC2" in prompt
+        assert "lint clean" in prompt
+
+    def test_missing_artifact_dir_raises_filenotfound(self, tmp_path, monkeypatch) -> None:
+        """Missing artifact directory -> FileNotFoundError (not silent fallback)."""
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(engine, "PROMPT_FILE", tmp_path / "docs" / "agent" / "PROMPT.md", raising=False)
+        monkeypatch.setattr(engine, "PROMPTS_DIR", tmp_path / "docs" / "agent" / "prompts", raising=False)
+
+        issue = {"number": 99, "title": "Test issue", "body": "Implement X."}
+        with pytest.raises(FileNotFoundError):
+            engine._assemble_subagent_prompt(issue, "implement.md", mode="B")
+
+
+# ─────────────────────────────────────────────────────────
+# A2.2 — _detect_tampered_tests reclassification (spec §10.1 A2)
+# ─────────────────────────────────────────────────────────
+
+
 class TestDetectTamperedTests:
     """A2.2: _detect_tampered_tests is now a sanity check, not a warning.
 
