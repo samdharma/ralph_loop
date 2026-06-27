@@ -15,15 +15,30 @@ Pre-flight check (per plan §3 R-5): the first invocation runs a
 supports git worktrees. If that fails, ``create_worktree`` raises
 ``RuntimeError`` with a clear remediation message — there is no
 silent fallback that would surprise the user later.
+
+Read-only ``src/`` enforcement (per plan §3 R-5): after creating a
+worktree, ``create_worktree`` invokes :func:`_enforce_readonly_src`
+which:
+
+  - on Linux: runs ``mount --bind`` + ``mount -o remount,ro,bind``.
+  - on macOS: runs ``chmod -R 0500 src/`` and logs a WARNING that
+    read isolation is policy-only on this platform.
+
+``remove_worktree`` reverses the read-only state via
+:func:`_cleanup_readonly_src` before invoking ``git worktree remove``.
 """
 
 from __future__ import annotations
 
+import logging
 import os
+import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
+_LOG = logging.getLogger(__name__)
 
 
 def _run_git(argv: list[str]) -> "subprocess.CompletedProcess[bytes]":
@@ -33,6 +48,24 @@ def _run_git(argv: list[str]) -> "subprocess.CompletedProcess[bytes]":
         capture_output=True,
         check=False,
         cwd=PROJECT_ROOT,
+    )
+
+
+def _run_mount(argv: list[str]) -> "subprocess.CompletedProcess[bytes]":
+    """Invoke ``mount`` with the given arguments. Tests patch this seam."""
+    return subprocess.run(  # noqa: S603
+        ["mount", *argv],
+        capture_output=True,
+        check=False,
+    )
+
+
+def _run_umount(argv: list[str]) -> "subprocess.CompletedProcess[bytes]":
+    """Invoke ``umount`` with the given arguments. Tests patch this seam."""
+    return subprocess.run(  # noqa: S603
+        ["umount", *argv],
+        capture_output=True,
+        check=False,
     )
 
 
@@ -53,8 +86,6 @@ def _preflight_check() -> None:
         # Clean up any prior probe.
         _run_git(["worktree", "remove", "--force", str(probe_path)])
         if probe_path.exists():
-            import shutil
-
             shutil.rmtree(probe_path, ignore_errors=True)
 
     probe_path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,11 +100,83 @@ def _preflight_check() -> None:
     _run_git(["worktree", "remove", "--force", str(probe_path)])
 
 
+def _enforce_readonly_src(wt_path: Path) -> None:
+    """Make ``src/`` inside the worktree read-only.
+
+    Per spec §10.2 B3 + plan §3 R-5:
+
+      - Linux: ``mount --bind <src> <wt>/src && mount -o
+        remount,ro,bind <wt>/src`` (true mechanism isolation —
+        writes fail at the kernel level).
+      - macOS: ``chmod -R 0500 <wt>/src`` (writes enforced; reads
+        remain policy-only because macOS lacks ``mount -o ro,bind``).
+        A WARNING is logged so the operator knows.
+
+    On Linux mount failure, fall back to ``chmod -R 0500 src/`` and
+    log a WARNING — the worktree still gets policy-only isolation.
+    """
+    wt_src = wt_path / "src"
+    if not wt_src.exists():
+        return
+
+    host_platform = sys.platform
+    if host_platform.startswith("linux"):
+        result = _run_mount(["--bind", str(PROJECT_ROOT / "src"), str(wt_src)])
+        if result.returncode == 0:
+            result = _run_mount(["-o", "remount,ro,bind", str(wt_src)])
+            if result.returncode != 0:
+                _LOG.warning(
+                    "mount remount,ro,bind failed for %s; falling back to chmod 0500",
+                    wt_src,
+                )
+                _chmod_readonly(wt_src)
+        else:
+            _LOG.warning(
+                "mount --bind failed for %s; falling back to chmod 0500", wt_src
+            )
+            _chmod_readonly(wt_src)
+    else:
+        # macOS / other: policy-only read isolation via chmod.
+        _LOG.warning(
+            "Read isolation is policy-only on %s; relying on chmod 0500",
+            host_platform,
+        )
+        _chmod_readonly(wt_src)
+
+
+def _chmod_readonly(directory: Path) -> None:
+    """Recursively chmod a directory to 0o500 (read+execute, no write)."""
+    if not directory.exists():
+        return
+    for root, dirs, files in os.walk(directory):
+        os.chmod(root, 0o500)
+        for fname in files:
+            os.chmod(Path(root) / fname, 0o500)
+
+
+def _cleanup_readonly_src(wt_path: Path) -> None:
+    """Reverse the read-only state applied by :func:`_enforce_readonly_src`.
+
+    On Linux the mount is unmounted. On macOS the directory is simply
+    removed (no umount needed because no mount was performed).
+    """
+    wt_src = wt_path / "src"
+    if not wt_src.exists():
+        return
+
+    host_platform = sys.platform
+    if host_platform.startswith("linux"):
+        _run_umount([str(wt_src)])
+    # On macOS no umount is needed.
+
+
 def create_worktree(issue_num: int) -> Path:
     """Create a worktree for issue ``issue_num`` and return its path.
 
     On first call (per-process), runs the pre-flight check. Subsequent
-    calls skip the check (it's a per-process one-shot).
+    calls skip the check (it's a per-process one-shot). After the
+    worktree is created, :func:`_enforce_readonly_src` is invoked so
+    the sub-agent cannot write to ``src/``.
     """
     if not getattr(create_worktree, "_preflight_done", False):
         _preflight_check()
@@ -101,6 +204,7 @@ def create_worktree(issue_num: int) -> Path:
     # into it. Real git worktree add creates it; this is a no-op in
     # that path.
     wt_path.mkdir(parents=True, exist_ok=True)
+    _enforce_readonly_src(wt_path)
     return wt_path
 
 
@@ -108,12 +212,11 @@ def remove_worktree(path: Path) -> None:
     """Remove a worktree at ``path``. No-op if the worktree doesn't exist."""
     if not path.exists():
         return
+    _cleanup_readonly_src(path)
     result = _run_git(["worktree", "remove", "--force", str(path)])
     if result.returncode != 0:
         # Best-effort: log a warning but don't raise. The worktree may
         # already be gone (e.g., from a prior failed cleanup).
-        import sys
-
         print(
             f"[ralph] WARNING: git worktree remove failed for {path}: "
             f"{result.stderr.decode('utf-8', errors='replace')}",
@@ -121,4 +224,10 @@ def remove_worktree(path: Path) -> None:
         )
 
 
-__all__ = ["create_worktree", "remove_worktree", "PROJECT_ROOT"]
+__all__ = [
+    "create_worktree",
+    "remove_worktree",
+    "PROJECT_ROOT",
+    "_enforce_readonly_src",
+    "_cleanup_readonly_src",
+]

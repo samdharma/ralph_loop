@@ -121,18 +121,29 @@ class TestReadOnlySrc:
         wt_path.mkdir(parents=True)
         src_dir = wt_path / "src"
         src_dir.mkdir()
+        # _enforce_readonly_src reads from PROJECT_ROOT / 'src'.
+        (tmp_path / "src").mkdir(parents=True)
 
+        ok = mock.Mock(returncode=0)
         with (
-            mock.patch.object(base, "_run_git", return_value=mock.Mock(returncode=0)),
-            mock.patch.object(base, "_run_mount") as run_mount,
+            mock.patch.object(base, "_run_git", return_value=ok),
+            mock.patch.object(base, "_run_mount", return_value=ok) as run_mount,
         ):
             base._enforce_readonly_src(wt_path)
 
-        # At least one mount call must reference bind + remount,ro,bind.
+        # The Linux path issues TWO mount calls: one for --bind, one for
+        # remount,ro,bind. Either-or: one call has --bind, another has the
+        # remount,ro,bind flag (passed via -o as a single arg).
         all_calls = [c.args[0] for c in run_mount.call_args_list]
-        assert any(
-            "--bind" in cmd and "remount" in cmd and "ro" in cmd for cmd in all_calls
-        ), f"expected mount --bind + remount,ro,bind; got {all_calls}"
+        has_bind = any("--bind" in cmd for cmd in all_calls)
+        # The remount,ro,bind is passed via -o so we look for it as a
+        # token in any element of the cmd list.
+        has_remount_ro = any(
+            any("remount" in tok and "ro" in tok for tok in cmd) for cmd in all_calls
+        )
+        assert (
+            has_bind and has_remount_ro
+        ), f"expected mount --bind AND remount,ro,bind; got {all_calls}"
 
     def test_macos_uses_chmod_0500(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
@@ -178,6 +189,7 @@ class TestReadOnlySrc:
         monkeypatch.setattr(base.sys, "platform", "linux")
         wt_path = tmp_path / ".ralph" / "worktrees" / "1"
         wt_path.mkdir(parents=True)
+        (wt_path / "src").mkdir(parents=True)
 
         with (
             mock.patch.object(base, "_run_git", return_value=mock.Mock(returncode=0)),
