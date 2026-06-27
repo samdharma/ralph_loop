@@ -23,6 +23,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 # ─────────────────────────────────────────────────────────
@@ -96,6 +97,11 @@ PYTEST_TIMEOUT = int(os.environ.get("RALPH_PYTEST_TIMEOUT", "300"))
 # ``{test_id, added_at, reason, auto_added}`` entries. Tests listed here
 # are deselected from pytest invocations.
 QUARANTINE_FILE = PROJECT_ROOT / TEST_DIR / "quarantine.yaml"
+
+# Failure history for auto-quarantine (C3.2). Each line is one validate
+# run: ``{"run_at": iso8601, "failures": [test_id, ...], "passes": [...]}``.
+# The auto-add logic scans the last 2 runs for consecutive failures.
+TEST_FAILURE_HISTORY_FILE = PROJECT_ROOT / ".ralph" / "test-failure-history.jsonl"
 
 
 # ─────────────────────────────────────────────────────────
@@ -780,3 +786,97 @@ def apply_quarantine_to_cmd(cmd: list[str]) -> list[str]:
         result.append("--deselect")
         result.append(entry["test_id"])
     return result
+
+
+# ─────────────────────────────────────────────────────────
+# C3.2 — Auto-quarantine on 2 consecutive failures (spec §10.3 C3)
+# ─────────────────────────────────────────────────────────
+#
+# Per plan §3 R-7: auto-quarantine scans the last 2 runs of the
+# failure history. A test that failed in BOTH the most recent run and
+# the run immediately before it, with no intervening pass, is
+# auto-added to ``tests/quarantine.yaml`` with ``auto_added: true``.
+
+
+def _load_failure_history() -> list[dict]:
+    """Read the per-test failure history. Returns [] if missing or empty."""
+    if not TEST_FAILURE_HISTORY_FILE.exists():
+        return []
+    try:
+        import json
+
+        runs: list[dict] = []
+        for line in TEST_FAILURE_HISTORY_FILE.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                runs.append(json.loads(line))
+            except json.JSONDecodeError:
+                # Skip malformed lines rather than crash.
+                continue
+        return runs
+    except OSError:
+        return []
+
+
+def record_test_result(
+    failures: list[str],
+    passes: list[str],
+    run_at: str | None = None,
+) -> None:
+    """Append a single validate-run entry to the failure history JSONL."""
+    import json
+
+    if run_at is None:
+        run_at = datetime.now(timezone.utc).isoformat()
+    TEST_FAILURE_HISTORY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    record = {
+        "run_at": run_at,
+        "failures": list(failures),
+        "passes": list(passes),
+    }
+    with TEST_FAILURE_HISTORY_FILE.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record) + "\n")
+
+
+def should_auto_quarantine(test_id: str) -> bool:
+    """Return True if test_id failed in the last 2 runs with no intervening pass.
+
+    Scoped to the most recent 2 history entries. If fewer than 2 runs
+    exist, returns False.
+    """
+    history = _load_failure_history()
+    if len(history) < 2:
+        return False
+    last_two = history[-2:]
+    # Both runs must list test_id in failures, and neither may list it in passes.
+    for run in last_two:
+        if test_id not in run.get("failures", []):
+            return False
+        if test_id in run.get("passes", []):
+            return False
+    return True
+
+
+def auto_quarantine_test(
+    test_id: str, reason: str = "two consecutive failures"
+) -> bool:
+    """Auto-add test_id to quarantine.yaml. Returns True if a new entry was added.
+
+    Idempotent: if test_id is already in the quarantine, returns False
+    and does not modify the file.
+    """
+    entries = load_quarantine_entries()
+    # Already present?
+    if any(e.get("test_id") == test_id for e in entries):
+        return False
+    entry = {
+        "test_id": test_id,
+        "added_at": datetime.now(timezone.utc).isoformat(),
+        "reason": reason,
+        "auto_added": True,
+    }
+    entries.append(entry)
+    save_quarantine_entries(entries)
+    return True

@@ -712,6 +712,25 @@ class TestAutoQuarantine:
     exist yet.
     """
 
+    def _write_quarantine_yaml(self, tmp_path: Path, entries: list[dict]) -> Path:
+        """Mirror of TestQuarantineSchema's helper for clarity in this class."""
+        lines: list[str] = []
+        for e in entries:
+            lines.append(f"- test_id: {e['test_id']}")
+            lines.append(f"  added_at: \"{e['added_at']}\"")
+            reason = str(e["reason"])
+            if any(c in reason for c in [":", "#", "\n"]):
+                lines.append(f'  reason: "{reason}"')
+            else:
+                lines.append(f"  reason: {reason}")
+            lines.append(f"  auto_added: {'true' if e['auto_added'] else 'false'}")
+            lines.append("")
+        tests_dir = tmp_path / "tests"
+        tests_dir.mkdir(parents=True, exist_ok=True)
+        path = tests_dir / "quarantine.yaml"
+        path.write_text("\n".join(lines), encoding="utf-8")
+        return path
+
     def _write_history_jsonl(self, tmp_path: Path, history: list[dict]) -> Path:
         """Write a .ralph/test-failure-history.jsonl with the given runs."""
         import json
