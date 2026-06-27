@@ -92,6 +92,11 @@ PYTEST_ADOPTS = ["-o", "addopts=--tb=short --strict-markers"]
 # pytest timeout in seconds (0 = no timeout). Override with RALPH_PYTEST_TIMEOUT.
 PYTEST_TIMEOUT = int(os.environ.get("RALPH_PYTEST_TIMEOUT", "300"))
 
+# Quarantine file (per spec §10.3 C3). The file holds a YAML list of
+# ``{test_id, added_at, reason, auto_added}`` entries. Tests listed here
+# are deselected from pytest invocations.
+QUARANTINE_FILE = PROJECT_ROOT / TEST_DIR / "quarantine.yaml"
+
 
 # ─────────────────────────────────────────────────────────
 # Helpers
@@ -642,3 +647,136 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+# ─────────────────────────────────────────────────────────
+# C3.1 — Quarantine schema (spec §10.3 C3)
+# ─────────────────────────────────────────────────────────
+#
+# Per spec §10.3 C3 and plan §3 R-7: tests/quarantine.yaml holds a list
+# of ``{test_id, added_at, reason, auto_added}`` entries. Listed tests
+# are deselected from pytest invocations. Auto-added entries (from C3.2)
+# include ``auto_added: true``. Auto-unquarantine (C3.3) removes entries
+# older than 7 days.
+#
+# We use a minimal YAML parser because PyYAML is not a project
+# dependency (stdlib-only project policy; ``tomllib`` is used for the
+# other config file). The parser handles the constrained YAML format
+# we ourselves produce — a list of dicts with string keys and string/
+# bool values. This is sufficient for our needs; complex YAML features
+# are not used.
+
+
+def _parse_quarantine_yaml(text: str) -> list[dict]:
+    """Parse the constrained YAML format produced by the project.
+
+    Format::
+
+        - test_id: <id>
+          added_at: "<iso8601>"
+          reason: <str>
+          auto_added: <bool>
+
+    Returns a list of dicts. Empty input returns an empty list.
+    """
+    entries: list[dict] = []
+    current: dict[str, object] | None = None
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        if not line or line.lstrip().startswith("#"):
+            continue
+        if line.startswith("- "):
+            # New list item.
+            if current is not None:
+                entries.append(current)
+            current = {}
+            rest = line[2:]
+        else:
+            if current is None:
+                # Stray content; skip.
+                continue
+            rest = line
+        # Split key: value.
+        if ":" not in rest:
+            continue
+        key, _, value = rest.partition(":")
+        key = key.strip()
+        value = value.strip()
+        # Strip surrounding quotes.
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        # Booleans.
+        coerced: object = value
+        if value == "true":
+            coerced = True
+        elif value == "false":
+            coerced = False
+        current[key] = coerced
+    if current is not None:
+        entries.append(current)
+    return entries
+
+
+def _dump_quarantine_yaml(entries: list[dict]) -> str:
+    """Serialize entries back into the constrained YAML format."""
+    lines: list[str] = []
+    for e in entries:
+        lines.append(f"- test_id: {e['test_id']}")
+        lines.append(f"  added_at: \"{e['added_at']}\"")
+        reason = str(e.get("reason", ""))
+        if any(c in reason for c in [":", "#", "\n"]):
+            lines.append(f'  reason: "{reason}"')
+        else:
+            lines.append(f"  reason: {reason}")
+        lines.append(
+            f"  auto_added: {'true' if e.get('auto_added', False) else 'false'}"
+        )
+        lines.append("")
+    return "\n".join(lines)
+
+
+def load_quarantine_entries() -> list[dict]:
+    """Load entries from QUARANTINE_FILE. Returns [] if the file is missing.
+
+    The file is allowed to be missing (first run). An existing-but-empty
+    file is also treated as no entries.
+    """
+    if not QUARANTINE_FILE.exists():
+        return []
+    try:
+        text = QUARANTINE_FILE.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    if not text.strip():
+        return []
+    return _parse_quarantine_yaml(text)
+
+
+def save_quarantine_entries(entries: list[dict]) -> None:
+    """Persist entries to QUARANTINE_FILE. Creates parent dirs as needed."""
+    QUARANTINE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    QUARANTINE_FILE.write_text(_dump_quarantine_yaml(entries), encoding="utf-8")
+
+
+def is_quarantined(test_id: str) -> bool:
+    """Return True if test_id is listed in QUARANTINE_FILE."""
+    for entry in load_quarantine_entries():
+        if entry.get("test_id") == test_id:
+            return True
+    return False
+
+
+def apply_quarantine_to_cmd(cmd: list[str]) -> list[str]:
+    """Return a new cmd with --deselect entries appended for each quarantined test.
+
+    The deselect args are appended at the end of the cmd so they do not
+    interfere with positional paths earlier in the list.
+    """
+    entries = load_quarantine_entries()
+    if not entries:
+        return list(cmd)
+    result = list(cmd)
+    for entry in entries:
+        result.append("--deselect")
+        result.append(entry["test_id"])
+    return result
