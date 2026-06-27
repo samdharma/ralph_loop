@@ -102,6 +102,65 @@ class TestRunTestSubagent:
         assert final_mode == 0o444
 
 
+# ─────────────────────────────────────────────────────────
+# A2.2 — _detect_tampered_tests reclassification (spec §10.1 A2)
+# ─────────────────────────────────────────────────────────
+
+
+class TestDetectTamperedTests:
+    """A2.2: _detect_tampered_tests is now a sanity check, not a warning.
+
+    Per spec §10.1 A2 — changed from advisory warning to a hard block:
+    pristine state (mode 0o444) → returns True
+    tampered state (mode != 0o444) → raises TamperedTestsError
+    Logs at ERROR level, not WARNING.
+    """
+
+    def _make_test_file(self, tmp_path: Path, mode: int) -> Path:
+        """Create a test file with the given mode. Returns its absolute path."""
+        test_file = tmp_path / "tests" / "unit" / "test_qa.py"
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text("def test_qa():\n    assert True\n")
+        test_file.chmod(mode)
+        return test_file
+
+    def test_pristine_state_returns_true(self, tmp_path) -> None:
+        """Pristine state (all files 0o444) → function returns True (no raise)."""
+        qa_file = self._make_test_file(tmp_path, 0o444)
+        result = engine._detect_tampered_tests([str(qa_file)])
+        assert result is True
+
+    def test_tampered_state_raises(self, tmp_path) -> None:
+        """File with mode != 0o444 → function raises TamperedTestsError (or returns False)."""
+        qa_file = self._make_test_file(tmp_path, 0o644)
+        raised = False
+        result = None
+        try:
+            result = engine._detect_tampered_tests([str(qa_file)])
+        except engine.TamperedTestsError:
+            raised = True
+        # Either raised, or returned False — both acceptable per task acceptance criteria
+        if not raised:
+            assert result is False, f"Expected raise or False; got {result}"
+
+    def test_logs_at_error_level_not_warning(self, tmp_path, caplog) -> None:
+        """The function logs at ERROR level on tampering, not WARNING."""
+        import logging
+
+        qa_file = self._make_test_file(tmp_path, 0o644)
+        with caplog.at_level(logging.ERROR):
+            try:
+                engine._detect_tampered_tests([str(qa_file)])
+            except Exception:
+                pass
+        # There must be at least one ERROR-level record (not WARNING-only).
+        error_records = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert len(error_records) >= 1, (
+            "Expected at least one ERROR-level log on tampering; "
+            f"got levels: {[r.levelname for r in caplog.records]}"
+        )
+
+
 def _make_gh_response(number=42, state="OPEN", body=""):
     return json.dumps(
         {"number": number, "title": "Test issue", "body": body, "state": state}
