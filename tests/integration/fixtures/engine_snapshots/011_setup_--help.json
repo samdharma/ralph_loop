@@ -4,9 +4,9 @@
     "/Users/sam.dharma/Trading/ralph/core/setup.py",
     "--help"
   ],
-  "exit_code": 124,
-  "stdout_pattern": "",
-  "stderr_pattern": "TimeoutExpired after 3s",
+  "exit_code": 1,
+  "stdout_pattern": "\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\n\u2551   Ralph v3 \u2014 Setup                       \u2551\n\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\n\nProject: /Users/sam.dharma/Trading/ralph\n\n  \u001b[32m\u2713\u001b[0m GitHub CL",
+  "stderr_pattern": "",
   "description": "setup --help",
   "skip_runtime": true
 }
