@@ -90,3 +90,99 @@ def test_create_worktree_preflight_raises_on_failure(
             base.create_worktree(1)
 
     assert "git worktree" in str(exc_info.value).lower()
+
+
+class TestReadOnlySrc:
+    """B3.2: read-only src/ enforcement.
+
+    Per spec §10.2 B3 and plan §3 R-5 mitigation:
+      - Linux: ``mount --bind src /tmp/ralph-wt/src && mount -o
+        remount,ro,bind /tmp/ralph-wt/src`` (true mechanism isolation).
+      - macOS: ``chmod -R 0500 src/`` (writes enforced, reads policy-only)
+        + WARNING log.
+      - On mount failure on Linux, fall back to ``chmod -R 0500 src/``.
+
+    Tests assert:
+      1. On Linux mock: mount command is invoked.
+      2. On macOS mock: chmod 0500 is applied AND a WARNING is logged.
+      3. remove_worktree reverses the read-only state.
+    """
+
+    def test_linux_uses_mount_bind(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Linux path: create_worktree invokes mount --bind + mount -o remount,ro,bind."""
+        monkeypatch.setattr(base, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(base.sys, "platform", "linux")
+
+        # Bypass pre-flight and the worktree add git call.
+        monkeypatch.setattr(base, "_preflight_check", lambda: None)
+        wt_path = tmp_path / ".ralph" / "worktrees" / "1"
+        wt_path.mkdir(parents=True)
+        src_dir = wt_path / "src"
+        src_dir.mkdir()
+
+        with (
+            mock.patch.object(base, "_run_git", return_value=mock.Mock(returncode=0)),
+            mock.patch.object(base, "_run_mount") as run_mount,
+        ):
+            base._enforce_readonly_src(wt_path)
+
+        # At least one mount call must reference bind + remount,ro,bind.
+        all_calls = [c.args[0] for c in run_mount.call_args_list]
+        assert any(
+            "--bind" in cmd and "remount" in cmd and "ro" in cmd for cmd in all_calls
+        ), f"expected mount --bind + remount,ro,bind; got {all_calls}"
+
+    def test_macos_uses_chmod_0500(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog
+    ) -> None:
+        """macOS path: chmod -R 0500 src/ is applied AND a WARNING is logged."""
+        import logging
+
+        monkeypatch.setattr(base, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(base.sys, "platform", "darwin")
+
+        monkeypatch.setattr(base, "_preflight_check", lambda: None)
+        wt_path = tmp_path / ".ralph" / "worktrees" / "1"
+        wt_path.mkdir(parents=True)
+        src_dir = wt_path / "src"
+        src_dir.mkdir()
+        (src_dir / "foo.py").write_text("x = 1\n")
+
+        with (
+            mock.patch.object(base, "_run_git", return_value=mock.Mock(returncode=0)),
+            mock.patch.object(base, "_run_mount") as run_mount,
+            caplog.at_level(logging.WARNING),
+        ):
+            base._enforce_readonly_src(wt_path)
+
+        # mount must NOT be invoked on macOS.
+        assert run_mount.call_count == 0
+        # chmod 0500 was applied (we read back the mode).
+        mode = (src_dir / "foo.py").stat().st_mode & 0o777
+        assert mode == 0o500, f"expected 0o500, got {oct(mode)}"
+        # WARNING was logged.
+        assert any("policy-only" in r.message for r in caplog.records)
+
+    def test_cleanup_reverses_readonly_state(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """remove_worktree reverses the read-only state (Linux path).
+
+        On Linux the cleanup invokes ``umount`` for the worktree's
+        src/ mount. On macOS no umount is needed (chmod is reversible
+        by simply deleting the directory tree).
+        """
+        monkeypatch.setattr(base, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(base.sys, "platform", "linux")
+        wt_path = tmp_path / ".ralph" / "worktrees" / "1"
+        wt_path.mkdir(parents=True)
+
+        with (
+            mock.patch.object(base, "_run_git", return_value=mock.Mock(returncode=0)),
+            mock.patch.object(base, "_run_umount") as run_umount,
+        ):
+            base._cleanup_readonly_src(wt_path)
+
+        assert run_umount.call_count >= 1
