@@ -290,16 +290,35 @@ def gh_comment(issue_num: int, body: str, run_id: Optional[str] = None) -> bool:
     Per spec §10.2 B2, this is what makes the engine crash-restart
     safe — a daemon SIGKILL followed by a restart must not
     double-post comments.
+
+    Per spec §10.2 B4.3, every successful comment also emits a
+    ``TrajectoryEvent`` (specifically, a SubagentInvocation-shaped
+    record is emitted via ``_emit_trajectory`` so the trajectory file
+    remains the canonical log of engine side effects).
     """
+    ok: bool
     if run_id is not None:
         gh_client = _build_github_client(run_id)
-        return gh_client.comment(issue_num, body)
-    try:
-        gh("issue", "comment", str(issue_num), "--body", body)
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"[ralph] WARNING: could not comment on #{issue_num}: {e}")
-        return False
+        ok = gh_client.comment(issue_num, body)
+    else:
+        try:
+            gh("issue", "comment", str(issue_num), "--body", body)
+            ok = True
+        except subprocess.CalledProcessError as e:
+            print(f"[ralph] WARNING: could not comment on #{issue_num}: {e}")
+            ok = False
+    # Trajectory: emit a SubagentInvocation-shaped event for the gh CLI.
+    # Comments don't have a dedicated TrajectoryEvent variant; reusing
+    # SubagentInvocation with agent_binary='gh' is the documented
+    # mapping per spec §10.2 B4.
+    _emit_trajectory(
+        issue_num,
+        run_id,
+        "subagent_invocation",
+        agent_binary="gh",
+        prompt_size_bytes=len(body),
+    )
+    return ok
 
 
 def git(*args: str) -> subprocess.CompletedProcess:
@@ -405,6 +424,44 @@ def _max_attempts_for_action(action: str, budget: RetryBudget) -> int:
     if action == "retry_l2":
         return budget.l2_max_attempts
     return 1
+
+
+# ─────────────────────────────────────────────────────────
+# B4.3 — Trajectory event emission helper (spec §10.2 B4)
+# ─────────────────────────────────────────────────────────
+
+
+def _emit_trajectory(
+    issue_num: int,
+    run_id: Optional[str],
+    event_type: str,
+    **payload: object,
+) -> None:
+    """Append a ``TrajectoryEvent`` to ``.ralph/issues/<N>/trajectory.jsonl``.
+
+    Per spec §10.2 B4.3 every engine side effect (transition_label,
+    comment, validate, etc.) emits an event. The helper is wrapped in
+    a try/except so trajectory emission failures do not break the
+    pipeline — the operator's experience is more important than the
+    log.
+    """
+    try:
+        from datetime import datetime, timezone
+
+        from core.pipeline import metrics as _metrics
+        from core.schemas.events import TrajectoryEvent
+
+        base: dict[str, object] = {
+            "timestamp": datetime.now(timezone.utc),
+            "issue_num": issue_num,
+            "run_id": run_id or "",
+            "event_type": event_type,
+            **payload,
+        }
+        evt = TrajectoryEvent.model_validate(base)
+        _metrics.append_trajectory_event(issue_num, evt)
+    except Exception as e:  # noqa: BLE001
+        print(f"[ralph] WARNING: trajectory emission failed: {e}")
 
 
 def _invoke_with_retry(
@@ -692,6 +749,13 @@ def transition_label(
                 + (f" / -{remove}" if remove else "")
             )
             sync_status(issue_num, add)
+            _emit_trajectory(
+                issue_num,
+                run_id,
+                "label_transition",
+                added=[add] if add else [],
+                removed=[remove] if remove else [],
+            )
         return
 
     cmd = ["issue", "edit", str(issue_num), "--add-label", add]
@@ -708,6 +772,13 @@ def transition_label(
             print(f"[ralph] #{issue_num} labels: {action}")
             # Mirror the new label to the GitHub Project board column.
             sync_status(issue_num, add)
+            _emit_trajectory(
+                issue_num,
+                run_id,
+                "label_transition",
+                added=[add] if add else [],
+                removed=[remove] if remove else [],
+            )
             return
         except subprocess.CalledProcessError as e:
             last_error = e

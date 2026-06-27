@@ -311,7 +311,14 @@ def run_pytest_invocation(cmd: list[str], env: dict[str, str] | None = None) -> 
     try:
         result = run(cmd, check=False, env=env, timeout=timeout)
         exit_code = result.returncode
-        stdout = result.stdout or ""
+        # subprocess returns bytes; decode to str for the JSON-friendly
+        # structured result. Per spec §10.1 A1 stdout_tail is str.
+        stdout_raw = result.stdout or b""
+        stdout = (
+            stdout_raw.decode("utf-8", errors="replace")
+            if isinstance(stdout_raw, (bytes, bytearray))
+            else stdout_raw
+        )
     except subprocess.TimeoutExpired:
         print(f"[ralph] pytest timed out after {PYTEST_TIMEOUT}s")
         exit_code = 124

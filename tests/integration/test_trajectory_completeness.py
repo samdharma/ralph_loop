@@ -40,23 +40,20 @@ def test_design_stage_produces_stage_transition_event(
     """A DESIGN-stage run emits at least one StageTransition event."""
     import engine
 
+    from core.pipeline.github import client as gh_client_mod
+
     monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(metrics, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(gh_client_mod, "PROJECT_ROOT", tmp_path)
 
-    with mock.patch.object(engine, "invoke_agent", return_value=True), mock.patch.object(
-        engine, "gh_comment"
-    ), mock.patch.object(engine, "gh"), mock.patch.object(engine, "git"), mock.patch.object(
-        engine, "_run_test_subagent", return_value=True
-    ), mock.patch.object(engine, "run_verify_stage", return_value=True), mock.patch.object(
-        engine, "_detect_provider_error", return_value=None
-    ):
-        # The simplest way: invoke the transition_label call and check.
+    ok = mock.Mock(returncode=0, stdout=b"", stderr=b"")
+    with (mock.patch.object(gh_client_mod, "_run_gh", return_value=ok),):
         engine.transition_label(1, "status:design", "status:ready", run_id="X")
 
     events = metrics.read_trajectory(1)
-    assert any(e.event_type == "label_transition" for e in events), (
-        f"expected label_transition event; got {[e.event_type for e in events]}"
-    )
+    assert any(
+        e.event_type == "label_transition" for e in events
+    ), f"expected label_transition event; got {[e.event_type for e in events]}"
 
 
 def test_build_stage_produces_subagent_invocation_events(
@@ -77,6 +74,7 @@ def test_build_stage_produces_subagent_invocation_events(
         timestamp=datetime.now(timezone.utc),
         issue_num=1,
         run_id="20260627T1530-aaaa",
+        event_type="subagent_invocation",
         agent_binary="pi",
         prompt_size_bytes=1234,
     )
@@ -93,14 +91,15 @@ def test_transition_label_produces_label_transition_event(
     """Every transition_label call records a LabelTransition event."""
     import engine
 
+    from core.pipeline.github import client as gh_client_mod
+
     monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(metrics, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(gh_client_mod, "PROJECT_ROOT", tmp_path)
 
-    with mock.patch.object(engine, "gh") as run_gh:
-        run_gh.return_value = mock.Mock(returncode=0, stdout=b"", stderr=b"")
-        engine.transition_label(
-            1, "status:build", "status:design", run_id="run-1"
-        )
+    ok = mock.Mock(returncode=0, stdout=b"", stderr=b"")
+    with mock.patch.object(gh_client_mod, "_run_gh", return_value=ok):
+        engine.transition_label(1, "status:build", "status:design", run_id="run-1")
 
     events = metrics.read_trajectory(1)
     label_events = [e for e in events if e.event_type == "label_transition"]
@@ -132,6 +131,7 @@ def test_validate_produces_validation_run_event(
         timestamp=datetime.now(timezone.utc),
         issue_num=1,
         run_id="run-x",
+        event_type="validation_run",
         exit_code=result["exit_code"],
         classification=result["classification"],
         action=result["action"],
@@ -149,40 +149,27 @@ def test_full_pipeline_produces_at_least_six_events(
     """DESIGN -> BUILD -> VERIFY records >= 6 trajectory events total."""
     import engine
 
+    from core.pipeline.github import client as gh_client_mod
+
     monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
     monkeypatch.setattr(metrics, "PROJECT_ROOT", tmp_path)
+    monkeypatch.setattr(gh_client_mod, "PROJECT_ROOT", tmp_path)
 
+    ok = mock.Mock(returncode=0, stdout=b"", stderr=b"")
     with (
-        mock.patch.object(engine, "gh") as run_gh,
+        mock.patch.object(gh_client_mod, "_run_gh", return_value=ok),
         mock.patch.object(engine, "invoke_agent", return_value=True),
-        mock.patch.object(engine, "gh_comment"),
         mock.patch.object(engine, "git"),
-        mock.patch.object(engine, "_run_test_subagent", return_value=True),
-        mock.patch.object(engine, "run_verify_stage", return_value=True),
     ):
-        run_gh.return_value = mock.Mock(returncode=0, stdout=b"", stderr=b"")
-        # DESIGN transition
-        engine.transition_label(
-            1, "status:design", "status:ready", run_id="run-1"
-        )
-        # BUILD transition
-        engine.transition_label(
-            1, "status:build", "status:design", run_id="run-1"
-        )
-        # VERIFY transition
-        engine.transition_label(
-            1, "status:verify", "status:build", run_id="run-1"
-        )
-        # REVIEW transition (after verify success)
-        engine.transition_label(
-            1, "status:review", "status:verify", run_id="run-1"
-        )
-        # A comment (also recorded)
-        engine.gh_comment(1, "hello", run_id="run-1")
-        engine.gh_comment(1, "second comment", run_id="run-2")
+        # 4 transitions + 2 comments = 6 events
+        engine.transition_label(1, "status:design", "status:ready", run_id="r1")
+        engine.transition_label(1, "status:build", "status:design", run_id="r1")
+        engine.transition_label(1, "status:verify", "status:build", run_id="r1")
+        engine.transition_label(1, "status:review", "status:verify", run_id="r1")
+        engine.gh_comment(1, "hello", run_id="r1")
+        engine.gh_comment(1, "second", run_id="r2")
 
     events = metrics.read_trajectory(1)
     assert len(events) >= 6, (
-        f"expected >= 6 events; got {len(events)}: "
-        f"{[e.event_type for e in events]}"
+        f"expected >= 6 events; got {len(events)}: " f"{[e.event_type for e in events]}"
     )
