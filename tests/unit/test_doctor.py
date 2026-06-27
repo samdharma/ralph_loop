@@ -86,3 +86,127 @@ def test_doctor_exit_code_zero_when_healthy(
     # With no .ralph/ directory at all (or empty), doctor returns 0.
     rc = doctor.run_doctor(None)
     assert rc in (0, 1)  # 0 healthy, 1 may be allowed for "no data"
+
+
+# ─────────────────────────────────────────────────────────
+# B5.2 — 5 diagnostic categories (spec §3.10, plan §3 R-11)
+# ─────────────────────────────────────────────────────────
+
+
+class TestDiagnosticCategories:
+    """B5.2: each of the 5 diagnostic categories contributes to the exit code.
+
+    Per spec §3.10 the categories are:
+      1. stuck issues (>1 hour in DESIGN/BUILD/VERIFY)
+      2. long-blocked issues (>7 days)
+      3. repeat failures (same test fails 3+ times in 30 days)
+      4. orphan subprocesses (zombie pi/kimi)
+      5. environment checks (missing labels, no gh auth, no git remote)
+
+    Per plan §3 R-11 the exit code mapping is:
+      - warnings contribute 1
+      - errors contribute 2
+      - final exit code = max(severity)
+
+    Tests assert: each category contributes the documented severity.
+    """
+
+    def test_stuck_issue_contributes_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A stuck issue (>1 hour in DESIGN/BUILD/VERIFY) → exit 1."""
+        monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
+
+        # Stub a stuck-issue detector that returns severity=1.
+        monkeypatch.setattr(
+            doctor,
+            "_detect_stuck_issues",
+            lambda: [(42, "stuck in BUILD for 2h")],
+        )
+        # Stub all other detectors as no-op.
+        for name in (
+            "_detect_long_blocked",
+            "_detect_repeat_failures",
+            "_detect_orphan_subprocesses",
+            "_detect_environment_problems",
+        ):
+            monkeypatch.setattr(doctor, name, lambda: [])
+
+        sev = doctor._aggregate_severities()
+        assert sev == 1
+
+    def test_orphan_subprocess_contributes_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Orphan subprocess → exit 2 (per plan §3 R-11 contribution table)."""
+        monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
+
+        monkeypatch.setattr(doctor, "_detect_stuck_issues", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_long_blocked", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_repeat_failures", lambda: [])
+        monkeypatch.setattr(
+            doctor,
+            "_detect_orphan_subprocesses",
+            lambda: [(12345, "pi", "zombie")],
+        )
+        monkeypatch.setattr(doctor, "_detect_environment_problems", lambda: [])
+
+        sev = doctor._aggregate_severities()
+        assert sev == 2
+
+    def test_missing_labels_contribute_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing environment (e.g., labels) → exit 2."""
+        monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
+
+        monkeypatch.setattr(doctor, "_detect_stuck_issues", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_long_blocked", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_repeat_failures", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_orphan_subprocesses", lambda: [])
+        monkeypatch.setattr(
+            doctor,
+            "_detect_environment_problems",
+            lambda: [("missing_label", "status:design")],
+        )
+
+        sev = doctor._aggregate_severities()
+        assert sev == 2
+
+    def test_repeat_failures_contribute_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Repeat failures (3+ in 30 days) → exit 1."""
+        monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
+
+        monkeypatch.setattr(doctor, "_detect_stuck_issues", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_long_blocked", lambda: [])
+        monkeypatch.setattr(
+            doctor,
+            "_detect_repeat_failures",
+            lambda: [("tests/foo.py::test_x", 5)],
+        )
+        monkeypatch.setattr(doctor, "_detect_orphan_subprocesses", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_environment_problems", lambda: [])
+
+        sev = doctor._aggregate_severities()
+        assert sev == 1
+
+    def test_long_blocked_contributes_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Long-blocked issue (>7 days) → exit 1."""
+        monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
+
+        monkeypatch.setattr(doctor, "_detect_stuck_issues", lambda: [])
+        monkeypatch.setattr(
+            doctor,
+            "_detect_long_blocked",
+            lambda: [(99, "blocked for 10 days")],
+        )
+        monkeypatch.setattr(doctor, "_detect_repeat_failures", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_orphan_subprocesses", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_environment_problems", lambda: [])
+
+        sev = doctor._aggregate_severities()
+        assert sev == 1
