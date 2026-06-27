@@ -2629,23 +2629,15 @@ def invoke_agent_with_output(
 # ─────────────────────────────────────────────────────────
 
 
-def save_checkpoint(issue_num: int, stage: str):
-    """Save checkpoint for crash recovery with stage info."""
-    CHECKPOINT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    pre_sha = git("rev-parse", "HEAD").stdout.strip()
-    data = {
-        "issue": issue_num,
-        "stage": stage,
-        "pre_stage_sha": pre_sha,
-        "started_at": datetime.now(timezone.utc).isoformat(),
-    }
-    CHECKPOINT_FILE.write_text(json.dumps(data, indent=2))
-
-
-def clear_checkpoint():
-    """Remove checkpoint file on clean completion."""
-    if CHECKPOINT_FILE.exists():
-        CHECKPOINT_FILE.unlink()
+# ─────────────────────────────────────────────────────────
+# C1 step 2 — checkpoint.py re-exports (per plan §1.1 C1)
+# ─────────────────────────────────────────────────────────
+# save_checkpoint and clear_checkpoint live at core.pipeline.checkpoint
+# (per spec §6.1, §10.3 C1). They are re-imported here so existing
+# callers that ``from core.engine import save_checkpoint`` continue
+# to work. New code should import directly from core.pipeline.checkpoint.
+from core.pipeline.checkpoint import clear_checkpoint  # noqa: E402,F401
+from core.pipeline.checkpoint import save_checkpoint  # noqa: E402,F401
 
 
 def recover_from_crash() -> Optional[dict]:
