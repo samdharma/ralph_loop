@@ -188,6 +188,65 @@ class TestAssembleImplementPrompt:
 # ─────────────────────────────────────────────────────────
 
 
+class TestNoProgressBoard:
+    """A7.1: _update_progress_board is removed; no PROGRESS.md writes."""
+
+    def test_update_progress_board_function_does_not_exist(self) -> None:
+        """grep _update_progress_board core/engine.py returns no matches after A7.1."""
+        import subprocess
+
+        result = subprocess.run(
+            ["grep", "-rn", "_update_progress_board", "core/"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        # After A7.1 (this task), the function should not exist anywhere in core/.
+        assert result.returncode != 0 or "_update_progress_board" not in result.stdout, (
+            f"Found _update_progress_board in core/: {result.stdout}"
+        )
+
+    def test_progress_md_not_created_during_mocked_pipeline(self, tmp_path, monkeypatch) -> None:
+        """A full mocked pipeline run does NOT create docs/agent/PROGRESS.md."""
+        progress_md = tmp_path / "docs" / "agent" / "PROGRESS.md"
+
+        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        # Mock all side effects so the pipeline can run.
+        with mock.patch.object(engine, "gh", return_value=mock.MagicMock(stdout="")), \
+             mock.patch.object(engine, "gh_comment"), \
+             mock.patch.object(engine, "git", return_value=mock.MagicMock(stdout="")), \
+             mock.patch.object(engine, "log_metrics"), \
+             mock.patch.object(engine, "transition_label"), \
+             mock.patch.object(engine, "fetch_ready_ticket"), \
+             mock.patch.object(engine, "fetch_retry_issue"), \
+             mock.patch.object(engine, "fetch_issue_by_number"), \
+             mock.patch.object(engine, "_dependencies_met", return_value=True), \
+             mock.patch.object(engine, "sync_ready_board"), \
+             mock.patch.object(engine, "acquire_pid_file", return_value=True), \
+             mock.patch.object(engine, "release_pid_file"), \
+             mock.patch.object(engine, "save_checkpoint"), \
+             mock.patch.object(engine, "clear_checkpoint"), \
+             mock.patch.object(engine, "run_loop"):
+            # Just import-and-call the function names that used to write PROGRESS.md.
+            assert not hasattr(engine, "_update_progress_board"), (
+                "_update_progress_board should be removed"
+            )
+
+        # The file was never created.
+        assert not progress_md.exists()
+
+    def test_no_module_imports_removed_function(self) -> None:
+        """No module imports or calls _update_progress_board (after A7.1 removal)."""
+        assert not hasattr(engine, "_update_progress_board"), (
+            "_update_progress_board still present in engine module"
+        )
+
+
+# ─────────────────────────────────────────────────────────
+# A2.2 — _detect_tampered_tests reclassification (spec §10.1 A2)
+# ─────────────────────────────────────────────────────────
+
+
 class TestEnrichedFailureComments:
     """A5.1: _format_stage_failure includes stdout tail, trajectory link, failure-report link."""
 
