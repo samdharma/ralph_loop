@@ -283,6 +283,11 @@ def run_pytest(tier: str, pytest_paths: list[str] | None = None) -> int:
     """Run pytest for the given tier or on explicit paths. Returns exit code."""
     base = [PYTHON_CMD, "-m", "pytest"] + PYTEST_ADOPTS
 
+    # A4.1: append --junitxml=<path> if RALPH_JUNITXML is set.
+    junitxml_path = os.environ.get("RALPH_JUNITXML")
+    if junitxml_path:
+        base.append(f"--junitxml={junitxml_path}")
+
     if pytest_paths:
         paths = pytest_paths
         suffix = ["-q", "-m", "not e2e and not performance and not broker_live"]
@@ -505,9 +510,18 @@ def main() -> int:
         default=None,
         help="Run pytest on these specific test paths only",
     )
+    parser.add_argument(
+        "--junitxml",
+        default=None,
+        metavar="PATH",
+        help="Emit JUnit XML report to PATH (spec §10.1 A4). Used by the "
+        "engine to surface structured failures to the agent.",
+    )
     args = parser.parse_args()
 
     # Also support --tier=value from the old bash CLI style
+    if args.junitxml:
+        os.environ["RALPH_JUNITXML"] = args.junitxml
     return validate(args.tier, pytest_paths=args.pytest_paths)
 
 
