@@ -24,6 +24,8 @@ import uuid
 from datetime import datetime, timezone
 from enum import Enum
 
+from pydantic import BaseModel, ConfigDict, Field
+
 
 class Stage(str, Enum):
     """The eight-state label machine used by Ralph's pipeline.
@@ -47,6 +49,33 @@ class Stage(str, Enum):
 # STATUS_LABEL is the canonical mapping from a Stage value to its
 # ``status:<value>`` label string used in ``gh issue edit`` calls.
 STATUS_LABEL: dict[Stage, str] = {s: f"status:{s.value}" for s in Stage}
+
+
+class PipelineState(BaseModel):
+    """Typed per-issue pipeline state (per spec §6.1, §7.2).
+
+    Holds the minimal fields needed to resume a pipeline across
+    crash/restart cycles. ``stage`` is the current stage; ``pre_sha``
+    is the commit hash at which the issue was claimed (for rollback);
+    ``run_id`` is the per-run idempotency discriminator (per spec
+    §10.2 B2).
+
+    Pydantic v2 model per spec §4.2 — validates inputs at the boundary
+    so downstream code can rely on typed fields.
+    """
+
+    model_config = ConfigDict(frozen=False, use_enum_values=False)
+
+    issue_num: int = Field(..., description="GitHub issue number")
+    stage: Stage = Field(..., description="Current pipeline stage")
+    pre_sha: str = Field(
+        default="",
+        description="Commit SHA at which the issue was claimed (for rollback)",
+    )
+    run_id: str = Field(
+        default="",
+        description="Unique run identifier for this pipeline run (idempotency key)",
+    )
 
 
 def generate_run_id() -> str:

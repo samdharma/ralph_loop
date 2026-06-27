@@ -63,7 +63,7 @@ lint:  ## black + isort + flake8 + mypy (check only).
 	black --check core tests bin
 	isort --check-only --profile black core tests bin
 	flake8 core tests bin
-	mypy --explicit-package-bases core/migrate.py core/validate.py core/pipeline/agents/artifacts.py
+	mypy --explicit-package-bases core/migrate.py core/validate.py core/pipeline/state.py core/pipeline/agents/artifacts.py
 
 format:  ## black + isort (apply).
 	black core tests bin

@@ -25,6 +25,31 @@ from typing import Optional
 
 from project_sync import _get_config, sync_closed, sync_status
 
+# Ensure the project root (parent of ``core/``) is on sys.path so
+# ``from core.pipeline.state import ...`` works whether engine.py is
+# invoked as ``python core/engine.py`` (bin/ralph flow) or as
+# ``python -m core.engine``. Without this, the package import fails
+# in the bin/ralph flow because only ``core/`` (not its parent) is
+# on sys.path.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+# ─────────────────────────────────────────────────────────
+# C1.2 — state.py re-imports (per plan §1.1 C1.2)
+# ─────────────────────────────────────────────────────────
+# The Stage enum, PipelineState Pydantic model, STATUS_LABEL mapping,
+# and generate_run_id helper all live at core.pipeline.state (per
+# spec §6.1, §7.2). They are re-imported here so existing callers
+# that ``from core.engine import Stage`` continue to work. New code
+# should import directly from core.pipeline.state.
+from core.pipeline.state import PipelineState  # noqa: E402,F401
+from core.pipeline.state import (  # noqa: E402,F401
+    STATUS_LABEL,
+    Stage,
+    generate_run_id,
+)
+
 # ─────────────────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────────────────
@@ -126,12 +151,14 @@ def _find_alternate_agent(excluded: set[str]) -> Optional[str]:
 
 def _revert_to_ready(issue_num: int):
     """Move an issue back to status:ready, removing any in-flight stage labels."""
+    # Per spec §6.1: derive the labels from the Stage enum rather than
+    # hand-writing the strings here. Keeps the source-of-truth single.
     for label in [
-        "status:design",
-        "status:build",
-        "status:verify",
-        "status:review",
-        "status:blocked",
+        STATUS_LABEL[Stage.DESIGN],
+        STATUS_LABEL[Stage.BUILD],
+        STATUS_LABEL[Stage.VERIFY],
+        STATUS_LABEL[Stage.REVIEW],
+        STATUS_LABEL[Stage.BLOCKED],
     ]:
         try:
             gh("issue", "edit", str(issue_num), "--remove-label", label)

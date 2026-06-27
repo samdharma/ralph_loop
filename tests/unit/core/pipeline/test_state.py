@@ -47,3 +47,81 @@ def test_two_consecutive_run_ids_differ() -> None:
     a = state.generate_run_id()
     b = state.generate_run_id()
     assert a != b
+
+
+# ─────────────────────────────────────────────────────────
+# C1.2 — state.py at new path (spec §6.1, §10.3 C1, plan §3 R-2)
+# ─────────────────────────────────────────────────────────
+
+
+class TestStateAtNewPath:
+    """C1.2: stage state re-imported from core/pipeline/state.py.
+
+    The state module already lives at the new path (B-007). This
+    block pins that the public surface — ``Stage``, ``PipelineState``,
+    ``STATUS_LABEL`` — is importable from the new location, and that
+    the engine no longer redefines them locally.
+
+    Per plan §3 R-2: this test runs alongside the snapshot test as
+    a behavior-change detector for the C1.x moves.
+    """
+
+    def test_state_module_imports_stage_pipeline_state_status_label(self) -> None:
+        """``from core.pipeline.state import Stage, PipelineState, STATUS_LABEL`` succeeds."""
+        from core.pipeline.state import (  # noqa: F401
+            STATUS_LABEL,
+            PipelineState,
+            Stage,
+        )
+
+        assert Stage is not None
+        assert PipelineState is not None
+        assert STATUS_LABEL is not None
+
+    def test_stage_design_value_is_design(self) -> None:
+        """Stage.DESIGN.value == 'design'."""
+        from core.pipeline.state import Stage
+
+        assert Stage.DESIGN.value == "design"
+
+    def test_status_label_for_design_stage(self) -> None:
+        """STATUS_LABEL[Stage.DESIGN] == 'status:design'."""
+        from core.pipeline.state import STATUS_LABEL, Stage
+
+        assert STATUS_LABEL[Stage.DESIGN] == "status:design"
+
+    def test_pipeline_state_pydantic_model(self) -> None:
+        """PipelineState is a Pydantic model with the expected fields."""
+        from core.pipeline.state import PipelineState, Stage
+
+        # Construct via Pydantic; verify field access.
+        ps = PipelineState(
+            issue_num=42,
+            stage=Stage.DESIGN,
+            pre_sha="abc1234",
+            run_id="20260101T0000-deadbeef",
+        )
+        assert ps.issue_num == 42
+        assert ps.stage == Stage.DESIGN
+        assert ps.pre_sha == "abc1234"
+        assert ps.run_id == "20260101T0000-deadbeef"
+
+    def test_engine_does_not_redefine_state_symbols(self) -> None:
+        """core.engine imports Stage / PipelineState / STATUS_LABEL from core.pipeline.state
+        rather than redefining them locally."""
+        import inspect
+
+        import core.engine as engine_mod
+        from core.pipeline import state as state_mod
+
+        source = inspect.getsource(engine_mod)
+        # The engine should import these from core.pipeline.state.
+        assert (
+            "from core.pipeline.state import" in source
+            or "from core.pipeline import state" in source
+        ), "engine.py must import state symbols from core.pipeline.state"
+
+        # State module has them defined.
+        assert hasattr(state_mod, "Stage")
+        assert hasattr(state_mod, "PipelineState")
+        assert hasattr(state_mod, "STATUS_LABEL")

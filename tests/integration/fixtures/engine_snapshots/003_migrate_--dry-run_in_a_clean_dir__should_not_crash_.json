@@ -5,8 +5,8 @@
     "migrate",
     "--dry-run"
   ],
-  "exit_code": 1,
-  "stdout_pattern": "",
-  "stderr_pattern": "Traceback (most recent call last):\n  File \"/Users/sam.dharma/Trading/ralph/core/engine.py\", line 3048, in <module>\n    from core.migrate import main as migrate_main\nModuleNotFoundError: No module name",
+  "exit_code": 0,
+  "stdout_pattern": "{\n  \"actions\": [],\n  \"archive_dir\": \"\",\n  \"errors\": []\n}\n",
+  "stderr_pattern": "",
   "description": "migrate --dry-run in a clean dir (should not crash)"
 }
