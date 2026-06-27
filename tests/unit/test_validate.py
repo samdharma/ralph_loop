@@ -842,3 +842,100 @@ class TestAutoQuarantine:
         assert run["failures"] == ["tests/unit/a.py::test_b"]
         assert run["passes"] == ["tests/unit/c.py::test_d"]
         assert run["run_at"] == "2026-06-27T15:00:00Z"
+
+
+# ─────────────────────────────────────────────────────────
+# C3.3 — Quarantine auto-unquarantine after 7 days (spec §10.3 C3)
+# ─────────────────────────────────────────────────────────
+
+
+class TestUnquarantineStale:
+    """C3.3: --unquarantine-stale CLI flag removes entries older than 7 days.
+
+    Per spec §10.3 C3: quarantined tests are auto-removed after 7 days.
+    The flag (or a scheduled sweep) removes entries where ``added_at``
+    is more than 7 days old and preserves the rest. Tests assert:
+    older entries are removed, newer ones preserved, and the function
+    returns the count of removed entries.
+    """
+
+    def _write_yaml(self, tmp_path: Path, entries: list[dict]) -> Path:
+        """Write a tests/quarantine.yaml with the given entries. Returns path."""
+        path = tmp_path / "tests"
+        path.mkdir(parents=True, exist_ok=True)
+        quarantine_path = path / "quarantine.yaml"
+        lines = []
+        for e in entries:
+            lines.append(f"- test_id: {e['test_id']}")
+            lines.append(f"  added_at: \"{e['added_at']}\"")
+            lines.append(f"  reason: {e['reason']}")
+            lines.append(f"  auto_added: {'true' if e['auto_added'] else 'false'}")
+            lines.append("")
+        quarantine_path.write_text("\n".join(lines), encoding="utf-8")
+        return quarantine_path
+
+    def test_entry_older_than_7_days_is_removed(self, tmp_path, monkeypatch) -> None:
+        """An entry with added_at 8 days ago is removed by unquarantine_stale_entries()."""
+        from core import validate
+
+        # 2026-06-19 = 8 days before 2026-06-27 (today for tests).
+        entry = {
+            "test_id": "tests/unit/x.py::test_y",
+            "added_at": "2026-06-19T12:00:00Z",
+            "reason": "flaky",
+            "auto_added": True,
+        }
+        quarantine_path = self._write_yaml(tmp_path, [entry])
+        monkeypatch.setattr(validate, "QUARANTINE_FILE", quarantine_path)
+
+        removed = validate.unquarantine_stale_entries(now="2026-06-27T12:00:00Z")
+        assert removed == 1
+
+        entries = validate.load_quarantine_entries()
+        assert entries == []
+
+    def test_entry_younger_than_7_days_preserved(self, tmp_path, monkeypatch) -> None:
+        """An entry with added_at 1 day ago is preserved."""
+        from core import validate
+
+        entry = {
+            "test_id": "tests/unit/x.py::test_y",
+            "added_at": "2026-06-26T12:00:00Z",
+            "reason": "flaky",
+            "auto_added": True,
+        }
+        quarantine_path = self._write_yaml(tmp_path, [entry])
+        monkeypatch.setattr(validate, "QUARANTINE_FILE", quarantine_path)
+
+        removed = validate.unquarantine_stale_entries(now="2026-06-27T12:00:00Z")
+        assert removed == 0
+
+        entries = validate.load_quarantine_entries()
+        assert len(entries) == 1
+        assert entries[0]["test_id"] == "tests/unit/x.py::test_y"
+
+    def test_mixed_ages_only_old_removed(self, tmp_path, monkeypatch) -> None:
+        """A mix of old and new entries — only old ones are removed; count is correct."""
+        from core import validate
+
+        old = {
+            "test_id": "tests/unit/a.py::test_old",
+            "added_at": "2026-06-10T12:00:00Z",  # 17 days old
+            "reason": "old flake",
+            "auto_added": True,
+        }
+        new = {
+            "test_id": "tests/unit/b.py::test_new",
+            "added_at": "2026-06-26T12:00:00Z",  # 1 day old
+            "reason": "recent flake",
+            "auto_added": True,
+        }
+        quarantine_path = self._write_yaml(tmp_path, [old, new])
+        monkeypatch.setattr(validate, "QUARANTINE_FILE", quarantine_path)
+
+        removed = validate.unquarantine_stale_entries(now="2026-06-27T12:00:00Z")
+        assert removed == 1
+
+        entries = validate.load_quarantine_entries()
+        assert len(entries) == 1
+        assert entries[0]["test_id"] == "tests/unit/b.py::test_new"
