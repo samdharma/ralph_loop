@@ -421,60 +421,16 @@ def test_snapshot_file_hashes_returns_empty_for_all_missing(tmp_path):
     assert hashes == {}
 
 
-def test_detect_tampered_tests_finds_changed_files(tmp_path):
-    """_detect_tampered_tests returns files whose content hash changed."""
-    fake_project = tmp_path / "project"
-    tests_dir = fake_project / "tests" / "unit"
-    tests_dir.mkdir(parents=True)
-
-    test_file = tests_dir / "test_x.py"
-    test_file.write_text("def test(): pass\n")
-
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
-        before = engine._snapshot_file_hashes(["tests/unit/test_x.py"])
-
-    # Modify the file
-    test_file.write_text("def test(): assert False\n")
-
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
-        after = engine._snapshot_file_hashes(["tests/unit/test_x.py"])
-        tampered = engine._detect_tampered_tests(before, after)
-
-    assert tampered == ["tests/unit/test_x.py"]
+# These tests previously verified _detect_tampered_tests against content-hash
+# snapshots (v3 semantics). A2.2 replaces that with a mode-based check
+# (spec §10.1 A2). The new behavior is covered by TestDetectTamperedTests
+# above. The legacy content-hash tests are removed because the function
+# signature changed and the old behavior is no longer accessible.
 
 
-def test_detect_tampered_tests_returns_empty_when_unchanged(tmp_path):
-    """_detect_tampered_tests returns empty when files haven't changed."""
-    fake_project = tmp_path / "project"
-    tests_dir = fake_project / "tests" / "unit"
-    tests_dir.mkdir(parents=True)
-    (tests_dir / "test_x.py").write_text("def test(): pass\n")
-
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
-        before = engine._snapshot_file_hashes(["tests/unit/test_x.py"])
-        after = engine._snapshot_file_hashes(["tests/unit/test_x.py"])
-        tampered = engine._detect_tampered_tests(before, after)
-
-    assert tampered == []
-
-
-def test_detect_tampered_tests_ignores_new_files(tmp_path):
-    """_detect_tampered_tests only reports modified files, not new ones."""
-    fake_project = tmp_path / "project"
-    tests_dir = fake_project / "tests" / "unit"
-    tests_dir.mkdir(parents=True)
-
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
-        before: dict[str, str] = {}
-    
-    (tests_dir / "test_new.py").write_text("def test(): pass\n")
-
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
-        after = engine._snapshot_file_hashes(["tests/unit/test_new.py"])
-        tampered = engine._detect_tampered_tests(before, after)
-
-    # New files are NOT tampered (they didn't exist before)
-    assert tampered == []
+def test_detect_tampered_tests_legacy_hash_helpers_remain():
+    """Sanity check: _snapshot_file_hashes is still present (other call sites use it)."""
+    assert hasattr(engine, "_snapshot_file_hashes")
 
 
 # ─────────────────────────────────────────────────────────

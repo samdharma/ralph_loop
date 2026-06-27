@@ -11,6 +11,7 @@ Usage (via CLI):
 
 import hashlib
 import json
+import logging
 import os
 import re
 import signal
@@ -845,20 +846,25 @@ def run_build_stage(issue: dict) -> bool:
         log_metrics("stage_complete", issue=str(issue_num), stage="build")
         return False
 
-    # Detect if IMPLEMENT agent modified QA-written test files.
-    qa_hashes_after = _snapshot_file_hashes(qa_test_paths_before)
-    tampered_tests = _detect_tampered_tests(qa_hashes_before, qa_hashes_after)
-    if tampered_tests:
-        print(
-            f"[ralph] WARNING: IMPLEMENT sub-agent modified {len(tampered_tests)} "
-            f"QA-written test file(s): {tampered_tests}"
+    # A2.2 sanity check: every QA-written test file must still be mode 0o444.
+    # Raises TamperedTestsError if any file is unlocked or missing.
+    try:
+        _detect_tampered_tests(qa_test_paths_before)
+    except TamperedTestsError as e:
+        # Hard block per spec §10.1 A2: tampering is no longer advisory.
+        _write_stage_report(
+            issue_num,
+            "BUILD",
+            "tampering detected",
+            str(e),
         )
         gh_comment(
             issue_num,
-            f"⚠️ IMPLEMENT sub-agent modified {len(tampered_tests)} QA-written "
-            f"test file(s): {', '.join(tampered_tests)}. "
-            f"Import/compilation fixes are acceptable; logic changes are not.",
+            f"🚫 IMPLEMENT sub-agent tampered with QA-written test files: {e}. "
+            "Build blocked. Manual operator review required.",
         )
+        log_metrics("stage_complete", issue=str(issue_num), stage="build", result="tampering")
+        return False
 
     # ── Validation gate (only tests written by the independent QA session) ──
     print("\n[ralph] Running validation gate...")
@@ -1480,16 +1486,52 @@ def _snapshot_file_hashes(paths: list[str]) -> dict[str, str]:
     return snapshot
 
 
-def _detect_tampered_tests(before: dict[str, str], after: dict[str, str]) -> list[str]:
-    """Return paths whose content hash changed between two snapshots.
+def _detect_tampered_tests(test_paths: list[str]) -> bool:
+    """Sanity check: every QA-written test file must have mode 0o444.
 
-    Used to detect if the IMPLEMENT sub-agent modified QA-written test files.
+    Per spec §10.1 A2 (A2.2): the A2.1 chmod at the end of TEST stage makes
+    content tampering impossible at the filesystem level. This function is a
+    sanity check that the chmod is still in place after the IMPLEMENT stage.
+
+    Returns True if all files have mode 0o444.
+    Raises TamperedTestsError if any file has mode != 0o444 (or has been
+    deleted/relocated), and logs at ERROR level.
+
+    Note: signature changed from v3 (was content-hash based). The new
+    mechanism-enforced check is cheaper and stronger.
     """
-    return sorted(
-        path
-        for path, digest in after.items()
-        if path in before and before[path] != digest
-    )
+    tampered: list[str] = []
+    for path_str in test_paths:
+        full = PROJECT_ROOT / path_str if not Path(path_str).is_absolute() else Path(path_str)
+        if not full.exists():
+            tampered.append(path_str)
+            continue
+        mode = full.stat().st_mode & 0o777
+        if mode != 0o444:
+            tampered.append(path_str)
+
+    if tampered:
+        logging.error(
+            "[ralph] TAMPERING DETECTED: %d QA test file(s) are not locked (mode != 0o444): %s",
+            len(tampered),
+            tampered,
+        )
+        raise TamperedTestsError(
+            f"QA test file(s) not in locked state (mode != 0o444): {tampered}"
+        )
+
+    return True
+
+
+class TamperedTestsError(Exception):
+    """Raised when QA-written test files are no longer in the locked state.
+
+    Per spec §10.1 A2 — the IMPLEMENT sub-agent must not be able to modify
+    test files that the TEST sub-agent wrote. A2.1 enforces this with a
+    chmod 0o444 lock; A2.2 detects any escape via this exception.
+    """
+
+    pass
 
 
 def _test_tracking_file(issue_num: int) -> Path:
