@@ -18,7 +18,6 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 METRICS_FILE = PROJECT_ROOT / "logs" / "ralph_metrics.jsonl"
 
@@ -47,12 +46,22 @@ def get_gh_issues_since(since: datetime) -> list[dict]:
     """Fetch issues updated since the given time via gh CLI."""
     try:
         result = subprocess.run(
-            ["gh", "issue", "list",
-             "--state", "all",
-             "--search", f"updated:>={since.strftime('%Y-%m-%d')}",
-             "--json", "number,title,state,labels",
-             "--limit", "50"],
-            capture_output=True, text=True, cwd=PROJECT_ROOT
+            [
+                "gh",
+                "issue",
+                "list",
+                "--state",
+                "all",
+                "--search",
+                f"updated:>={since.strftime('%Y-%m-%d')}",
+                "--json",
+                "number,title,state,labels",
+                "--limit",
+                "50",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
         )
         if result.returncode == 0:
             return json.loads(result.stdout)

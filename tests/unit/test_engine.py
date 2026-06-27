@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "core"))
 
 import engine  # noqa: E402
 
-
 # ─────────────────────────────────────────────────────────
 # A2.1 — QA-test permission lock (spec §10.1 A2)
 # ─────────────────────────────────────────────────────────
@@ -32,7 +31,9 @@ class TestRunTestSubagent:
         test_file.write_text("def test_qa():\n    assert True\n")
         return test_file
 
-    def test_qa_test_files_have_mode_0444_after_subagent_returns(self, tmp_path, monkeypatch) -> None:
+    def test_qa_test_files_have_mode_0444_after_subagent_returns(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """After _run_test_subagent returns successfully, every file in QA test dir has mode 0o444."""
         qa_file = self._setup_qa_test_file(tmp_path)
 
@@ -40,12 +41,18 @@ class TestRunTestSubagent:
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
 
         # Mock all side-effecting helpers + the agent invocation.
-        with mock.patch.object(engine, "invoke_agent", return_value=True), \
-             mock.patch.object(engine, "gh_comment"), \
-             mock.patch.object(engine, "log_metrics"), \
-             mock.patch.object(engine, "_snapshot_tests_dir") as mock_snap, \
-             mock.patch.object(engine, "_detect_new_tests", return_value=[str(qa_file.relative_to(tmp_path))]), \
-             mock.patch.object(engine, "_save_test_tracking"):
+        with (
+            mock.patch.object(engine, "invoke_agent", return_value=True),
+            mock.patch.object(engine, "gh_comment"),
+            mock.patch.object(engine, "log_metrics"),
+            mock.patch.object(engine, "_snapshot_tests_dir"),
+            mock.patch.object(
+                engine,
+                "_detect_new_tests",
+                return_value=[str(qa_file.relative_to(tmp_path))],
+            ),
+            mock.patch.object(engine, "_save_test_tracking"),
+        ):
             issue = {"number": 1, "title": "Test issue"}
             ok = engine._run_test_subagent(issue)
 
@@ -53,17 +60,25 @@ class TestRunTestSubagent:
         mode = qa_file.stat().st_mode & 0o777
         assert mode == 0o444, f"Expected mode 0o444, got {oct(mode)}"
 
-    def test_implement_cannot_write_to_locked_qa_test(self, tmp_path, monkeypatch) -> None:
+    def test_implement_cannot_write_to_locked_qa_test(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """IMPLEMENT sub-agent attempting to write to a QA test file raises PermissionError."""
         qa_file = self._setup_qa_test_file(tmp_path)
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
 
-        with mock.patch.object(engine, "invoke_agent", return_value=True), \
-             mock.patch.object(engine, "gh_comment"), \
-             mock.patch.object(engine, "log_metrics"), \
-             mock.patch.object(engine, "_snapshot_tests_dir"), \
-             mock.patch.object(engine, "_detect_new_tests", return_value=[str(qa_file.relative_to(tmp_path))]), \
-             mock.patch.object(engine, "_save_test_tracking"):
+        with (
+            mock.patch.object(engine, "invoke_agent", return_value=True),
+            mock.patch.object(engine, "gh_comment"),
+            mock.patch.object(engine, "log_metrics"),
+            mock.patch.object(engine, "_snapshot_tests_dir"),
+            mock.patch.object(
+                engine,
+                "_detect_new_tests",
+                return_value=[str(qa_file.relative_to(tmp_path))],
+            ),
+            mock.patch.object(engine, "_save_test_tracking"),
+        ):
             engine._run_test_subagent({"number": 1, "title": "Test issue"})
 
         # After lock, attempting to write must raise PermissionError on POSIX.
@@ -85,12 +100,18 @@ class TestRunTestSubagent:
             observed_modes.append(qa_file.stat().st_mode & 0o777)
             return True
 
-        with mock.patch.object(engine, "invoke_agent", side_effect=fake_invoke_agent), \
-             mock.patch.object(engine, "gh_comment"), \
-             mock.patch.object(engine, "log_metrics"), \
-             mock.patch.object(engine, "_snapshot_tests_dir"), \
-             mock.patch.object(engine, "_detect_new_tests", return_value=[str(qa_file.relative_to(tmp_path))]), \
-             mock.patch.object(engine, "_save_test_tracking"):
+        with (
+            mock.patch.object(engine, "invoke_agent", side_effect=fake_invoke_agent),
+            mock.patch.object(engine, "gh_comment"),
+            mock.patch.object(engine, "log_metrics"),
+            mock.patch.object(engine, "_snapshot_tests_dir"),
+            mock.patch.object(
+                engine,
+                "_detect_new_tests",
+                return_value=[str(qa_file.relative_to(tmp_path))],
+            ),
+            mock.patch.object(engine, "_save_test_tracking"),
+        ):
             engine._run_test_subagent({"number": 1, "title": "Test issue"})
 
         # During the agent run, the file should NOT yet be locked.
@@ -119,8 +140,12 @@ class TestAssembleImplementPrompt:
             write_qa_tests,
         )
 
-        write_design(issue_num, "# Design for issue 1\n\nApproach: TDD.", project_root=tmp_path)
-        write_files_in_scope(issue_num, ["src/foo.py", "tests/unit/test_foo.py"], project_root=tmp_path)
+        write_design(
+            issue_num, "# Design for issue 1\n\nApproach: TDD.", project_root=tmp_path
+        )
+        write_files_in_scope(
+            issue_num, ["src/foo.py", "tests/unit/test_foo.py"], project_root=tmp_path
+        )
         write_acceptance_criteria(
             issue_num,
             [
@@ -129,14 +154,26 @@ class TestAssembleImplementPrompt:
             ],
             project_root=tmp_path,
         )
-        write_qa_tests(issue_num, ["tests/unit/test_foo.py::test_a"], project_root=tmp_path)
+        write_qa_tests(
+            issue_num, ["tests/unit/test_foo.py::test_a"], project_root=tmp_path
+        )
 
     def test_prompt_contains_verbatim_design_text(self, tmp_path, monkeypatch) -> None:
         """Assembled IMPLEMENT prompt contains the verbatim design text."""
         self._setup_artifacts(tmp_path, issue_num=1)
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        monkeypatch.setattr(engine, "PROMPT_FILE", tmp_path / "docs" / "agent" / "PROMPT.md", raising=False)
-        monkeypatch.setattr(engine, "PROMPTS_DIR", tmp_path / "docs" / "agent" / "prompts", raising=False)
+        monkeypatch.setattr(
+            engine,
+            "PROMPT_FILE",
+            tmp_path / "docs" / "agent" / "PROMPT.md",
+            raising=False,
+        )
+        monkeypatch.setattr(
+            engine,
+            "PROMPTS_DIR",
+            tmp_path / "docs" / "agent" / "prompts",
+            raising=False,
+        )
 
         issue = {"number": 1, "title": "Test issue", "body": "Implement X."}
         prompt = engine._assemble_subagent_prompt(issue, "implement.md", mode="B")
@@ -148,8 +185,18 @@ class TestAssembleImplementPrompt:
         """Assembled IMPLEMENT prompt lists every path from files_in_scope.json."""
         self._setup_artifacts(tmp_path, issue_num=1)
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        monkeypatch.setattr(engine, "PROMPT_FILE", tmp_path / "docs" / "agent" / "PROMPT.md", raising=False)
-        monkeypatch.setattr(engine, "PROMPTS_DIR", tmp_path / "docs" / "agent" / "prompts", raising=False)
+        monkeypatch.setattr(
+            engine,
+            "PROMPT_FILE",
+            tmp_path / "docs" / "agent" / "PROMPT.md",
+            raising=False,
+        )
+        monkeypatch.setattr(
+            engine,
+            "PROMPTS_DIR",
+            tmp_path / "docs" / "agent" / "prompts",
+            raising=False,
+        )
 
         issue = {"number": 1, "title": "Test issue", "body": "Implement X."}
         prompt = engine._assemble_subagent_prompt(issue, "implement.md", mode="B")
@@ -157,12 +204,24 @@ class TestAssembleImplementPrompt:
         assert "src/foo.py" in prompt
         assert "tests/unit/test_foo.py" in prompt
 
-    def test_prompt_lists_every_acceptance_criterion(self, tmp_path, monkeypatch) -> None:
+    def test_prompt_lists_every_acceptance_criterion(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """Assembled IMPLEMENT prompt lists every acceptance criterion as a numbered item."""
         self._setup_artifacts(tmp_path, issue_num=1)
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        monkeypatch.setattr(engine, "PROMPT_FILE", tmp_path / "docs" / "agent" / "PROMPT.md", raising=False)
-        monkeypatch.setattr(engine, "PROMPTS_DIR", tmp_path / "docs" / "agent" / "prompts", raising=False)
+        monkeypatch.setattr(
+            engine,
+            "PROMPT_FILE",
+            tmp_path / "docs" / "agent" / "PROMPT.md",
+            raising=False,
+        )
+        monkeypatch.setattr(
+            engine,
+            "PROMPTS_DIR",
+            tmp_path / "docs" / "agent" / "prompts",
+            raising=False,
+        )
 
         issue = {"number": 1, "title": "Test issue", "body": "Implement X."}
         prompt = engine._assemble_subagent_prompt(issue, "implement.md", mode="B")
@@ -172,11 +231,23 @@ class TestAssembleImplementPrompt:
         assert "AC2" in prompt
         assert "lint clean" in prompt
 
-    def test_missing_artifact_dir_raises_filenotfound(self, tmp_path, monkeypatch) -> None:
+    def test_missing_artifact_dir_raises_filenotfound(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """Missing artifact directory -> FileNotFoundError (not silent fallback)."""
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        monkeypatch.setattr(engine, "PROMPT_FILE", tmp_path / "docs" / "agent" / "PROMPT.md", raising=False)
-        monkeypatch.setattr(engine, "PROMPTS_DIR", tmp_path / "docs" / "agent" / "prompts", raising=False)
+        monkeypatch.setattr(
+            engine,
+            "PROMPT_FILE",
+            tmp_path / "docs" / "agent" / "PROMPT.md",
+            raising=False,
+        )
+        monkeypatch.setattr(
+            engine,
+            "PROMPTS_DIR",
+            tmp_path / "docs" / "agent" / "prompts",
+            raising=False,
+        )
 
         issue = {"number": 99, "title": "Test issue", "body": "Implement X."}
         with pytest.raises(FileNotFoundError):
@@ -202,44 +273,48 @@ class TestNoProgressBoard:
             check=False,
         )
         # After A7.1 (this task), the function should not exist anywhere in core/.
-        assert result.returncode != 0 or "_update_progress_board" not in result.stdout, (
-            f"Found _update_progress_board in core/: {result.stdout}"
-        )
+        assert (
+            result.returncode != 0 or "_update_progress_board" not in result.stdout
+        ), f"Found _update_progress_board in core/: {result.stdout}"
 
-    def test_progress_md_not_created_during_mocked_pipeline(self, tmp_path, monkeypatch) -> None:
+    def test_progress_md_not_created_during_mocked_pipeline(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """A full mocked pipeline run does NOT create docs/agent/PROGRESS.md."""
         progress_md = tmp_path / "docs" / "agent" / "PROGRESS.md"
 
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
         # Mock all side effects so the pipeline can run.
-        with mock.patch.object(engine, "gh", return_value=mock.MagicMock(stdout="")), \
-             mock.patch.object(engine, "gh_comment"), \
-             mock.patch.object(engine, "git", return_value=mock.MagicMock(stdout="")), \
-             mock.patch.object(engine, "log_metrics"), \
-             mock.patch.object(engine, "transition_label"), \
-             mock.patch.object(engine, "fetch_ready_ticket"), \
-             mock.patch.object(engine, "fetch_retry_issue"), \
-             mock.patch.object(engine, "fetch_issue_by_number"), \
-             mock.patch.object(engine, "_dependencies_met", return_value=True), \
-             mock.patch.object(engine, "sync_ready_board"), \
-             mock.patch.object(engine, "acquire_pid_file", return_value=True), \
-             mock.patch.object(engine, "release_pid_file"), \
-             mock.patch.object(engine, "save_checkpoint"), \
-             mock.patch.object(engine, "clear_checkpoint"), \
-             mock.patch.object(engine, "run_loop"):
+        with (
+            mock.patch.object(engine, "gh", return_value=mock.MagicMock(stdout="")),
+            mock.patch.object(engine, "gh_comment"),
+            mock.patch.object(engine, "git", return_value=mock.MagicMock(stdout="")),
+            mock.patch.object(engine, "log_metrics"),
+            mock.patch.object(engine, "transition_label"),
+            mock.patch.object(engine, "fetch_ready_ticket"),
+            mock.patch.object(engine, "fetch_retry_issue"),
+            mock.patch.object(engine, "fetch_issue_by_number"),
+            mock.patch.object(engine, "_dependencies_met", return_value=True),
+            mock.patch.object(engine, "sync_ready_board"),
+            mock.patch.object(engine, "acquire_pid_file", return_value=True),
+            mock.patch.object(engine, "release_pid_file"),
+            mock.patch.object(engine, "save_checkpoint"),
+            mock.patch.object(engine, "clear_checkpoint"),
+            mock.patch.object(engine, "run_loop"),
+        ):
             # Just import-and-call the function names that used to write PROGRESS.md.
-            assert not hasattr(engine, "_update_progress_board"), (
-                "_update_progress_board should be removed"
-            )
+            assert not hasattr(
+                engine, "_update_progress_board"
+            ), "_update_progress_board should be removed"
 
         # The file was never created.
         assert not progress_md.exists()
 
     def test_no_module_imports_removed_function(self) -> None:
         """No module imports or calls _update_progress_board (after A7.1 removal)."""
-        assert not hasattr(engine, "_update_progress_board"), (
-            "_update_progress_board still present in engine module"
-        )
+        assert not hasattr(
+            engine, "_update_progress_board"
+        ), "_update_progress_board still present in engine module"
 
 
 # ─────────────────────────────────────────────────────────
@@ -267,7 +342,9 @@ class TestEnrichedFailureComments:
         # At least one agent stdout line is preserved in the comment.
         assert "agent line A" in body
 
-    def test_comment_links_to_trajectory_when_present(self, tmp_path, monkeypatch) -> None:
+    def test_comment_links_to_trajectory_when_present(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """Comment contains a Markdown link to .ralph/issues/<N>/trajectory.jsonl when present."""
         # Create the trajectory file
         traj_dir = tmp_path / ".ralph" / "issues" / "1"
@@ -275,21 +352,29 @@ class TestEnrichedFailureComments:
         (traj_dir / "trajectory.jsonl").write_text('{"event": "stage_complete"}\n')
 
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        body = engine._format_stage_failure("BUILD", report_content="some failure", issue_num=1)
+        body = engine._format_stage_failure(
+            "BUILD", report_content="some failure", issue_num=1
+        )
         assert "trajectory.jsonl" in body
         # Markdown link format: should contain .ralph/issues/<N>/trajectory.jsonl
         assert ".ralph/issues/1/trajectory.jsonl" in body
 
-    def test_comment_omits_trajectory_link_when_absent(self, tmp_path, monkeypatch) -> None:
+    def test_comment_omits_trajectory_link_when_absent(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """Comment does NOT include a trajectory link when trajectory.jsonl does not exist."""
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        body = engine._format_stage_failure("BUILD", report_content="some failure", issue_num=1)
+        body = engine._format_stage_failure(
+            "BUILD", report_content="some failure", issue_num=1
+        )
         assert ".ralph/issues/1/trajectory.jsonl" not in body
 
     def test_comment_links_to_failure_report(self, tmp_path, monkeypatch) -> None:
         """Comment contains a Markdown link to .ralph/issue-<N>-report.md."""
         monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        body = engine._format_stage_failure("BUILD", report_content="some failure", issue_num=1)
+        body = engine._format_stage_failure(
+            "BUILD", report_content="some failure", issue_num=1
+        )
         # Should reference the failure report file path
         assert "issue-1-report.md" in body
 
@@ -307,7 +392,9 @@ class TestInvokeAgentNoContinue:
     --continue nor --session ever appear in the command line.
     """
 
-    def _capture_invocation(self, monkeypatch, agent_bin: str, **invoke_kwargs) -> list[str]:
+    def _capture_invocation(
+        self, monkeypatch, agent_bin: str, **invoke_kwargs
+    ) -> list[str]:
         """Patch subprocess and capture the assembled command."""
         captured: dict[str, list[str]] = {}
 
@@ -360,6 +447,7 @@ class TestInvokeAgentNoContinue:
                 fake_proc.stdout = ""
                 fake_proc.stderr = ""
                 return fake_proc
+
             return fake_run
 
         # Capture pi invocation
@@ -637,11 +725,13 @@ def test_resolve_existing_test_paths_filters_missing_files(tmp_path):
     (tests_dir / "test_real.py").write_text("def test_pass(): pass\n")
 
     with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
-        result = engine._resolve_existing_test_paths([
-            "tests/unit/test_real.py",
-            "tests/unit/test_gone.py",
-            "tests/unit/test_also_missing.py",
-        ])
+        result = engine._resolve_existing_test_paths(
+            [
+                "tests/unit/test_real.py",
+                "tests/unit/test_gone.py",
+                "tests/unit/test_also_missing.py",
+            ]
+        )
 
     assert result == ["tests/unit/test_real.py"]
 
@@ -652,10 +742,12 @@ def test_resolve_existing_test_paths_returns_empty_for_all_missing(tmp_path):
     fake_project.mkdir(parents=True)
 
     with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
-        result = engine._resolve_existing_test_paths([
-            "tests/unit/ghost.py",
-            "tests/integration/nope.py",
-        ])
+        result = engine._resolve_existing_test_paths(
+            [
+                "tests/unit/ghost.py",
+                "tests/integration/nope.py",
+            ]
+        )
 
     assert result == []
 
@@ -680,11 +772,13 @@ def test_snapshot_file_hashes_returns_hashes_for_existing_files(tmp_path):
     (tests_dir / "test_b.py").write_text("def test(): assert True\n")
 
     with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
-        hashes = engine._snapshot_file_hashes([
-            "tests/unit/test_a.py",
-            "tests/unit/test_b.py",
-            "tests/unit/test_missing.py",
-        ])
+        hashes = engine._snapshot_file_hashes(
+            [
+                "tests/unit/test_a.py",
+                "tests/unit/test_b.py",
+                "tests/unit/test_missing.py",
+            ]
+        )
 
     assert len(hashes) == 2
     assert "tests/unit/test_a.py" in hashes
@@ -750,9 +844,10 @@ def test_invoke_agent_raises_rate_limit_error_on_kimi_429():
     fake_result = mock.Mock(
         returncode=1, stdout="", stderr="APIProviderRateLimitError: 429"
     )
-    with mock.patch.object(
-        engine, "_resolve_agent_binary", return_value="kimi"
-    ), mock.patch.object(engine, "run", return_value=fake_result):
+    with (
+        mock.patch.object(engine, "_resolve_agent_binary", return_value="kimi"),
+        mock.patch.object(engine, "run", return_value=fake_result),
+    ):
         with pytest.raises(engine.ProviderRateLimitError):
             engine.invoke_agent("prompt", 42)
 
@@ -762,9 +857,10 @@ def test_invoke_agent_raises_quota_error_on_pi_limit():
     fake_result = mock.Mock(
         returncode=1, stdout="", stderr="FreeUsageLimitError: quota exceeded"
     )
-    with mock.patch.object(
-        engine, "_resolve_agent_binary", return_value="pi"
-    ), mock.patch.object(engine, "run", return_value=fake_result):
+    with (
+        mock.patch.object(engine, "_resolve_agent_binary", return_value="pi"),
+        mock.patch.object(engine, "run", return_value=fake_result),
+    ):
         with pytest.raises(engine.ProviderQuotaError):
             engine.invoke_agent("prompt", 42)
 
@@ -817,32 +913,22 @@ def test_run_loop_reverts_ready_and_sleeps_on_rate_limit():
     os.environ.pop("RALPH_AGENT", None)
     issue = {"number": 42, "title": "Test"}
 
-    with mock.patch.object(
-        engine, "acquire_pid_file", return_value=True
-    ), mock.patch.object(
-        engine, "recover_from_crash", return_value=None
-    ), mock.patch.object(
-        engine, "fetch_ready_ticket", side_effect=[issue, None]
-    ), mock.patch.object(
-        engine, "transition_label"
-    ) as mock_transition, mock.patch.object(
-        engine, "run_pipeline", side_effect=engine.ProviderRateLimitError("429")
-    ), mock.patch.object(
-        engine, "_find_alternate_agent", return_value=None
-    ), mock.patch.object(
-        engine, "_revert_to_ready"
-    ) as mock_revert, mock.patch.object(
-        engine, "time"
-    ) as mock_time, mock.patch.object(
-        engine, "gh", return_value=mock.Mock(stdout="[]")
-    ), mock.patch.object(
-        engine, "sync_status"
-    ), mock.patch.object(
-        engine, "gh_comment"
-    ), mock.patch.object(
-        engine, "log_metrics"
-    ), mock.patch.object(
-        engine, "release_pid_file"
+    with (
+        mock.patch.object(engine, "acquire_pid_file", return_value=True),
+        mock.patch.object(engine, "recover_from_crash", return_value=None),
+        mock.patch.object(engine, "fetch_ready_ticket", side_effect=[issue, None]),
+        mock.patch.object(engine, "transition_label") as mock_transition,
+        mock.patch.object(
+            engine, "run_pipeline", side_effect=engine.ProviderRateLimitError("429")
+        ),
+        mock.patch.object(engine, "_find_alternate_agent", return_value=None),
+        mock.patch.object(engine, "_revert_to_ready") as mock_revert,
+        mock.patch.object(engine, "time") as mock_time,
+        mock.patch.object(engine, "gh", return_value=mock.Mock(stdout="[]")),
+        mock.patch.object(engine, "sync_status"),
+        mock.patch.object(engine, "gh_comment"),
+        mock.patch.object(engine, "log_metrics"),
+        mock.patch.object(engine, "release_pid_file"),
     ):
         mock_time.sleep.side_effect = _make_sleep_shutdown()
         engine.run_loop()
@@ -876,32 +962,20 @@ def test_run_loop_falls_back_to_alternate_agent():
         while True:
             yield None
 
-    with mock.patch.object(
-        engine, "acquire_pid_file", return_value=True
-    ), mock.patch.object(
-        engine, "recover_from_crash", return_value=None
-    ), mock.patch.object(
-        engine, "fetch_ready_ticket", side_effect=fetch_gen()
-    ), mock.patch.object(
-        engine, "transition_label"
-    ) as mock_transition, mock.patch.object(
-        engine, "run_pipeline", side_effect=fail_then_succeed
-    ), mock.patch.object(
-        engine, "_find_alternate_agent", return_value="pi"
-    ), mock.patch.object(
-        engine, "_revert_to_ready"
-    ) as mock_revert, mock.patch.object(
-        engine, "time"
-    ), mock.patch.object(
-        engine, "gh", return_value=mock.Mock(stdout="[]")
-    ), mock.patch.object(
-        engine, "sync_status"
-    ), mock.patch.object(
-        engine, "gh_comment"
-    ), mock.patch.object(
-        engine, "log_metrics"
-    ), mock.patch.object(
-        engine, "release_pid_file"
+    with (
+        mock.patch.object(engine, "acquire_pid_file", return_value=True),
+        mock.patch.object(engine, "recover_from_crash", return_value=None),
+        mock.patch.object(engine, "fetch_ready_ticket", side_effect=fetch_gen()),
+        mock.patch.object(engine, "transition_label") as mock_transition,
+        mock.patch.object(engine, "run_pipeline", side_effect=fail_then_succeed),
+        mock.patch.object(engine, "_find_alternate_agent", return_value="pi"),
+        mock.patch.object(engine, "_revert_to_ready") as mock_revert,
+        mock.patch.object(engine, "time"),
+        mock.patch.object(engine, "gh", return_value=mock.Mock(stdout="[]")),
+        mock.patch.object(engine, "sync_status"),
+        mock.patch.object(engine, "gh_comment"),
+        mock.patch.object(engine, "log_metrics"),
+        mock.patch.object(engine, "release_pid_file"),
     ):
         engine.run_loop()
 
@@ -919,34 +993,23 @@ def test_run_loop_creates_project_issue_when_all_agents_exhausted():
     os.environ.pop("RALPH_AGENT", None)
     issue = {"number": 42, "title": "Test"}
 
-    with mock.patch.object(
-        engine, "acquire_pid_file", return_value=True
-    ), mock.patch.object(
-        engine, "recover_from_crash", return_value=None
-    ), mock.patch.object(
-        engine, "fetch_ready_ticket", side_effect=[issue, None]
-    ), mock.patch.object(
-        engine, "transition_label"
-    ), mock.patch.object(
-        engine, "run_pipeline", side_effect=engine.ProviderQuotaError("quota")
-    ), mock.patch.object(
-        engine, "_find_alternate_agent", return_value=None
-    ), mock.patch.object(
-        engine, "_revert_to_ready"
-    ), mock.patch.object(
-        engine, "_create_provider_issue"
-    ) as mock_create, mock.patch.object(
-        engine, "time"
-    ), mock.patch.object(
-        engine, "gh", return_value=mock.Mock(stdout="[]")
-    ), mock.patch.object(
-        engine, "sync_status"
-    ), mock.patch.object(
-        engine, "gh_comment"
-    ), mock.patch.object(
-        engine, "log_metrics"
-    ), mock.patch.object(
-        engine, "release_pid_file"
+    with (
+        mock.patch.object(engine, "acquire_pid_file", return_value=True),
+        mock.patch.object(engine, "recover_from_crash", return_value=None),
+        mock.patch.object(engine, "fetch_ready_ticket", side_effect=[issue, None]),
+        mock.patch.object(engine, "transition_label"),
+        mock.patch.object(
+            engine, "run_pipeline", side_effect=engine.ProviderQuotaError("quota")
+        ),
+        mock.patch.object(engine, "_find_alternate_agent", return_value=None),
+        mock.patch.object(engine, "_revert_to_ready"),
+        mock.patch.object(engine, "_create_provider_issue") as mock_create,
+        mock.patch.object(engine, "time"),
+        mock.patch.object(engine, "gh", return_value=mock.Mock(stdout="[]")),
+        mock.patch.object(engine, "sync_status"),
+        mock.patch.object(engine, "gh_comment"),
+        mock.patch.object(engine, "log_metrics"),
+        mock.patch.object(engine, "release_pid_file"),
     ):
         engine.run_loop()
 

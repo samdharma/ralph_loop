@@ -42,7 +42,6 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
-
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 CONFIG_FILE = PROJECT_ROOT / ".ralph" / "config.toml"
 
@@ -62,18 +61,21 @@ DEFAULT_STATUS_FIELD = "Status"
 # Config loading
 # ─────────────────────────────────────────────────────────
 
+
 def _load_toml(path: Path) -> dict:
     """Best-effort TOML load. Supports tomllib (3.11+) and tomli (3.10+)."""
     if not path.exists():
         return {}
     try:
         import tomllib  # type: ignore
+
         with open(path, "rb") as f:
             return tomllib.load(f)
     except Exception:
         pass
     try:
         import tomli  # type: ignore
+
         with open(path, "rb") as f:
             return tomli.load(f)
     except Exception:
@@ -148,6 +150,7 @@ def _status_map(config: dict) -> dict:
 # GraphQL helpers
 # ─────────────────────────────────────────────────────────
 
+
 def _gh_graphql(query: str, variables: dict) -> dict:
     """Run a GitHub GraphQL query via gh and return the JSON payload."""
     # Use -F so gh correctly types numeric/boolean GraphQL variables.
@@ -172,14 +175,16 @@ def _get_repo_owner_name(config: dict) -> tuple[str, str]:
     # Fall back to git remote origin.
     result = subprocess.run(
         ["git", "remote", "get-url", "origin"],
-        capture_output=True, text=True, cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        cwd=PROJECT_ROOT,
     )
     if result.returncode != 0:
         raise RuntimeError("no git remote origin")
     url = result.stdout.strip()
     for prefix in ["https://github.com/", "git@github.com:"]:
         if url.startswith(prefix):
-            path = url[len(prefix):]
+            path = url[len(prefix) :]
             if path.endswith(".git"):
                 path = path[:-4]
             owner, name = path.split("/", 1)
@@ -191,7 +196,9 @@ def _get_issue_node_id(issue_num: int) -> str:
     """Return the GitHub node ID for an issue."""
     result = subprocess.run(
         ["gh", "issue", "view", str(issue_num), "--json", "id"],
-        capture_output=True, text=True, cwd=PROJECT_ROOT,
+        capture_output=True,
+        text=True,
+        cwd=PROJECT_ROOT,
     )
     if result.returncode != 0:
         raise RuntimeError(f"cannot fetch issue #{issue_num}: {result.stderr.strip()}")
@@ -326,8 +333,9 @@ def _add_issue_to_project(issue_node_id: str, project_id: str) -> str:
     return item["id"]
 
 
-def _set_project_status(project_id: str, item_id: str, field_id: str,
-                        option_id: str) -> None:
+def _set_project_status(
+    project_id: str, item_id: str, field_id: str, option_id: str
+) -> None:
     """Set the Status field on a project item."""
     mutation = """
     mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
@@ -345,17 +353,21 @@ def _set_project_status(project_id: str, item_id: str, field_id: str,
       }
     }
     """
-    _gh_graphql(mutation, {
-        "projectId": project_id,
-        "itemId": item_id,
-        "fieldId": field_id,
-        "optionId": option_id,
-    })
+    _gh_graphql(
+        mutation,
+        {
+            "projectId": project_id,
+            "itemId": item_id,
+            "fieldId": field_id,
+            "optionId": option_id,
+        },
+    )
 
 
 # ─────────────────────────────────────────────────────────
 # Public API
 # ─────────────────────────────────────────────────────────
+
 
 def sync_status(issue_num: int, status_label: str):
     """

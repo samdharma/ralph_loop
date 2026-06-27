@@ -41,7 +41,9 @@ def _write(path: Path, content: str) -> Path:
     return path
 
 
-def write_design(issue_num: int, design_text: str, project_root: Path | None = None) -> Path:
+def write_design(
+    issue_num: int, design_text: str, project_root: Path | None = None
+) -> Path:
     """Write the design spec to `<artifact_dir>/design.md`.
 
     Args:

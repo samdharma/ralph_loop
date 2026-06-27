@@ -34,6 +34,7 @@ def _project_root() -> Path:
     """Resolve project root at call time so monkeypatch.chdir works in tests."""
     return Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 
+
 # v3-format state files that get migrated to .ralph/issues/<N>/... per spec §6.2.
 _V3_ISSUE_FILES_GLOB = "issue-*-*.{json,md}"
 
@@ -108,7 +109,9 @@ def _issue_num_from_stem(stem: str) -> str | None:
     return issue_num_str
 
 
-def _archive_existing(project_root: Path, archive_dir: Path, actions: list[dict[str, str]]) -> None:
+def _archive_existing(
+    project_root: Path, archive_dir: Path, actions: list[dict[str, str]]
+) -> None:
     """Copy each source file to archive_dir preserving the relative path."""
     for action in actions:
         src = project_root / action["src"]
@@ -205,7 +208,9 @@ def migrate(dry_run: bool = False) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     """CLI entry point for `python -m core.migrate`."""
-    parser = argparse.ArgumentParser(description="Migrate v3 state files to v3.1 layout.")
+    parser = argparse.ArgumentParser(
+        description="Migrate v3 state files to v3.1 layout."
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",

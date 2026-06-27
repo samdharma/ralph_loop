@@ -30,7 +30,9 @@ def project_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def test_write_design_creates_design_md(project_root: Path) -> None:
     """write_design(issue_num, design_text) creates design.md with the given content."""
-    from core.pipeline.agents.artifacts import write_design  # type: ignore[import-not-found]
+    from core.pipeline.agents.artifacts import (
+        write_design,  # type: ignore[import-not-found]
+    )
 
     path = write_design(1, "# Issue #1 design\n\nApproach: TDD.")
     assert path.name == "design.md"
@@ -40,7 +42,9 @@ def test_write_design_creates_design_md(project_root: Path) -> None:
 
 def test_write_files_in_scope_creates_json(project_root: Path) -> None:
     """write_files_in_scope(issue_num, paths_list) creates files_in_scope.json containing the list."""
-    from core.pipeline.agents.artifacts import write_files_in_scope  # type: ignore[import-not-found]
+    from core.pipeline.agents.artifacts import (
+        write_files_in_scope,  # type: ignore[import-not-found]
+    )
 
     paths = ["src/foo.py", "tests/unit/test_foo.py"]
     out = write_files_in_scope(1, paths)
@@ -51,9 +55,14 @@ def test_write_files_in_scope_creates_json(project_root: Path) -> None:
 
 def test_write_acceptance_criteria_creates_json(project_root: Path) -> None:
     """write_acceptance_criteria(issue_num, ac_list) creates acceptance_criteria.json with each AC as {id, criterion}."""
-    from core.pipeline.agents.artifacts import write_acceptance_criteria  # type: ignore[import-not-found]
+    from core.pipeline.agents.artifacts import (
+        write_acceptance_criteria,  # type: ignore[import-not-found]
+    )
 
-    ac = [{"id": "AC1", "criterion": "tests pass"}, {"id": "AC2", "criterion": "lint clean"}]
+    ac = [
+        {"id": "AC1", "criterion": "tests pass"},
+        {"id": "AC2", "criterion": "lint clean"},
+    ]
     out = write_acceptance_criteria(1, ac)
     assert out.name == "acceptance_criteria.json"
     loaded = json.loads(out.read_text())
@@ -63,7 +72,9 @@ def test_write_acceptance_criteria_creates_json(project_root: Path) -> None:
 
 def test_write_qa_tests_creates_json(project_root: Path) -> None:
     """write_qa_tests(issue_num, qa_tests) creates qa_tests_to_pass.json."""
-    from core.pipeline.agents.artifacts import write_qa_tests  # type: ignore[import-not-found]
+    from core.pipeline.agents.artifacts import (
+        write_qa_tests,  # type: ignore[import-not-found]
+    )
 
     qa = ["tests/unit/test_foo.py::test_a", "tests/unit/test_foo.py::test_b"]
     out = write_qa_tests(1, qa)
@@ -74,7 +85,9 @@ def test_write_qa_tests_creates_json(project_root: Path) -> None:
 
 def test_write_design_is_idempotent(project_root: Path) -> None:
     """Writing the same design twice produces identical filesystem state."""
-    from core.pipeline.agents.artifacts import write_design  # type: ignore[import-not-found]
+    from core.pipeline.agents.artifacts import (
+        write_design,  # type: ignore[import-not-found]
+    )
 
     write_design(1, "first")
     before = sorted(p.name for p in project_root.rglob("*"))
@@ -88,21 +101,36 @@ def test_write_design_is_idempotent(project_root: Path) -> None:
 
 def test_write_files_in_scope_is_idempotent(project_root: Path) -> None:
     """Writing the same files_in_scope twice produces identical filesystem state."""
-    from core.pipeline.agents.artifacts import write_files_in_scope  # type: ignore[import-not-found]
+    from core.pipeline.agents.artifacts import (
+        write_files_in_scope,  # type: ignore[import-not-found]
+    )
 
     write_files_in_scope(1, ["a.py"])
     write_files_in_scope(1, ["b.py"])
     loaded = json.loads(
-        (project_root / ".ralph" / "issues" / "1" / "artifacts" / "files_in_scope.json").read_text()
+        (
+            project_root
+            / ".ralph"
+            / "issues"
+            / "1"
+            / "artifacts"
+            / "files_in_scope.json"
+        ).read_text()
     )
     assert loaded == ["b.py"]
 
 
 def test_distinct_issues_get_distinct_directories(project_root: Path) -> None:
     """Different issue numbers get separate artifact directories."""
-    from core.pipeline.agents.artifacts import write_design  # type: ignore[import-not-found]
+    from core.pipeline.agents.artifacts import (
+        write_design,  # type: ignore[import-not-found]
+    )
 
     write_design(1, "issue 1 design")
     write_design(2, "issue 2 design")
-    assert (project_root / ".ralph" / "issues" / "1" / "artifacts" / "design.md").exists()
-    assert (project_root / ".ralph" / "issues" / "2" / "artifacts" / "design.md").exists()
+    assert (
+        project_root / ".ralph" / "issues" / "1" / "artifacts" / "design.md"
+    ).exists()
+    assert (
+        project_root / ".ralph" / "issues" / "2" / "artifacts" / "design.md"
+    ).exists()

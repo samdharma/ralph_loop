@@ -1210,11 +1210,12 @@ def _extract_failure_summary(stdout: str, stderr: str) -> str:
     summary_lines: list[str] = []
 
     # Determine what failed — add a header line for clarity
-    has_test_failure = any("pytest" in l and "FAILED" in l for l in lines)
+    has_test_failure = any("pytest" in line and "FAILED" in line for line in lines)
     has_lint_failure = any(
-        f"{tool} FAILED" in l for tool in ["black", "isort", "flake8", "ruff", "mypy"]
+        f"{tool} FAILED" in line
+        for tool in ["black", "isort", "flake8", "ruff", "mypy"]
+        for line in lines
     )
-    has_skip_msg = any("skipping modified-file lint" in l.lower() for l in lines)
 
     if has_test_failure and not has_lint_failure:
         summary_lines.append(
@@ -1636,7 +1637,7 @@ def _format_stage_failure(
         if traj_path.exists():
             rel = traj_path.relative_to(PROJECT_ROOT)
             lines.append("")
-            lines.append(f"## Trajectory")
+            lines.append("## Trajectory")
             lines.append("")
             lines.append(f"Full trajectory: [`{rel}`]({rel})")
 

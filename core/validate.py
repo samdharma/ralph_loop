@@ -111,7 +111,11 @@ def run(
     """
     run_env = {**os.environ, **(env or {})}
     result = subprocess.run(
-        cmd, capture_output=True, text=True, cwd=PROJECT_ROOT, env=run_env,
+        cmd,
+        capture_output=True,
+        text=True,
+        cwd=PROJECT_ROOT,
+        env=run_env,
         timeout=timeout,
     )
     if result.returncode != 0 and not check:
@@ -213,7 +217,9 @@ _PYTEST_EXIT_TABLE: dict[int, Classification] = {
     2: Classification(2, "test_failure", "block"),  # test execution interrupted
     3: Classification(3, "internal_error", "block"),  # internal error
     4: Classification(4, "test_failure", "block"),  # pytest usage error
-    5: Classification(5, "internal_error", "block"),  # no tests collected (config issue)
+    5: Classification(
+        5, "internal_error", "block"
+    ),  # no tests collected (config issue)
     # 124, 137, 143 handled separately for distinct classification
 }
 
@@ -326,7 +332,9 @@ def run_pytest(tier: str, pytest_paths: list[str] | None = None) -> int:
         if critical_paths:
             print(f"[ralph] Running {len(critical_paths)} critical-path test(s) first")
             crit_cmd = base + critical_paths + ["-q"]
-            crit_result = run(crit_cmd, check=False, env={"RALPH_NO_RECURSIVE_PYTEST": "1"})
+            crit_result = run(
+                crit_cmd, check=False, env={"RALPH_NO_RECURSIVE_PYTEST": "1"}
+            )
             if crit_result.returncode != 0:
                 print("[ralph] Critical-path test(s) failed; blocking BUILD.")
                 return crit_result.returncode
@@ -413,7 +421,8 @@ def run_lint(tool: str, files: list[str]) -> bool:
 
     tool_configs = {
         "black": [PYTHON_CMD, "-m", "black", "--check"] + files,
-        "isort": [PYTHON_CMD, "-m", "isort", "--check-only"] + files,
+        "isort": [PYTHON_CMD, "-m", "isort", "--check-only", "--profile", "black"]
+        + files,
         "flake8": [PYTHON_CMD, "-m", "flake8"] + files,
         "ruff": [PYTHON_CMD, "-m", "ruff", "check"] + files,
     }
@@ -425,7 +434,14 @@ def run_lint(tool: str, files: list[str]) -> bool:
         if not py_files:
             print("[ralph] mypy: no files to check.")
             return True
-        cmd = [PYTHON_CMD, "-m", "mypy", "--follow-imports=silent"] + py_files
+        cmd = [
+            PYTHON_CMD,
+            "-m",
+            "mypy",
+            "--follow-imports=silent",
+            "--explicit-package-bases",
+            "--ignore-missing-imports",
+        ] + py_files
     elif tool in tool_configs:
         cmd = tool_configs[tool]
     else:
@@ -503,7 +519,9 @@ def validate(tier: str = DEFAULT_TIER, pytest_paths: list[str] | None = None) ->
             print("\n[ralph] No modified/untracked Python files detected.")
             print("[ralph] Skipping lint/formatter checks.")
         else:
-            print("\n[ralph] Checking modified/untracked Python files (IMPLEMENT agent changes):")
+            print(
+                "\n[ralph] Checking modified/untracked Python files (IMPLEMENT agent changes):"
+            )
             for f in modified_files:
                 print(f"  {f}")
             print()

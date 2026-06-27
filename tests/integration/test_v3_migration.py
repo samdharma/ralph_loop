@@ -84,7 +84,7 @@ def test_migrate_moves_files_to_v31_layout(tmp_path: Path) -> None:
         os.chdir(tmp_path)
         import migrate  # type: ignore[import-not-found]
 
-        report = migrate.migrate(dry_run=False)
+        migrate.migrate(dry_run=False)
         # v3.1 layout: .ralph/issues/1/tests.json (from issue-1-tests.json)
         assert (tmp_path / ".ralph" / "issues" / "1" / "tests.json").exists()
         assert (tmp_path / ".ralph" / "issues" / "1" / "report.md").exists()

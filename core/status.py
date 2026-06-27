@@ -11,9 +11,7 @@ Usage:
 import json
 import os
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
-
 
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 PID_FILE = Path("/tmp") / f"ralph_daemon_{PROJECT_ROOT.name}.pid"

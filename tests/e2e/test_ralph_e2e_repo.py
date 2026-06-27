@@ -95,7 +95,14 @@ def _clone_e2e_repo(tmp_path: Path) -> Path:
 def _copy_ralph_into(ralph_src: Path, target: Path) -> None:
     """Copy the current Ralph source tree into the target repo."""
     for item in ralph_src.iterdir():
-        if item.name in {".git", ".venv", "__pycache__", "logs", ".pytest_cache", ".mypy_cache"}:
+        if item.name in {
+            ".git",
+            ".venv",
+            "__pycache__",
+            "logs",
+            ".pytest_cache",
+            ".mypy_cache",
+        }:
             continue
         dest = target / item.name
         if item.is_dir():
