@@ -30,10 +30,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent / "core"))
 
 from core.pipeline import metrics  # noqa: E402
 from core.schemas.events import (  # noqa: E402
-    StageTransition,
     TrajectoryEvent,
 )
-
 
 T0 = datetime(2026, 6, 27, 15, 30, 0, tzinfo=timezone.utc)
 
