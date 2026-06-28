@@ -32,6 +32,107 @@ from core.pipeline.shell import gh, git
 from core.pipeline.stages.build import run_build_stage
 from core.pipeline.stages.verify import run_verify_stage
 
+# Per spec §10.4 D3 — the canonical 8 status labels that the dry-run
+# health-check validates exist on the GitHub repo. The 8th label
+# (``status:retry``) is the only allowed addition in v3.1.x per spec
+# §3.5 and §9.1.5 (D2 in Phase D).
+_REQUIRED_STATUS_LABELS: tuple[str, ...] = (
+    "status:ready",
+    "status:design",
+    "status:build",
+    "status:verify",
+    "status:review",
+    "status:blocked",
+    "status:build-retry",
+    "status:verify-retry",
+)
+
+
+def dry_run() -> int:
+    """Validate the daemon's preconditions WITHOUT invoking any agent.
+
+    Per spec §10.4 D3: ``ralph daemon --dry-run`` walks the pipeline up
+    to (but not including) agent invocation. It validates:
+
+      - ``gh auth status`` (auth must be valid)
+      - ``git remote -v`` (a remote must be configured)
+      - the 8 status labels exist on the repo (via ``gh label list``)
+      - the on-disk paths ``.ralph/`` (and its parent) exist
+
+    Returns ``0`` on success, non-zero on the first failed check. Each
+    failure path prints a clear remediation message so CI logs are
+    actionable. No agent subprocess (``pi`` / ``kimi``) is invoked.
+
+    This function is intended for CI health checks per plan §2.4.
+    """
+    # ── 1. gh auth ──
+    try:
+        gh_result = gh("auth", "status")
+    except Exception as e:  # noqa: BLE001
+        print(
+            f"[ralph] gh not authenticated: {e}. Run `gh auth login`.", file=sys.stderr
+        )
+        return 2
+    if gh_result.returncode != 0:
+        print(
+            "[ralph] gh is not authenticated; run `gh auth login`.",
+            file=sys.stderr,
+        )
+        return 2
+
+    # ── 2. git remote ──
+    try:
+        git_result = git("remote", "-v")
+    except Exception as e:  # noqa: BLE001
+        print(f"[ralph] git remote check failed: {e}", file=sys.stderr)
+        return 3
+    if git_result.returncode != 0 or not (git_result.stdout or "").strip():
+        print(
+            "[ralph] No git remote configured. `git remote add origin <url>`.",
+            file=sys.stderr,
+        )
+        return 3
+
+    # ── 3. status labels ──
+    try:
+        label_result = gh("label", "list", "--json", "name")
+    except Exception as e:  # noqa: BLE001
+        print(f"[ralph] gh label list failed: {e}", file=sys.stderr)
+        return 4
+
+    try:
+        import json as _json
+
+        labels_data = _json.loads(label_result.stdout or "[]")
+    except _json.JSONDecodeError as e:
+        print(f"[ralph] could not parse gh label list output: {e}", file=sys.stderr)
+        return 4
+
+    existing = {label["name"] for label in labels_data if "name" in label}
+    missing = [label for label in _REQUIRED_STATUS_LABELS if label not in existing]
+    if missing:
+        print(
+            f"[ralph] Missing required labels: {', '.join(missing)}",
+            file=sys.stderr,
+        )
+        return 4
+
+    # ── 4. on-disk paths ──
+    from core.pipeline.shell import PROJECT_ROOT
+
+    ralph_dir = PROJECT_ROOT / ".ralph"
+    if not ralph_dir.exists():
+        print(
+            f"[ralph] .ralph/ not found at {ralph_dir}. Run `ralph setup`.",
+            file=sys.stderr,
+        )
+        return 5
+
+    print(
+        "[ralph] Dry-run OK. gh auth, git remote, 8 status labels, .ralph/ validated."
+    )
+    return 0
+
 
 def run_loop(auto_close: bool = False, single_issue: Optional[int] = None):
     """

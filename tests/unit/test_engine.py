@@ -1488,6 +1488,7 @@ class TestDaemonDryRun:
             git_mock.return_value = mock.Mock(
                 returncode=0, stdout="origin\tgit@github.com:foo/bar.git\n", stderr=""
             )
+
             # Mock `gh label list` to return all 8 labels.
             def fake_gh(*args, **kwargs):
                 if args and args[0] == "label" and args[1] == "list":
@@ -1508,9 +1509,7 @@ class TestDaemonDryRun:
         assert rc == 0
         # gh auth status was called
         assert any(
-            call_args
-            and call_args[0]
-            and "auth" in call_args[0]
+            call_args and call_args[0] and "auth" in call_args[0]
             for call_args in gh_mock.call_args_list
         ), f"Expected `gh auth status` invocation; got: {gh_mock.call_args_list}"
 
@@ -1592,9 +1591,10 @@ class TestDaemonDryRun:
         self, tmp_path, monkeypatch
     ) -> None:
         """`dry_run()` does NOT invoke `subprocess.run` with `pi` or `kimi` in argv."""
+        import subprocess as subprocess_mod
+
         from core.pipeline import daemon as daemon_mod
         from core.pipeline import shell as shell_mod
-        import subprocess as subprocess_mod
 
         monkeypatch.setattr(shell_mod, "PROJECT_ROOT", tmp_path)
         (tmp_path / ".ralph").mkdir(parents=True, exist_ok=True)

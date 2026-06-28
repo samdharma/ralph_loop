@@ -5,7 +5,7 @@
     "--tier",
     "integration"
   ],
-  "exit_code": 1,
+  "exit_code": 0,
   "stdout_pattern": "=========================================\n[ralph] Validation Gate Starting...\n[ralph] Test tier: integration\n[ralph] Python: /Users/sam.dharma/Trading/ralph/.venv/bin/python\n==========================",
   "stderr_pattern": "Warning: Python 3.14 cannot parse code formatted for Python 3.15. To fix this: run Black with Python 3.15, set --target-version to py314, or use --fast to skip the safety check. Black's safety check v",
   "description": "validate.py --tier integration",

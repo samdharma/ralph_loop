@@ -36,7 +36,7 @@ from core.pipeline.checkpoint import (  # noqa: E402,F401
     clear_checkpoint,
     save_checkpoint,
 )
-from core.pipeline.daemon import run_loop  # noqa: E402,F401
+from core.pipeline.daemon import dry_run, run_loop  # noqa: E402,F401
 from core.pipeline.git_ops import (  # noqa: E402,F401
     _has_commits,
     _has_unpushed_commits,
@@ -175,6 +175,11 @@ if __name__ == "__main__":
         help="Extra flag for every pi invocation (repeatable). "
         "Example: --pi-flag='--model=claude-sonnet-4' --pi-flag='--thinking high'",
     )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate gh/git/labels/paths without invoking the agent (per spec §10.4 D3).",
+    )
     args = parser.parse_args()
     if args.agent:
         os.environ["RALPH_AGENT"] = args.agent
@@ -189,4 +194,8 @@ if __name__ == "__main__":
             print(
                 f"[ralph] Validated {len(args.pi_flag)} pi flag(s): {' '.join(_PI_FLAGS)}"
             )
+    if args.dry_run:
+        # Per spec §10.4 D3: dry-run walks the pipeline up to (but not
+        # including) agent invocation. No pi/kimi subprocess is invoked.
+        sys.exit(dry_run())
     run_loop(auto_close=args.auto_close, single_issue=args.issue)
