@@ -133,9 +133,16 @@ class TestTransitionLabelFailureHandling:
 
         # GitHubClient's gh call fails; direct gh fallback also fails.
         fail = mock.Mock(returncode=1, stdout=b"", stderr=b"boom")
-        with mock.patch.object(gh_client_mod, "_run_gh", return_value=fail):
+        with (
+            mock.patch.object(gh_client_mod, "_run_gh", return_value=fail),
+            mock.patch(
+                "core.pipeline.github.labels._run_gh", return_value=fail
+            ) as direct_gh,
+        ):
             transition_label(1, "status:design", "status:ready")
 
+        # The direct-gh fallback must have been attempted, not the real gh CLI.
+        assert direct_gh.call_count >= 1
         # A label_transition_failed trajectory event should have been emitted.
         failed_events = [
             event
