@@ -9,9 +9,7 @@ Usage (via CLI):
     ralph daemon
 """
 
-import hashlib
 import json
-import logging
 import os
 import signal
 import subprocess
@@ -20,7 +18,8 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from core.project_sync import sync_closed, sync_status
+from core.project_sync import sync_status  # noqa: F401
+from core.project_sync import sync_closed
 
 # Ensure the project root (parent of ``core/``) is on sys.path so
 # ``from core.pipeline.state import ...`` works whether engine.py is
@@ -31,6 +30,69 @@ from core.project_sync import sync_closed, sync_status
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+
+# Phase C follow-up: ticket fetchers, prompt builders, test tracking,
+# git helpers, reporting, and artifact helpers now live in dedicated
+# pipeline modules. Engine re-exports them for backward compatibility.
+from core.pipeline.artifacts_ops import (  # noqa: E402,F401
+    _archive_issue_artifacts,
+    _archived_issue_dir,
+    _cleanup_issue_artifacts,
+    _design_spec_path,
+)
+
+# CHECKPOINT_FILE lives in core.pipeline.checkpoint (C1 step 2);
+# engine.py re-imports it for backward compatibility.
+from core.pipeline.checkpoint import CHECKPOINT_FILE  # noqa: E402,F401
+from core.pipeline.git_ops import (  # noqa: E402,F401
+    _has_commits,
+    _has_unpushed_commits,
+    _push_with_retry,
+    _rollback_working_tree,
+    commit_stage,
+)
+from core.pipeline.issue_ops import (  # noqa: E402,F401
+    RETRY_LABEL_MAP,
+    _dependencies_met,
+    _parse_depends_on,
+    fetch_issue_by_number,
+    fetch_ready_ticket,
+    fetch_retry_issue,
+    sync_ready_board,
+)
+from core.pipeline.prompts import (  # noqa: E402,F401
+    _assemble_subagent_prompt,
+    _fetch_issue_comments,
+    _parse_reference_docs,
+    assemble_stage_prompt,
+)
+
+# PID_FILE lives in core.pipeline.recovery (C1 step 3); engine.py
+# re-imports it for backward compatibility.
+from core.pipeline.recovery import PID_FILE  # noqa: E402,F401
+from core.pipeline.reporting import (  # noqa: E402,F401
+    _extract_failure_summary,
+    _format_stage_failure,
+    _read_partial_design_spec,
+    _summarize_design_spec,
+    _write_stage_report,
+)
+
+# Canonical project-path constants and shell wrappers live in
+# core.pipeline.shell (Phase C follow-up). Engine re-exports them
+# so existing ``from core.engine import X`` callers keep working.
+from core.pipeline.shell import (  # noqa: E402,F401
+    DESIGN_SPEC_DIR,
+    LOG_DIR,
+    METRICS_FILE,
+    PREFLIGHT_SCRIPT,
+    PROJECT_ROOT,
+    PROMPT_FILE,
+    PROMPTS_DIR,
+    gh,
+    git,
+    run,
+)
 
 # ─────────────────────────────────────────────────────────
 # C1.2 — state.py re-imports (per plan §1.1 C1.2)
@@ -46,35 +108,56 @@ from core.pipeline.state import (  # noqa: E402,F401
     Stage,
     generate_run_id,
 )
+from core.pipeline.test_tracking import (  # noqa: E402,F401
+    TamperedTestsError,
+    _detect_new_tests,
+    _detect_tampered_tests,
+    _file_hash,
+    _load_test_tracking,
+    _resolve_existing_test_paths,
+    _save_test_tracking,
+    _snapshot_file_hashes,
+    _snapshot_tests_dir,
+    _test_tracking_file,
+)
 
 # ─────────────────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────────────────
 
-PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
-# CHECKPOINT_FILE lives in core.pipeline.checkpoint (C1 step 2);
-# engine.py re-imports it for backward compatibility.
-from core.pipeline.checkpoint import CHECKPOINT_FILE  # noqa: E402,F401
-
-# PID_FILE lives in core.pipeline.recovery (C1 step 3); engine.py
-# re-imports it for backward compatibility.
-from core.pipeline.recovery import PID_FILE  # noqa: E402,F401
-
-LOG_DIR = PROJECT_ROOT / "logs"
-METRICS_FILE = LOG_DIR / "ralph_metrics.jsonl"
-PROMPT_FILE = PROJECT_ROOT / "docs" / "agent" / "PROMPT.md"
-PROMPTS_DIR = PROJECT_ROOT / "docs" / "agent" / "prompts"
-
-# Per-issue design specs live in docs/designs/<N>.md (one file per issue).
-DESIGN_SPEC_DIR = PROJECT_ROOT / "docs" / "designs"
-PREFLIGHT_SCRIPT = PROJECT_ROOT / "config" / "ralph_preflight.sh"
-
-# Backoff used when all available agents are rate-limited.
-RATE_LIMIT_BACKOFF_SECONDS = 15 * 60  # 15 minutes
 
 # Extra flags passed to pi via --pi-flag (validated at startup against pi --help).
 # Each string may contain multiple whitespace-separated tokens.
 _PI_FLAGS: list[str] = []
+
+# ─────────────────────────────────────────────────────────
+# C1 step 6 — github/client.py re-exports (per plan §1.1 C1)
+# ─────────────────────────────────────────────────────────
+# _build_github_client lives at core.pipeline.github.client (per
+# spec §6.1, §10.3 C1). It is re-imported here so existing callers
+# that ``from core.engine import _build_github_client`` continue
+# to work. New code should import directly from
+# core.pipeline.github.client.
+from core.pipeline.github.client import _build_github_client  # noqa: E402,F401
+
+# ─────────────────────────────────────────────────────────
+# C1 step 4 — github/comments.py re-exports (per plan §1.1 C1)
+# ─────────────────────────────────────────────────────────
+# gh_comment lives at core.pipeline.github.comments (per spec §6.1,
+# §10.3 C1). It is re-imported here so existing callers that
+# ``from core.engine import gh_comment`` continue to work. New code
+# should import directly from core.pipeline.github.comments.
+from core.pipeline.github.comments import gh_comment  # noqa: E402,F401
+
+# ─────────────────────────────────────────────────────────
+# Item 4: Label Management
+# ─────────────────────────────────────────────────────────
+# transition_label lives at core.pipeline.github.labels (per
+# spec §6.1, §10.3 C1). It is re-imported here so existing
+# callers that ``from core.engine import transition_label``
+# continue to work. New code should import directly from
+# core.pipeline.github.labels.
+from core.pipeline.github.labels import transition_label  # noqa: E402,F401
 
 # ─────────────────────────────────────────────────────────
 # C1 step 14a — providers.py re-exports (per plan §1.1 C1)
@@ -103,66 +186,6 @@ from core.pipeline.providers import (  # noqa: E402,F401
     _sleep_with_interrupt,
 )
 
-
-def _design_spec_path(issue_num: int) -> Path:
-    """Return the path to the per-issue design spec for issue_num."""
-    return DESIGN_SPEC_DIR / f"{issue_num}.md"
-
-
-# ─────────────────────────────────────────────────────────
-# Shell helpers
-# ─────────────────────────────────────────────────────────
-
-
-def run(
-    cmd: list[str],
-    check: bool = True,
-    capture: bool = True,
-    timeout: Optional[int] = None,
-) -> subprocess.CompletedProcess:
-    """Run a shell command, return CompletedProcess."""
-    result = subprocess.run(
-        cmd,
-        capture_output=capture,
-        text=True,
-        check=check,
-        timeout=timeout,
-        cwd=PROJECT_ROOT,
-    )
-    _check_interrupt()
-    return result
-
-
-def gh(*args: str) -> subprocess.CompletedProcess:
-    """Run `gh` command. Raises on failure."""
-    return run(["gh", *args])
-
-
-# ─────────────────────────────────────────────────────────
-# C1 step 4 — github/comments.py re-exports (per plan §1.1 C1)
-# ─────────────────────────────────────────────────────────
-# gh_comment lives at core.pipeline.github.comments (per spec §6.1,
-# §10.3 C1). It is re-imported here so existing callers that
-# ``from core.engine import gh_comment`` continue to work. New code
-# should import directly from core.pipeline.github.comments.
-from core.pipeline.github.comments import gh_comment  # noqa: E402,F401
-
-
-def git(*args: str) -> subprocess.CompletedProcess:
-    """Run `git` command. Raises on failure."""
-    return run(["git", *args])
-
-
-# ─────────────────────────────────────────────────────────
-# C1 step 6 — github/client.py re-exports (per plan §1.1 C1)
-# ─────────────────────────────────────────────────────────
-# _build_github_client lives at core.pipeline.github.client (per
-# spec §6.1, §10.3 C1). It is re-imported here so existing callers
-# that ``from core.engine import _build_github_client`` continue
-# to work. New code should import directly from
-# core.pipeline.github.client.
-from core.pipeline.github.client import _build_github_client  # noqa: E402,F401
-
 # ─────────────────────────────────────────────────────────
 # C1 step 14b — retry.py re-exports (per plan §1.1 C1)
 # ─────────────────────────────────────────────────────────
@@ -182,189 +205,6 @@ from core.pipeline.retry import (  # noqa: E402,F401
     load_retry_config,
     log_metrics,
 )
-
-# ─────────────────────────────────────────────────────────
-# Item 2: Ticket Fetcher
-# ─────────────────────────────────────────────────────────
-
-
-def fetch_ready_ticket() -> Optional[dict]:
-    """
-    Fetch the open status:ready issue with the smallest number.
-    Checks dependencies — skips issues with unmet deps.
-    Returns issue dict {number, title, body} or None.
-    """
-    # Get ready issues sorted by number
-    result = gh(
-        "issue",
-        "list",
-        "--label",
-        "status:ready",
-        "--state",
-        "open",
-        "--json",
-        "number,title,body",
-        "--limit",
-        "20",
-    )
-
-    issues = json.loads(result.stdout)
-    if not issues:
-        return None
-
-    # Sort by number for determinism
-    issues.sort(key=lambda i: i["number"])
-
-    for issue in issues:
-        if _dependencies_met(issue):
-            return issue
-        else:
-            print(f"[ralph] Skipping #{issue['number']} — unmet dependencies")
-
-    return None
-
-
-# Retry labels let humans re-queue a blocked issue without re-running all stages.
-# Ordered smallest scope first — verify-only is faster than build+verify.
-RETRY_LABEL_MAP = {
-    "status:verify-retry": "verify",
-    "status:build-retry": "build",
-}
-
-
-def fetch_retry_issue() -> Optional[tuple[dict, str]]:
-    """
-    Fetch the open retry-labeled issue with the smallest number.
-
-    Checks status:verify-retry first (fastest), then status:build-retry.
-    Returns (issue_dict, resume_stage) or None.
-    """
-    for label, resume_stage in RETRY_LABEL_MAP.items():
-        try:
-            result = gh(
-                "issue",
-                "list",
-                "--label",
-                label,
-                "--state",
-                "open",
-                "--json",
-                "number,title,body",
-                "--limit",
-                "10",
-            )
-            issues = json.loads(result.stdout)
-            if not issues:
-                continue
-            issues.sort(key=lambda i: i["number"])
-            for issue in issues:
-                if _dependencies_met(issue):
-                    return issue, resume_stage
-                else:
-                    print(f"[ralph] Skipping #{issue['number']} — unmet dependencies")
-        except subprocess.CalledProcessError:
-            continue
-    return None
-
-
-def sync_ready_board():
-    """
-    Ensure all open status:ready issues are in the Ready board column.
-    This fixes the common case where an issue was added to the project in the
-    default Backlog column even though it already has the status:ready label.
-    """
-    try:
-        result = gh(
-            "issue",
-            "list",
-            "--label",
-            "status:ready",
-            "--state",
-            "open",
-            "--json",
-            "number",
-            "--limit",
-            "50",
-        )
-        issues = json.loads(result.stdout)
-        for issue in issues:
-            sync_status(issue["number"], "status:ready")
-    except Exception as e:
-        # Fail-soft: board sync must never break the pipeline.
-        print(f"[ralph] WARNING: could not sync ready tickets: {e}")
-
-
-def fetch_issue_by_number(issue_num: int) -> Optional[dict]:
-    """Fetch a specific GitHub issue by number.
-
-    Returns the issue dict {number, title, body, state} or None if:
-    - The issue doesn't exist
-    - The issue is closed
-    - Dependencies are unmet
-    """
-    try:
-        result = gh(
-            "issue",
-            "view",
-            str(issue_num),
-            "--json",
-            "number,title,body,state",
-        )
-        issue = json.loads(result.stdout)
-    except (subprocess.CalledProcessError, json.JSONDecodeError):
-        return None
-
-    if issue.get("state") != "OPEN":
-        return None
-
-    if not _dependencies_met(issue):
-        return None
-
-    return issue
-
-
-def _dependencies_met(issue: dict) -> bool:
-    """Check if all 'Depends on: #N' references in the body are closed."""
-    body = issue.get("body") or ""
-    deps = _parse_depends_on(body)
-    for dep_num in deps:
-        try:
-            result = gh(
-                "issue", "view", str(dep_num), "--json", "state", "--jq", ".state"
-            )
-            state = result.stdout.strip()
-            if state != "CLOSED":
-                print(
-                    f"[ralph] #{issue['number']} depends on #{dep_num} (still {state})"
-                )
-                return False
-        except subprocess.CalledProcessError:
-            print(f"[ralph] #{issue['number']} depends on #{dep_num} (not found)")
-            return False
-    return True
-
-
-def _parse_depends_on(body: str) -> list[int]:
-    """Extract issue numbers from 'Depends on: #42' patterns in the body."""
-    import re
-
-    deps = []
-    for line in body.splitlines():
-        match = re.search(r"Depends\s+on:\s*#(\d+)", line, re.IGNORECASE)
-        if match:
-            deps.append(int(match.group(1)))
-    return deps
-
-
-# ─────────────────────────────────────────────────────────
-# Item 4: Label Management
-# ─────────────────────────────────────────────────────────
-# transition_label lives at core.pipeline.github.labels (per
-# spec §6.1, §10.3 C1). It is re-imported here so existing
-# callers that ``from core.engine import transition_label``
-# continue to work. New code should import directly from
-# core.pipeline.github.labels.
-from core.pipeline.github.labels import transition_label  # noqa: E402,F401
 
 # ─────────────────────────────────────────────────────────
 # Item 3: Single-Stage Pipeline
@@ -1023,821 +863,6 @@ def _run_implement_subagent(issue: dict) -> bool:
         result="success" if success else "failure",
     )
     return success
-
-
-def _write_stage_report(issue_num: int, stage: str, failed_step: str, output: str):
-    """Write a failure report file following the Failure Reporting Contract."""
-    report_path = PROJECT_ROOT / ".ralph" / f"issue-{issue_num}-report.md"
-    report_path.parent.mkdir(parents=True, exist_ok=True)
-    # Truncate if enormous (GitHub comments already have their own limit)
-    max_output = 50000
-    if len(output) > max_output:
-        output = (
-            output[:max_output].rstrip() + "\n\n_(output truncated for report file)_"
-        )
-    report = (
-        f"# Failure Report: Stage {stage}\n\n"
-        f"## Stage\n"
-        f"{stage} — {failed_step}\n\n"
-        f"## What Was Attempted\n"
-        f"Pipeline ran the {failed_step} step for issue #{issue_num}.\n\n"
-        f"## What Failed\n\n"
-        f"```\n{output}\n```\n\n"
-        f"## Root Cause\n"
-        f"See the output above for the specific test/lint failures.\n\n"
-        f"## What to Check\n"
-        f"- The full report is at `.ralph/issue-{issue_num}-report.md`\n"
-        f"- Design spec: `docs/designs/{issue_num}.md`\n"
-        f"- QA-written tests: `.ralph/issue-{issue_num}-tests.json`\n"
-    )
-    report_path.write_text(report, encoding="utf-8")
-    print(f"[ralph] Failure report written to {report_path}")
-
-
-def _extract_failure_summary(stdout: str, stderr: str) -> str:
-    """Extract the most relevant failure lines from validation output."""
-    combined = (stdout + "\n" + stderr).strip()
-    if not combined:
-        return "(no output captured from validation gate)"
-
-    lines = combined.splitlines()
-    summary_lines: list[str] = []
-
-    # Determine what failed — add a header line for clarity
-    has_test_failure = any("pytest" in line and "FAILED" in line for line in lines)
-    has_lint_failure = any(
-        f"{tool} FAILED" in line
-        for tool in ["black", "isort", "flake8", "ruff", "mypy"]
-        for line in lines
-    )
-
-    if has_test_failure and not has_lint_failure:
-        summary_lines.append(
-            "═══ Validation failed: TESTS did not pass (lint checks were skipped) ═══"
-        )
-        summary_lines.append("")
-    elif has_test_failure and has_lint_failure:
-        summary_lines.append("═══ Validation failed: TESTS and LINT both failed ═══")
-        summary_lines.append("")
-    elif has_lint_failure:
-        summary_lines.append(
-            "═══ Validation failed: LINT checks failed on modified files ═══"
-        )
-        summary_lines.append("")
-
-    # Always include FAILED lines and their surrounding context
-    include_next = 0
-    for i, line in enumerate(lines):
-        stripped = line.strip()
-        # Markers that indicate a failure we want to capture
-        is_failure = any(
-            marker in stripped
-            for marker in [
-                "FAILED",
-                "ERROR",
-                "FAIL",
-                "assert",
-                "AssertionError",
-                "E ",  # pytest error context lines
-                "RALPH_GATE_FAILED",
-                "error:",
-            ]
-        )
-        if is_failure or include_next > 0:
-            summary_lines.append(line)
-            include_next = 3 if is_failure else include_next - 1
-
-    if not summary_lines:
-        # Fallback: return last 30 lines
-        summary_lines = lines[-30:]
-
-    result = "\n".join(summary_lines)
-    # Truncate summary for GitHub comment
-    max_summary = 8000
-    if len(result) > max_summary:
-        result = (
-            result[:max_summary].rstrip()
-            + "\n\n_(summary truncated — see `.ralph/issue-*-report.md` for full output)_"
-        )
-    return result
-
-
-def _rollback_working_tree():
-    """Discard all uncommitted changes so stale files don't pollute later stages.
-
-    Uses the checkpoint's pre_stage_sha for a precise rollback to the exact
-    state before the BUILD stage started. This avoids two problems with the
-    old approach (git clean -fd + git checkout -- .):
-
-    1. git clean -fd destroys entire untracked directories (e.g. a new
-       adapters/ subpackage created by the IMPLEMENT agent). On retry the
-       agent may not recreate them, causing "missing __init__.py" lint errors.
-
-    2. git checkout -- . resets to the index, not HEAD. If stray staged
-       changes exist, the restore is imprecise.
-    """
-    try:
-        # Read pre_stage_sha from checkpoint for precise rollback
-        pre_sha = None
-        if CHECKPOINT_FILE.exists():
-            try:
-                data = json.loads(CHECKPOINT_FILE.read_text())
-                pre_sha = data.get("pre_stage_sha")
-            except Exception:
-                pass
-
-        if pre_sha:
-            # Reset tracked files + index to pre-build state
-            run(["git", "reset", "--hard", pre_sha], check=False, capture=True)
-            # Remove untracked files and directories
-            run(["git", "clean", "-fd"], check=False, capture=True)
-            print(
-                f"[ralph] Working tree rolled back to checkpoint " f"SHA {pre_sha[:8]}."
-            )
-        else:
-            # Fallback: restore tracked files to HEAD
-            run(["git", "clean", "-fd"], check=False, capture=True)
-            run(["git", "checkout", "--", "."], check=False, capture=True)
-            print("[ralph] Working tree rolled back after BUILD failure (fallback).")
-    except Exception as e:
-        print(f"[ralph] WARNING: rollback failed: {e}")
-
-
-def _file_hash(path: Path) -> str:
-    """Return SHA-256 hash of a file's contents."""
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def _snapshot_tests_dir() -> dict[str, str]:
-    """Return {relative_path: content_hash} for all .py files under tests/.
-
-    Excludes __pycache__/, .pytest_cache/, and non-.py files so that
-    transient cache artifacts don't leak into the test tracking manifest.
-    """
-    tests_dir = PROJECT_ROOT / "tests"
-    snapshot: dict[str, str] = {}
-    if tests_dir.exists():
-        for p in tests_dir.rglob("*"):
-            if not p.is_file():
-                continue
-            # Exclude cache directories and non-.py files
-            if any(part in ("__pycache__", ".pytest_cache") for part in p.parts):
-                continue
-            if p.suffix != ".py":
-                continue
-            snapshot[str(p.relative_to(PROJECT_ROOT))] = _file_hash(p)
-    return snapshot
-
-
-def _detect_new_tests(before: dict[str, str], after: dict[str, str]) -> list[str]:
-    """Return paths that are new or modified between two test snapshots.
-
-    Only includes .py files; filters out cache artifacts defensively.
-    """
-    return sorted(
-        path
-        for path, digest in after.items()
-        if path not in before or before[path] != digest
-        if path.endswith(".py")
-    )
-
-
-def _snapshot_file_hashes(paths: list[str]) -> dict[str, str]:
-    """Return {relative_path: content_hash} for an explicit list of file paths.
-
-    Paths that don't exist on disk are silently skipped.
-    """
-    snapshot: dict[str, str] = {}
-    for p in paths:
-        full = PROJECT_ROOT / p
-        if full.is_file():
-            snapshot[p] = _file_hash(full)
-    return snapshot
-
-
-def _detect_tampered_tests(test_paths: list[str]) -> bool:
-    """Sanity check: every QA-written test file must have mode 0o444.
-
-    Per spec §10.1 A2 (A2.2): the A2.1 chmod at the end of TEST stage makes
-    content tampering impossible at the filesystem level. This function is a
-    sanity check that the chmod is still in place after the IMPLEMENT stage.
-
-    Returns True if all files have mode 0o444.
-    Raises TamperedTestsError if any file has mode != 0o444 (or has been
-    deleted/relocated), and logs at ERROR level.
-
-    Note: signature changed from v3 (was content-hash based). The new
-    mechanism-enforced check is cheaper and stronger.
-    """
-    tampered: list[str] = []
-    for path_str in test_paths:
-        full = (
-            PROJECT_ROOT / path_str
-            if not Path(path_str).is_absolute()
-            else Path(path_str)
-        )
-        if not full.exists():
-            tampered.append(path_str)
-            continue
-        mode = full.stat().st_mode & 0o777
-        if mode != 0o444:
-            tampered.append(path_str)
-
-    if tampered:
-        logging.error(
-            "[ralph] TAMPERING DETECTED: %d QA test file(s) are not locked (mode != 0o444): %s",
-            len(tampered),
-            tampered,
-        )
-        raise TamperedTestsError(
-            f"QA test file(s) not in locked state (mode != 0o444): {tampered}"
-        )
-
-    return True
-
-
-class TamperedTestsError(Exception):
-    """Raised when QA-written test files are no longer in the locked state.
-
-    Per spec §10.1 A2 — the IMPLEMENT sub-agent must not be able to modify
-    test files that the TEST sub-agent wrote. A2.1 enforces this with a
-    chmod 0o444 lock; A2.2 detects any escape via this exception.
-    """
-
-    pass
-
-
-def _test_tracking_file(issue_num: int) -> Path:
-    return PROJECT_ROOT / ".ralph" / f"issue-{issue_num}-tests.json"
-
-
-def _save_test_tracking(issue_num: int, test_paths: list[str]):
-    """Persist the list of test files created during the TEST stage.
-
-    Sanitizes input to exclude cache artifacts (__pycache__/, .pytest_cache/)
-    and non-.py files. The agent's output is untrusted input.
-    """
-    sanitized = [
-        p
-        for p in test_paths
-        if p.endswith(".py") and "__pycache__" not in p and ".pytest_cache" not in p
-    ]
-    path = _test_tracking_file(issue_num)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"tests": sanitized}, indent=2))
-
-
-def _load_test_tracking(issue_num: int) -> list[str]:
-    """Load the list of test files created during the TEST stage."""
-    path = _test_tracking_file(issue_num)
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return data.get("tests", [])
-    except Exception:
-        return []
-
-
-def _resolve_existing_test_paths(test_paths: list[str]) -> list[str]:
-    """Filter test_paths to only those that exist on disk under PROJECT_ROOT.
-
-    Logs a warning for any path that is missing so the operator knows a
-    tracked test file has been deleted or renamed.
-    """
-    existing: list[str] = []
-    for p in test_paths:
-        full = PROJECT_ROOT / p
-        if full.is_file():
-            existing.append(p)
-        else:
-            print(f"[ralph] WARNING: tracked test file not found: {p}")
-    return existing
-
-
-def _summarize_design_spec(issue_num: int) -> Optional[str]:
-    """Read the per-issue design spec and return a condensed design summary
-    for posting as a GitHub issue comment.
-
-    Reads from docs/designs/<issue_num>.md only. After A7.1, the legacy
-    fallback is removed; v3 projects must run `ralph migrate`
-    to convert their legacy design content.
-    """
-    design_file = _design_spec_path(issue_num)
-    if not design_file.exists():
-        return None
-    text = design_file.read_text(encoding="utf-8")
-    lines = text.splitlines()
-
-    title = ""
-    summary_parts: list[str] = []
-    decisions: list[str] = []
-    risks: list[str] = []
-    ac_count = 0
-    section: Optional[str] = None
-
-    for line in lines:
-        stripped = line.strip()
-        if stripped.startswith("# ") and not title:
-            title = stripped.lstrip("# ").strip()
-            continue
-        if stripped.startswith("## Summary"):
-            section = "summary"
-            continue
-        if stripped.startswith("## Design Decisions"):
-            section = "decisions"
-            continue
-        if stripped.startswith("## Acceptance Criteria"):
-            section = "criteria"
-            continue
-        if stripped.startswith("## Risks"):
-            section = "risks"
-            continue
-        if stripped.startswith("## ") or stripped.startswith("# "):
-            section = None
-            continue
-        if section == "summary" and stripped:
-            summary_parts.append(stripped)
-        if section == "decisions" and stripped and stripped[0] in "0123456789-":
-            decisions.append(stripped)
-        if section == "criteria" and stripped.startswith("- ["):
-            ac_count += 1
-        if section == "risks" and stripped and stripped.startswith("- "):
-            risks.append(stripped)
-
-    if not title:
-        return None
-
-    out = ["## 📐 Design Complete", ""]
-    out.append(f"**{title}**")
-    out.append("")
-    if summary_parts:
-        out.append(f"**Summary:** {' '.join(summary_parts)}")
-        out.append("")
-    if design_file.exists():
-        out.append(
-            f"**Files:** See [`docs/designs/{issue_num}.md`](docs/designs/{issue_num}.md)"
-        )
-    else:
-        out.append(
-            f"**Files:** See [`docs/designs/{issue_num}.md`](docs/designs/{issue_num}.md) (legacy fallback removed in A7.1)"
-        )
-    if decisions:
-        out.append("")
-        out.append("**Key Decisions:**")
-        for d in decisions:
-            out.append(f"- {d}")
-    if risks:
-        out.append("")
-        out.append("**Risks:**")
-        for r in risks:
-            out.append(r)
-    out.append("")
-    out.append(f"**Acceptance Criteria:** {ac_count} criteria defined.")
-    out.append("")
-    if design_file.exists():
-        out.append(f"Full design spec committed to `docs/designs/{issue_num}.md`.")
-    else:
-        out.append(
-            f"Full design spec expected at `docs/designs/{issue_num}.md` (not yet written)."
-        )
-    return "\n".join(out)
-
-
-def _read_partial_design_spec(issue_num: int, max_chars: int = 2000) -> Optional[str]:
-    """Read the per-issue design spec if it exists.
-
-    Returns truncated content or None if the file is missing. The legacy
-    fallback is removed in A7.1; v3 projects must run `ralph migrate`.
-    """
-    design_file = _design_spec_path(issue_num)
-    if not design_file.exists():
-        return None
-    text = design_file.read_text(encoding="utf-8")
-    try:
-        text = text.strip()
-        if not text:
-            return None
-        if len(text) > max_chars:
-            text = (
-                text[:max_chars].rstrip()
-                + "\n\n_(truncated — see file for full content)_"
-            )
-        return text
-    except Exception:
-        return None
-
-
-def _format_stage_failure(
-    stage: str,
-    partial_spec: Optional[str] = None,
-    report_content: Optional[str] = None,
-    fallback: str = "Blocking issue.",
-    issue_num: Optional[int] = None,
-    agent_stdout: Optional[str] = None,
-) -> str:
-    """Build a detailed stage-failure comment with pointers to artifacts.
-
-    Per spec §10.1 A5: the failure comment includes:
-    - Last 50 lines of agent stdout (when available)
-    - Link to trajectory file (when present)
-    - Link to failure report file
-
-    The function is idempotent: re-formatting the same failure produces
-    the same body.
-    """
-    lines = [f"❌ {stage} stage failed.", ""]
-    lines.append("See the design spec for this issue (at `docs/designs/<N>.md`).")
-    if partial_spec:
-        lines.append("")
-        lines.append("## Partial Design Spec")
-        lines.append("")
-        lines.append(partial_spec)
-    if report_content:
-        lines.append("")
-        lines.append("## Failure Details")
-        lines.append("")
-        # Truncate to fit GitHub comments (65k char limit)
-        max_detail = 50000
-        if len(report_content) > max_detail:
-            report_content = (
-                report_content[:max_detail].rstrip()
-                + "\n\n_(output truncated — see `.ralph/issue-*-report.md` for full log)_"
-            )
-        lines.append(report_content)
-    else:
-        lines.append("")
-        lines.append(fallback)
-
-    # A5.1: Agent stdout (last 50 lines) when provided.
-    if agent_stdout:
-        lines.append("")
-        lines.append("## Agent stdout (last 50 lines)")
-        lines.append("")
-        tail = "\n".join(agent_stdout.splitlines()[-50:])
-        lines.append("```")
-        lines.append(tail)
-        lines.append("```")
-
-    # A5.1: Trajectory file link when present (issue_num and file must be set).
-    if issue_num is not None:
-        traj_path = (
-            PROJECT_ROOT / ".ralph" / "issues" / str(issue_num) / "trajectory.jsonl"
-        )
-        if traj_path.exists():
-            rel = traj_path.relative_to(PROJECT_ROOT)
-            lines.append("")
-            lines.append("## Trajectory")
-            lines.append("")
-            lines.append(f"Full trajectory: [`{rel}`]({rel})")
-
-        # A5.1: Failure report link (always — the report is written by _write_stage_report).
-        rel_report = Path(f".ralph/issue-{issue_num}-report.md")
-        lines.append("")
-        lines.append("## Failure report")
-        lines.append("")
-        lines.append(f"Full report: [`{rel_report}`]({rel_report})")
-
-    return "\n".join(lines)
-
-
-def _archived_issue_dir(issue_num: int) -> Path:
-    """Return the archive directory for a blocked issue's artifacts."""
-    return PROJECT_ROOT / ".ralph" / "blocked" / f"issue-{issue_num}"
-
-
-def _cleanup_issue_artifacts(issue_num: int):
-    """Remove session and per-issue test-tracking files after pipeline SUCCEEDS.
-
-    On failure, artifacts are MOVED to .ralph/blocked/issue-N/ instead of
-    being deleted, so a human can inspect the evidence.
-    """
-    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
-    if session_file.exists():
-        session_file.unlink()
-        print(f"[ralph] Cleaned up session: {session_file.name}")
-
-    tracking_file = _test_tracking_file(issue_num)
-    if tracking_file.exists():
-        tracking_file.unlink()
-        print(f"[ralph] Cleaned up test tracking: {tracking_file.name}")
-
-
-def _archive_issue_artifacts(issue_num: int):
-    """Move session and test-tracking files to .ralph/blocked/ for inspection."""
-    archive_dir = _archived_issue_dir(issue_num)
-    archive_dir.mkdir(parents=True, exist_ok=True)
-
-    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
-    if session_file.exists():
-        dest = archive_dir / session_file.name
-        session_file.rename(dest)
-        print(f"[ralph] Archived session: {session_file.name} → blocked/")
-
-    tracking_file = _test_tracking_file(issue_num)
-    if tracking_file.exists():
-        dest = archive_dir / tracking_file.name
-        tracking_file.rename(dest)
-        print(f"[ralph] Archived test tracking: {tracking_file.name} → blocked/")
-
-    # Also copy the failure report if it exists
-    report_file = PROJECT_ROOT / ".ralph" / f"issue-{issue_num}-report.md"
-    if report_file.exists():
-        dest = archive_dir / report_file.name
-        report_file.rename(dest)
-        print(f"[ralph] Archived failure report: {report_file.name} → blocked/")
-
-
-def _has_commits() -> bool:
-    """Check if the repo has any commits (vs. fresh repo)."""
-    try:
-        result = git("rev-list", "--count", "HEAD")
-        return int(result.stdout.strip()) >= 2
-    except Exception:
-        return False
-
-
-def _has_unpushed_commits(branch: str) -> bool:
-    """Return True if the local branch has commits not yet pushed to origin."""
-    try:
-        result = git("rev-list", "--count", f"origin/{branch}..{branch}")
-        return int(result.stdout.strip()) > 0
-    except subprocess.CalledProcessError:
-        # No upstream or origin branch missing — assume nothing to push.
-        return False
-
-
-def _fetch_issue_comments(issue_num: int, limit: int = 2) -> str:
-    """Fetch the last N comments from the GitHub issue. Returns formatted markdown."""
-    try:
-        result = gh(
-            "issue", "view", str(issue_num), "--json", "comments", "--jq", ".comments"
-        )
-        comments = json.loads(result.stdout)
-        if not isinstance(comments, list):
-            return ""
-        comments.sort(key=lambda c: c.get("createdAt", "") or "")
-        selected = comments[-limit:] if len(comments) >= limit else comments
-        if not selected:
-            return ""
-        lines = [f"\n\n## Recent Issue Comments (last {len(selected)})"]
-        for idx, c in enumerate(selected, 1):
-            author = c.get("author", {}).get("login", "unknown")
-            created = c.get("createdAt", "")
-            body = c.get("body", "") or ""
-            lines.append(f"\n### Comment {idx} by @{author} ({created})\n\n{body}")
-        lines.append(
-            "\n*If these comments do not provide enough clarity, read additional "
-            "comments before proceeding.*"
-        )
-        return "\n".join(lines)
-    except Exception as e:
-        print(f"[ralph] WARNING: could not fetch comments for #{issue_num}: {e}")
-        return ""
-
-
-def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) -> str:
-    """
-    Build a prompt for a sub-agent invocation.
-
-    Mode A (Isolated): issue body + design spec + stage persona + recent comments.
-      No codebase context, no reference docs. Fresh pi --print session.
-      Used for TEST and VERIFY sub-agents — genuine independent perspective.
-
-    Mode B (Context inherit): issue body + reference docs + stage persona + recent comments.
-      Session context is inherited via pi --continue.
-      Design spec is already in the session — no need to re-inject.
-      Used for IMPLEMENT sub-agent — builds on DESIGN's codebase knowledge.
-    """
-    base = ""
-    if PROMPT_FILE.exists():
-        base = PROMPT_FILE.read_text(encoding="utf-8")
-
-    # Stage-specific persona instructions
-    stage_prompt = ""
-    stage_path = PROMPTS_DIR / stage_prompt_file
-    if stage_path.exists():
-        stage_prompt = stage_path.read_text(encoding="utf-8")
-
-    body = issue.get("body") or "(No description)"
-
-    # Build prompt sections
-    section_label = (
-        "Sub-Agent Instructions"
-        if mode == "A"
-        else "Sub-Agent Instructions (Mode B — continuing DESIGN session)"
-    )
-    prompt = (
-        f"{base}\n\n"
-        f"---\n\n"
-        f"## {section_label}\n\n"
-        f"{stage_prompt}\n\n"
-        f"---\n\n"
-        f"## Issue #{issue['number']}: {issue['title']}\n\n"
-        f"{body}"
-    )
-
-    # Design spec — read per-issue file. Legacy fallback removed in A7.1.
-    # Injected in both Mode A and Mode B so the prompt is self-contained.
-    design_file = _design_spec_path(issue["number"])
-    if design_file.exists():
-        design_spec = design_file.read_text(encoding="utf-8")
-        prompt += (
-            f"\n\n## Design Spec (from DESIGN stage)\n\n"
-            f"{design_spec}\n\n"
-            f"_Source: `docs/designs/{issue['number']}.md` — "
-            f"this is the design for the current issue only._"
-        )
-
-    # A3.2: artifact-based handoff for IMPLEMENT sub-agent (Mode B).
-    # The IMPLEMENT agent reads its inputs from disk, not from session context.
-    if mode == "B":
-        artifact_dir = (
-            PROJECT_ROOT / ".ralph" / "issues" / str(issue["number"]) / "artifacts"
-        )
-        if not artifact_dir.is_dir():
-            # Per task A-021 acceptance criteria: fail fast, no silent fallback.
-            raise FileNotFoundError(
-                f"Artifact directory missing: {artifact_dir}. "
-                "The DESIGN stage must write artifacts before IMPLEMENT can run. "
-                "See docs/IMPROVEMENT_ROADMAP_SPEC.md §6.2."
-            )
-        design_artifact = artifact_dir / "design.md"
-        files_in_scope_artifact = artifact_dir / "files_in_scope.json"
-        acceptance_criteria_artifact = artifact_dir / "acceptance_criteria.json"
-        qa_tests_artifact = artifact_dir / "qa_tests_to_pass.json"
-
-        prompt += "\n\n## Implement Inputs (from DESIGN artifacts)\n"
-        prompt += (
-            f"\n_All inputs below are read from `.ralph/issues/"
-            f"{issue['number']}/artifacts/`. Per spec §6.2, this replaces "
-            f"the v3 `--continue` session-based handoff._\n"
-        )
-
-        if design_artifact.exists():
-            prompt += f"\n### Design\n\n{design_artifact.read_text(encoding='utf-8')}\n"
-
-        if files_in_scope_artifact.exists():
-            import json as _json
-
-            paths = _json.loads(files_in_scope_artifact.read_text(encoding="utf-8"))
-            prompt += "\n### Files In Scope (you may modify ONLY these)\n\n"
-            for p in paths:
-                prompt += f"- `{p}`\n"
-
-        if acceptance_criteria_artifact.exists():
-            import json as _json
-
-            acs = _json.loads(acceptance_criteria_artifact.read_text(encoding="utf-8"))
-            prompt += "\n### Acceptance Criteria\n\n"
-            for idx, ac in enumerate(acs, 1):
-                prompt += (
-                    f"{idx}. **[{ac.get('id', 'AC')}]** {ac.get('criterion', '')}\n"
-                )
-
-        if qa_tests_artifact.exists():
-            import json as _json
-
-            qa = _json.loads(qa_tests_artifact.read_text(encoding="utf-8"))
-            prompt += "\n### QA Tests to Pass\n\n"
-            for t in qa:
-                prompt += f"- `{t}`\n"
-
-    # Reference docs (all modes)
-    ref_docs = _parse_reference_docs(body)
-    if ref_docs:
-        prompt += "\n\n## Reference Documentation\n\n"
-        for ref in ref_docs:
-            ref_path = PROJECT_ROOT / ref
-            if ref_path.exists():
-                prompt += f"### {ref}\n\n{ref_path.read_text(encoding='utf-8')}\n\n"
-            else:
-                prompt += f"### {ref}\n\n(File not found: {ref})\n\n"
-
-    # Mode A isolation notice
-    if mode == "A":
-        prompt += (
-            "\n\n---\n\n"
-            "**ISOLATION NOTICE:** You are a Mode A sub-agent in a fresh session. "
-            "You have NO prior context about the codebase. "
-            "Do NOT attempt to read implementation code — work from the specification above ONLY."
-        )
-
-    # Mode B continuation notice
-    if mode == "B":
-        prompt += (
-            "\n\n---\n\n"
-            "**CONTEXT NOTE:** You are a Mode B sub-agent continuing from the DESIGN session. "
-            "You inherit full knowledge of the codebase, design decisions, and the issue. "
-            "Test files were written by an independent QA sub-agent (Mode A) who never saw the code. "
-            "Find the test files in tests/ and implement minimal code to make them pass. "
-            "Do NOT write new test files or modify existing tests — the QA tests are the verification truth."
-        )
-
-    prompt += _fetch_issue_comments(issue["number"], limit=2)
-    return prompt
-
-
-def assemble_stage_prompt(issue: dict, stage_prompt_file: str) -> str:
-    """Build a stage-specific prompt from PROMPT.md + stage persona + issue body."""
-    base = ""
-    if PROMPT_FILE.exists():
-        base = PROMPT_FILE.read_text(encoding="utf-8")
-
-    # Stage-specific persona instructions
-    stage_prompt = ""
-    stage_path = PROMPTS_DIR / stage_prompt_file
-    if stage_path.exists():
-        stage_prompt = stage_path.read_text(encoding="utf-8")
-
-    body = issue.get("body") or "(No description)"
-
-    # Append reference docs if referenced in body
-    ref_docs = _parse_reference_docs(body)
-    ref_section = ""
-    if ref_docs:
-        ref_section = "\n\n## Reference Documentation\n\n"
-        for ref in ref_docs:
-            ref_path = PROJECT_ROOT / ref
-            if ref_path.exists():
-                ref_section += (
-                    f"### {ref}\n\n{ref_path.read_text(encoding='utf-8')}\n\n"
-                )
-            else:
-                ref_section += f"### {ref}\n\n(File not found: {ref})\n\n"
-
-    prompt = (
-        f"{base}\n\n"
-        f"---\n\n"
-        f"## Stage Instructions\n\n"
-        f"{stage_prompt}\n\n"
-        f"---\n\n"
-        f"## Issue #{issue['number']}: {issue['title']}\n\n"
-        f"{body}"
-        f"{ref_section}"
-    )
-    prompt += _fetch_issue_comments(issue["number"], limit=2)
-    return prompt
-
-
-def commit_stage(issue_num: int, stage: str):
-    """Commit all changes after a pipeline stage completes and push to origin."""
-    msg = f"[ralph] {stage}: #{issue_num}"
-    committed = False
-    try:
-        git("add", "-A")
-        git("commit", "-m", msg)
-        print(f"[ralph] Committed: {msg}")
-        committed = True
-    except subprocess.CalledProcessError:
-        # No changes to commit (e.g., DESIGN stage may not change files)
-        print(f"[ralph] Nothing to commit for {stage}")
-
-    branch = git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
-    if _has_unpushed_commits(branch):
-        _push_with_retry(branch)
-    elif committed:
-        print(f"[ralph] No unpushed commits on {branch}")
-
-
-def _push_with_retry(branch: str, retries: int = 3, backoff: float = 2.0):
-    """Push current branch to origin with retries. Raises on final failure."""
-    for attempt in range(1, retries + 1):
-        try:
-            git("push", "-u", "origin", branch)
-            print(f"[ralph] Pushed to origin/{branch}")
-            return
-        except subprocess.CalledProcessError as e:
-            if attempt < retries:
-                wait = backoff**attempt
-                print(
-                    f"[ralph] Push failed (attempt {attempt}/{retries}), "
-                    f"retrying in {wait:.0f}s..."
-                )
-                _check_interrupt()
-                time.sleep(wait)
-            else:
-                print(
-                    f"[ralph] ERROR: Push to origin/{branch} failed after "
-                    f"{retries} attempts: {e}"
-                )
-                raise
-
-
-def _parse_reference_docs(body: str) -> list[str]:
-    """Extract 'Reference: path/to/doc.md' from issue body."""
-    import re
-
-    refs = []
-    for line in body.splitlines():
-        match = re.search(r"Reference:\s*(\S+)", line, re.IGNORECASE)
-        if match:
-            refs.append(match.group(1))
-    return refs
 
 
 # ─────────────────────────────────────────────────────────

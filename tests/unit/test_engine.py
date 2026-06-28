@@ -15,6 +15,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "core"))
 
 import engine  # noqa: E402
 
+from core.pipeline import (  # noqa: E402
+    issue_ops,
+    prompts,
+    recovery,
+    reporting,
+    test_tracking,
+)
+
 # ─────────────────────────────────────────────────────────
 # A2.1 — QA-test permission lock (spec §10.1 A2)
 # ─────────────────────────────────────────────────────────
@@ -158,22 +166,26 @@ class TestAssembleImplementPrompt:
             issue_num, ["tests/unit/test_foo.py::test_a"], project_root=tmp_path
         )
 
-    def test_prompt_contains_verbatim_design_text(self, tmp_path, monkeypatch) -> None:
-        """Assembled IMPLEMENT prompt contains the verbatim design text."""
-        self._setup_artifacts(tmp_path, issue_num=1)
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+    def _patch_prompt_module(self, tmp_path: Path, monkeypatch) -> None:
+        """Point prompt constants at tmp_path for the moved prompts module."""
+        monkeypatch.setattr(prompts, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(
-            engine,
+            prompts,
             "PROMPT_FILE",
             tmp_path / "docs" / "agent" / "PROMPT.md",
             raising=False,
         )
         monkeypatch.setattr(
-            engine,
+            prompts,
             "PROMPTS_DIR",
             tmp_path / "docs" / "agent" / "prompts",
             raising=False,
         )
+
+    def test_prompt_contains_verbatim_design_text(self, tmp_path, monkeypatch) -> None:
+        """Assembled IMPLEMENT prompt contains the verbatim design text."""
+        self._setup_artifacts(tmp_path, issue_num=1)
+        self._patch_prompt_module(tmp_path, monkeypatch)
 
         issue = {"number": 1, "title": "Test issue", "body": "Implement X."}
         prompt = engine._assemble_subagent_prompt(issue, "implement.md", mode="B")
@@ -184,19 +196,7 @@ class TestAssembleImplementPrompt:
     def test_prompt_lists_every_in_scope_path(self, tmp_path, monkeypatch) -> None:
         """Assembled IMPLEMENT prompt lists every path from files_in_scope.json."""
         self._setup_artifacts(tmp_path, issue_num=1)
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        monkeypatch.setattr(
-            engine,
-            "PROMPT_FILE",
-            tmp_path / "docs" / "agent" / "PROMPT.md",
-            raising=False,
-        )
-        monkeypatch.setattr(
-            engine,
-            "PROMPTS_DIR",
-            tmp_path / "docs" / "agent" / "prompts",
-            raising=False,
-        )
+        self._patch_prompt_module(tmp_path, monkeypatch)
 
         issue = {"number": 1, "title": "Test issue", "body": "Implement X."}
         prompt = engine._assemble_subagent_prompt(issue, "implement.md", mode="B")
@@ -209,19 +209,7 @@ class TestAssembleImplementPrompt:
     ) -> None:
         """Assembled IMPLEMENT prompt lists every acceptance criterion as a numbered item."""
         self._setup_artifacts(tmp_path, issue_num=1)
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        monkeypatch.setattr(
-            engine,
-            "PROMPT_FILE",
-            tmp_path / "docs" / "agent" / "PROMPT.md",
-            raising=False,
-        )
-        monkeypatch.setattr(
-            engine,
-            "PROMPTS_DIR",
-            tmp_path / "docs" / "agent" / "prompts",
-            raising=False,
-        )
+        self._patch_prompt_module(tmp_path, monkeypatch)
 
         issue = {"number": 1, "title": "Test issue", "body": "Implement X."}
         prompt = engine._assemble_subagent_prompt(issue, "implement.md", mode="B")
@@ -235,19 +223,7 @@ class TestAssembleImplementPrompt:
         self, tmp_path, monkeypatch
     ) -> None:
         """Missing artifact directory -> FileNotFoundError (not silent fallback)."""
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
-        monkeypatch.setattr(
-            engine,
-            "PROMPT_FILE",
-            tmp_path / "docs" / "agent" / "PROMPT.md",
-            raising=False,
-        )
-        monkeypatch.setattr(
-            engine,
-            "PROMPTS_DIR",
-            tmp_path / "docs" / "agent" / "prompts",
-            raising=False,
-        )
+        self._patch_prompt_module(tmp_path, monkeypatch)
 
         issue = {"number": 99, "title": "Test issue", "body": "Implement X."}
         with pytest.raises(FileNotFoundError):
@@ -351,7 +327,7 @@ class TestEnrichedFailureComments:
         traj_dir.mkdir(parents=True)
         (traj_dir / "trajectory.jsonl").write_text('{"event": "stage_complete"}\n')
 
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(reporting, "PROJECT_ROOT", tmp_path)
         body = engine._format_stage_failure(
             "BUILD", report_content="some failure", issue_num=1
         )
@@ -363,7 +339,7 @@ class TestEnrichedFailureComments:
         self, tmp_path, monkeypatch
     ) -> None:
         """Comment does NOT include a trajectory link when trajectory.jsonl does not exist."""
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(reporting, "PROJECT_ROOT", tmp_path)
         body = engine._format_stage_failure(
             "BUILD", report_content="some failure", issue_num=1
         )
@@ -371,7 +347,7 @@ class TestEnrichedFailureComments:
 
     def test_comment_links_to_failure_report(self, tmp_path, monkeypatch) -> None:
         """Comment contains a Markdown link to .ralph/issue-<N>-report.md."""
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(reporting, "PROJECT_ROOT", tmp_path)
         body = engine._format_stage_failure(
             "BUILD", report_content="some failure", issue_num=1
         )
@@ -544,7 +520,7 @@ def _make_gh_response(number=42, state="OPEN", body=""):
 def test_fetch_issue_by_number_returns_open_issue():
     """fetch_issue_by_number returns an open issue with no unmet deps."""
     with mock.patch.object(
-        engine, "gh", return_value=mock.Mock(stdout=_make_gh_response())
+        issue_ops, "gh", return_value=mock.Mock(stdout=_make_gh_response())
     ) as mock_gh:
         issue = engine.fetch_issue_by_number(42)
 
@@ -559,7 +535,9 @@ def test_fetch_issue_by_number_returns_open_issue():
 def test_fetch_issue_by_number_returns_none_when_closed():
     """fetch_issue_by_number returns None if the issue is closed."""
     with mock.patch.object(
-        engine, "gh", return_value=mock.Mock(stdout=_make_gh_response(state="CLOSED"))
+        issue_ops,
+        "gh",
+        return_value=mock.Mock(stdout=_make_gh_response(state="CLOSED")),
     ):
         issue = engine.fetch_issue_by_number(42)
 
@@ -571,7 +549,7 @@ def test_fetch_issue_by_number_returns_none_when_not_found():
     import subprocess
 
     with mock.patch.object(
-        engine, "gh", side_effect=subprocess.CalledProcessError(1, "gh")
+        issue_ops, "gh", side_effect=subprocess.CalledProcessError(1, "gh")
     ):
         issue = engine.fetch_issue_by_number(42)
 
@@ -593,7 +571,7 @@ def test_fetch_issue_by_number_returns_none_when_dependencies_unmet():
     def fake_gh(*args):
         return responses[args]
 
-    with mock.patch.object(engine, "gh", side_effect=fake_gh):
+    with mock.patch.object(issue_ops, "gh", side_effect=fake_gh):
         issue = engine.fetch_issue_by_number(42)
 
     assert issue is None
@@ -614,7 +592,7 @@ def test_fetch_issue_by_number_returns_issue_when_dependencies_met():
     def fake_gh(*args):
         return responses[args]
 
-    with mock.patch.object(engine, "gh", side_effect=fake_gh):
+    with mock.patch.object(issue_ops, "gh", side_effect=fake_gh):
         issue = engine.fetch_issue_by_number(42)
 
     assert issue is not None
@@ -635,7 +613,7 @@ def test_snapshot_tests_dir_ignores_pycache_and_pyc_files(tmp_path):
     (pytest_cache / "cachecontents").write_text("x")
     (tests_dir / "notes.md").write_text("not a test\n")
 
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+    with mock.patch.object(test_tracking, "PROJECT_ROOT", fake_project):
         snapshot = engine._snapshot_tests_dir()
 
     assert list(snapshot.keys()) == ["tests/unit/test_real.py"]
@@ -651,7 +629,7 @@ def test_save_test_tracking_sanitizes_pycache_paths(tmp_path):
     fake_project = tmp_path / "project"
     ralph_dir = fake_project / ".ralph"
 
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+    with mock.patch.object(test_tracking, "PROJECT_ROOT", fake_project):
         engine._save_test_tracking(
             56,
             [
@@ -670,7 +648,7 @@ def test_save_test_tracking_sanitizes_pytest_cache_entries(tmp_path):
     """_save_test_tracking excludes .pytest_cache entries."""
     fake_project = tmp_path / "project"
 
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+    with mock.patch.object(test_tracking, "PROJECT_ROOT", fake_project):
         engine._save_test_tracking(
             57,
             [
@@ -688,7 +666,7 @@ def test_save_test_tracking_sanitizes_non_py_files(tmp_path):
     """_save_test_tracking excludes entries that don't end with .py."""
     fake_project = tmp_path / "project"
 
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+    with mock.patch.object(test_tracking, "PROJECT_ROOT", fake_project):
         engine._save_test_tracking(
             58,
             [
@@ -707,7 +685,7 @@ def test_save_test_tracking_handles_empty_list(tmp_path):
     """_save_test_tracking writes empty array when all inputs are filtered out."""
     fake_project = tmp_path / "project"
 
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+    with mock.patch.object(test_tracking, "PROJECT_ROOT", fake_project):
         engine._save_test_tracking(
             59,
             [
@@ -728,7 +706,7 @@ def test_resolve_existing_test_paths_filters_missing_files(tmp_path):
     tests_dir.mkdir(parents=True)
     (tests_dir / "test_real.py").write_text("def test_pass(): pass\n")
 
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+    with mock.patch.object(test_tracking, "PROJECT_ROOT", fake_project):
         result = engine._resolve_existing_test_paths(
             [
                 "tests/unit/test_real.py",
@@ -745,7 +723,7 @@ def test_resolve_existing_test_paths_returns_empty_for_all_missing(tmp_path):
     fake_project = tmp_path / "project"
     fake_project.mkdir(parents=True)
 
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+    with mock.patch.object(test_tracking, "PROJECT_ROOT", fake_project):
         result = engine._resolve_existing_test_paths(
             [
                 "tests/unit/ghost.py",
@@ -761,7 +739,7 @@ def test_resolve_existing_test_paths_returns_empty_for_empty_input(tmp_path):
     fake_project = tmp_path / "project"
     fake_project.mkdir(parents=True)
 
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+    with mock.patch.object(test_tracking, "PROJECT_ROOT", fake_project):
         result = engine._resolve_existing_test_paths([])
 
     assert result == []
@@ -775,7 +753,7 @@ def test_snapshot_file_hashes_returns_hashes_for_existing_files(tmp_path):
     (tests_dir / "test_a.py").write_text("def test(): pass\n")
     (tests_dir / "test_b.py").write_text("def test(): assert True\n")
 
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+    with mock.patch.object(test_tracking, "PROJECT_ROOT", fake_project):
         hashes = engine._snapshot_file_hashes(
             [
                 "tests/unit/test_a.py",
@@ -795,7 +773,7 @@ def test_snapshot_file_hashes_returns_empty_for_all_missing(tmp_path):
     fake_project = tmp_path / "project"
     fake_project.mkdir(parents=True)
 
-    with mock.patch.object(engine, "PROJECT_ROOT", fake_project):
+    with mock.patch.object(test_tracking, "PROJECT_ROOT", fake_project):
         hashes = engine._snapshot_file_hashes(["tests/nowhere.py"])
 
     assert hashes == {}
@@ -918,15 +896,19 @@ def _make_sleep_shutdown():
         nonlocal called
         if not called:
             called = True
-            engine._shutdown_requested = True
+            # _sleep_with_interrupt reads recovery's module state, not engine's re-export.
+            recovery._shutdown_requested = True
 
     return _sleep
 
 
 def test_run_loop_reverts_ready_and_sleeps_on_rate_limit():
     """A provider rate-limit pauses the loop, reverts the ticket to ready, and does not block it."""
+    # Reset canonical state in recovery.py; engine re-exports may be rebound by other tests.
     engine._shutdown_requested = False
     engine._in_cleanup = False
+    recovery._shutdown_requested = False
+    recovery._in_cleanup = False
     os.environ.pop("RALPH_AGENT", None)
     issue = {"number": 42, "title": "Test"}
 
@@ -945,7 +927,7 @@ def test_run_loop_reverts_ready_and_sleeps_on_rate_limit():
         ),
         mock.patch.object(providers_mod, "_find_alternate_agent", return_value=None),
         mock.patch.object(providers_mod, "_revert_to_ready") as mock_revert,
-        mock.patch.object(engine, "time") as mock_time,
+        mock.patch.object(providers_mod, "time") as mock_time,
         mock.patch.object(engine, "gh", return_value=mock.Mock(stdout="[]")),
         mock.patch.object(engine, "sync_status"),
         mock.patch.object(engine, "gh_comment"),
@@ -966,6 +948,8 @@ def test_run_loop_falls_back_to_alternate_agent():
     """When the current agent is rate-limited, the loop tries the alternate agent once."""
     engine._shutdown_requested = False
     engine._in_cleanup = False
+    recovery._shutdown_requested = False
+    recovery._in_cleanup = False
     os.environ.pop("RALPH_AGENT", None)
     issue = {"number": 42, "title": "Test"}
     calls = []
@@ -1014,6 +998,8 @@ def test_run_loop_creates_project_issue_when_all_agents_exhausted():
     """When all agents hit quota/rate-limit, the loop logs a project issue and stops."""
     engine._shutdown_requested = False
     engine._in_cleanup = False
+    recovery._shutdown_requested = False
+    recovery._in_cleanup = False
     os.environ.pop("RALPH_AGENT", None)
     issue = {"number": 42, "title": "Test"}
 
@@ -1447,6 +1433,11 @@ class TestSubagentsUseWorktree:
             mock.patch.object(engine, "log_metrics"),
             mock.patch.object(engine, "git"),
             mock.patch.object(engine, "_has_commits", return_value=False),
+            mock.patch.object(
+                engine,
+                "run",
+                return_value=mock.Mock(returncode=0, stdout="", stderr=""),
+            ),
         ):
             engine.run_verify_stage({"number": 1, "title": "Test issue"})
 
