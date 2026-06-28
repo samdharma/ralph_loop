@@ -186,7 +186,9 @@ def check_gh_labels():
             "status:ready",
             "status:design",
             "status:build",
+            "status:build-retry",
             "status:verify",
+            "status:verify-retry",
             "status:review",
             "status:blocked",
         ]

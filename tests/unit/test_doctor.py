@@ -24,6 +24,7 @@ Tests verify:
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -210,3 +211,105 @@ class TestDiagnosticCategories:
 
         sev = doctor._aggregate_severities()
         assert sev == 1
+
+
+class TestRepeatFailures:
+    """``_detect_repeat_failures`` reads the failure-history file."""
+
+    def test_no_history_file_returns_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Missing history file → no repeat failures."""
+        monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
+        assert doctor._detect_repeat_failures() == []
+
+    def test_repeating_failure_detected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A test failing 3+ times in 30 days is reported."""
+        monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
+
+        history = tmp_path / ".ralph" / "test-failure-history.jsonl"
+        history.parent.mkdir(parents=True, exist_ok=True)
+        now = "2026-06-28T12:00:00+00:00"
+        history.write_text(
+            "\n".join(
+                [
+                    json.dumps({"test": "tests/foo.py::test_x", "timestamp": now}),
+                    json.dumps({"test": "tests/foo.py::test_x", "timestamp": now}),
+                    json.dumps({"test": "tests/foo.py::test_x", "timestamp": now}),
+                    json.dumps({"test": "tests/bar.py::test_y", "timestamp": now}),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        result = doctor._detect_repeat_failures()
+        assert result == [("tests/foo.py::test_x", 3)]
+
+    def test_old_failures_are_ignored(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Failures older than 30 days do not count."""
+        monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
+
+        history = tmp_path / ".ralph" / "test-failure-history.jsonl"
+        history.parent.mkdir(parents=True, exist_ok=True)
+        old = "2026-05-01T12:00:00+00:00"
+        history.write_text(
+            "\n".join(
+                [
+                    json.dumps({"test": "tests/foo.py::test_x", "timestamp": old}),
+                    json.dumps({"test": "tests/foo.py::test_x", "timestamp": old}),
+                    json.dumps({"test": "tests/foo.py::test_x", "timestamp": old}),
+                ]
+            ),
+            encoding="utf-8",
+        )
+
+        assert doctor._detect_repeat_failures() == []
+
+
+class TestQuietMode:
+    """``--quiet`` suppresses non-critical output."""
+
+    def test_quiet_suppresses_warning_findings(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Quiet mode hides severity 1 findings but still reports errors."""
+        monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
+
+        # Create a fake issue so run_doctor enters scan mode.
+        issues_root = tmp_path / ".ralph" / "issues"
+        issues_root.mkdir(parents=True, exist_ok=True)
+        (issues_root / "1").mkdir()
+
+        monkeypatch.setattr(doctor, "_detect_stuck_issues", lambda: [(1, "stuck")])
+        monkeypatch.setattr(doctor, "_detect_long_blocked", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_repeat_failures", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_orphan_subprocesses", lambda: [])
+        monkeypatch.setattr(
+            doctor, "_detect_environment_problems", lambda: [("missing_label", "x")]
+        )
+
+        rc = doctor.run_doctor(None, quiet=True)
+        captured = capsys.readouterr()
+        assert rc == 2
+        assert "Stuck issues" not in captured.out
+        assert "Environment problems" in captured.out
+
+    def test_main_passes_quiet_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """CLI ``--quiet`` is forwarded to ``run_doctor``."""
+        calls: list[tuple[object, ...]] = []
+
+        def fake_run_doctor(issue_num, quiet: bool = False):
+            calls.append((issue_num, quiet))
+            return 0
+
+        monkeypatch.setattr(doctor, "run_doctor", fake_run_doctor)
+        rc = doctor.main(["--quiet"])
+        assert rc == 0
+        assert calls == [(None, True)]

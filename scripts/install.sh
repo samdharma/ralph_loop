@@ -37,7 +37,6 @@ MISSING=()
 WARNINGS=()
 
 RALPH_HOME="${RALPH_HOME:-$HOME/.ralph}"
-RALPH_VERSION="3.0.0"
 
 # Determine the source directory (where this script lives)
 # When run via `curl ... | bash`, BASH_SOURCE may be unset.
@@ -48,6 +47,14 @@ if [[ -n "${SCRIPT_SOURCE}" && -f "${SCRIPT_SOURCE}" ]]; then
 else
     REPO_DIR=""
 fi
+
+# Derive version from pyproject.toml, git tags, or fallback to 3.1.0
+if [[ -n "${REPO_DIR}" && -f "${REPO_DIR}/pyproject.toml" ]]; then
+    RALPH_VERSION=$(grep -oE '^version = "[^"]+"' "${REPO_DIR}/pyproject.toml" | head -1 | sed -E 's/version = "([^"]+)"/\1/')
+elif command -v git &>/dev/null && git describe --tags --always &>/dev/null; then
+    RALPH_VERSION=$(git describe --tags --always)
+fi
+RALPH_VERSION="${RALPH_VERSION:-3.1.0}"
 
 echo "╔══════════════════════════════════════════╗"
 echo "║   Ralph v3.1 — Automated Build System    ║"
@@ -198,8 +205,15 @@ if [[ ! -f "${RALPH_HOME}/bin/ralph" ]]; then
         echo "    export RALPH_HOME=/path/to/ralph"
         exit 1
     fi
-    # Checkout the ralph-v3 branch
-    git -C "${RALPH_HOME}" checkout ralph-v3 2>/dev/null || true
+    # Checkout the target branch (derive from current clone or default to ralph-v3.1)
+    TARGET_BRANCH="ralph-v3.1"
+    if [[ -n "${REPO_DIR}" ]]; then
+        CURRENT_BRANCH=$(git -C "${REPO_DIR}" branch --show-current 2>/dev/null || true)
+        if [[ -n "${CURRENT_BRANCH}" && "${CURRENT_BRANCH}" == ralph-v* ]]; then
+            TARGET_BRANCH="${CURRENT_BRANCH}"
+        fi
+    fi
+    git -C "${RALPH_HOME}" checkout "${TARGET_BRANCH}" 2>/dev/null || true
     pass "Cloned Ralph v3 to ${RALPH_HOME}"
 fi
 

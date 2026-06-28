@@ -151,14 +151,38 @@ def _detect_long_blocked() -> list[tuple[int, str]]:
 def _detect_repeat_failures() -> list[tuple[str, int]]:
     """Detect tests failing 3+ times in the last 30 days.
 
-    Stub implementation: returns empty list when the failure-history
-    file does not exist. Full reading is deferred — the C3 work
-    (C-004) writes the history file in production.
+    Reads ``.ralph/test-failure-history.jsonl``. Each record is expected
+    to have at least ``test`` (test identifier) and ``timestamp`` (ISO
+    datetime) fields. Returns a list of ``(test_id, failure_count)`` for
+    tests that failed 3 or more times within the last 30 days.
     """
+    import json
+    from datetime import datetime, timedelta, timezone
+
     history = PROJECT_ROOT / ".ralph" / "test-failure-history.jsonl"
     if not history.exists():
         return []
-    return []
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    counts: dict[str, int] = {}
+    for raw in history.read_text(encoding="utf-8").splitlines():
+        if not raw.strip():
+            continue
+        try:
+            rec = json.loads(raw)
+            test_id = rec.get("test")
+            ts_str = rec.get("timestamp")
+            if not test_id or not ts_str:
+                continue
+            ts = datetime.fromisoformat(ts_str)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            if ts >= cutoff:
+                counts[test_id] = counts.get(test_id, 0) + 1
+        except Exception:
+            continue
+
+    return [(test_id, count) for test_id, count in counts.items() if count >= 3]
 
 
 def _detect_orphan_subprocesses() -> list[tuple[int, str, str]]:
@@ -265,8 +289,11 @@ def _aggregate_severities() -> int:
     return max(severities) if severities else 0
 
 
-def _print_findings() -> None:
-    """Pretty-print findings grouped by category."""
+def _print_findings(quiet: bool = False) -> None:
+    """Pretty-print findings grouped by category.
+
+    When ``quiet`` is True, suppress non-critical findings (severity < 2).
+    """
     categories = [
         ("Stuck issues", list(_detect_stuck_issues()), 1),
         ("Long-blocked issues", list(_detect_long_blocked()), 1),
@@ -277,12 +304,14 @@ def _print_findings() -> None:
     for label, findings, severity in categories:
         if not findings:
             continue
+        if quiet and severity < 2:
+            continue
         print(f"\n=== {label} (severity {severity}) ===")
         for finding in findings:  # type: ignore[attr-defined]
             print(f"  - {finding}")  # type: ignore[attr-defined]
 
 
-def run_doctor(issue_num: Optional[int]) -> int:
+def run_doctor(issue_num: Optional[int], quiet: bool = False) -> int:
     """Run the doctor diagnostic. Returns the exit code."""
     if issue_num is None:
         issues = _list_known_issues()
@@ -292,9 +321,10 @@ def run_doctor(issue_num: Optional[int]) -> int:
             )
             print("Status: HEALTHY (no data)")
             return 0
-        print(f"Ralph doctor: scanning {len(issues)} issue(s)…")
+        if not quiet:
+            print(f"Ralph doctor: scanning {len(issues)} issue(s)…")
         sev = _aggregate_severities()
-        _print_findings()
+        _print_findings(quiet=quiet)
         if sev == 0:
             print("\nStatus: HEALTHY")
         elif sev == 1:
@@ -339,7 +369,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    return run_doctor(args.issue_num)
+    return run_doctor(args.issue_num, quiet=args.quiet)
 
 
 if __name__ == "__main__":
