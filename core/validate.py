@@ -450,12 +450,12 @@ def run_pytest(tier: str, pytest_paths: list[str] | None = None) -> int:
         if critical_paths:
             print(f"[ralph] Running {len(critical_paths)} critical-path test(s) first")
             crit_cmd = base + critical_paths + ["-q"]
-            crit_result = run(
-                crit_cmd, check=False, env={"RALPH_NO_RECURSIVE_PYTEST": "1"}
+            crit_result = run_pytest_invocation(
+                crit_cmd, env={"RALPH_NO_RECURSIVE_PYTEST": "1"}
             )
-            if crit_result.returncode != 0:
+            if crit_result["exit_code"] != 0:
                 print("[ralph] Critical-path test(s) failed; blocking BUILD.")
-                return crit_result.returncode
+                return crit_result["exit_code"]
 
     if pytest_paths:
         paths = pytest_paths
@@ -513,8 +513,10 @@ def run_pytest(tier: str, pytest_paths: list[str] | None = None) -> int:
         cmd = base + tier_map.get(tier, [])
         print()
         # Prevent target-project tests that spawn pytest from recursing forever.
-        result = run(cmd, check=False, env={"RALPH_NO_RECURSIVE_PYTEST": "1"})
-        return result.returncode
+        pytest_result = run_pytest_invocation(
+            cmd, env={"RALPH_NO_RECURSIVE_PYTEST": "1"}
+        )
+        return pytest_result["exit_code"]
 
     # Check for module basename collisions and split by directory if needed.
     collisions = detect_collisions(paths)

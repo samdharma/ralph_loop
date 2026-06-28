@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 # Make core/ importable without installing Ralph.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "core"))
 
@@ -1133,3 +1135,135 @@ class TestRetryFlag:
             pytest_paths=["tests/unit/test_smoke.py"]
         )
         assert exit_code == 0
+
+
+# ─────────────────────────────────────────────────────────
+# Task 9 — Route all pytest invocations through run_pytest_invocation
+# ─────────────────────────────────────────────────────────
+
+
+class TestRunPytestRoutesThroughInvocation:
+    """Task 9: run_pytest routes every pytest invocation through run_pytest_invocation.
+
+    This ensures quarantine, timeout, failure-history, and exit-code classification
+    are applied consistently across targeted, non-targeted, pytest-paths, and
+    critical-path tiers.
+    """
+
+    def _fake_invocation(self, returncode: int = 0):
+        """Return a fake run_pytest_invocation that records calls."""
+
+        def fake(cmd: list[str], env: dict[str, str] | None = None) -> dict:
+            fake.calls.append((cmd, env))  # type: ignore[attr-defined]
+            return {
+                "exit_code": returncode,
+                "classification": "success" if returncode == 0 else "test_failure",
+                "action": "accept" if returncode == 0 else "block",
+                "stdout_tail": "",
+                "junitxml_path": None,
+            }
+
+        fake.calls = []  # type: ignore[attr-defined]
+        return fake
+
+    @pytest.mark.parametrize(
+        "tier",
+        ["smoke", "integration", "full", "e2e", "performance"],
+    )
+    def test_non_targeted_tier_uses_run_pytest_invocation(
+        self, monkeypatch, tier: str
+    ) -> None:
+        """Non-targeted tiers call run_pytest_invocation with the expected args."""
+        fake = self._fake_invocation(returncode=0)
+        monkeypatch.setattr(validate, "run_pytest_invocation", fake)
+        monkeypatch.setattr(validate, "is_critical_run", lambda force=False: False)
+        monkeypatch.setattr(validate, "PYTEST_ADOPTS", [])
+
+        exit_code = validate.run_pytest(tier)
+
+        assert exit_code == 0
+        assert len(fake.calls) == 1  # type: ignore[attr-defined]
+        cmd, env = fake.calls[0]  # type: ignore[attr-defined]
+        assert cmd[0] == validate.PYTHON_CMD
+        assert cmd[1:3] == ["-m", "pytest"]
+        assert env == {"RALPH_NO_RECURSIVE_PYTEST": "1"}
+
+    def test_critical_path_uses_run_pytest_invocation(self, monkeypatch) -> None:
+        """Critical-path runs call run_pytest_invocation before the main tier."""
+        fake = self._fake_invocation(returncode=0)
+        monkeypatch.setattr(validate, "run_pytest_invocation", fake)
+        monkeypatch.setattr(
+            validate,
+            "get_critical_paths",
+            lambda: ["tests/unit/core/test_smoke.py::test_x"],
+        )
+        monkeypatch.setattr(validate, "is_critical_run", lambda force=False: True)
+        monkeypatch.setattr(validate, "PYTEST_ADOPTS", [])
+
+        exit_code = validate.run_pytest(
+            "targeted", pytest_paths=["tests/unit/test_x.py"]
+        )
+
+        assert exit_code == 0
+        assert len(fake.calls) == 2  # type: ignore[attr-defined]
+        crit_cmd, crit_env = fake.calls[0]  # type: ignore[attr-defined]
+        assert "tests/unit/core/test_smoke.py::test_x" in crit_cmd
+        assert "-q" in crit_cmd
+        assert crit_env == {"RALPH_NO_RECURSIVE_PYTEST": "1"}
+        main_cmd, main_env = fake.calls[1]  # type: ignore[attr-defined]
+        assert "tests/unit/test_x.py" in main_cmd
+        assert main_env == {"RALPH_NO_RECURSIVE_PYTEST": "1"}
+
+    def test_critical_path_failure_blocks_before_main_tier(self, monkeypatch) -> None:
+        """A failing critical-path run returns its exit code and skips the main tier."""
+        fake = self._fake_invocation(returncode=1)
+        monkeypatch.setattr(validate, "run_pytest_invocation", fake)
+        monkeypatch.setattr(
+            validate,
+            "get_critical_paths",
+            lambda: ["tests/unit/core/test_smoke.py::test_x"],
+        )
+        monkeypatch.setattr(validate, "is_critical_run", lambda force=False: True)
+        monkeypatch.setattr(validate, "PYTEST_ADOPTS", [])
+
+        exit_code = validate.run_pytest(
+            "targeted", pytest_paths=["tests/unit/test_x.py"]
+        )
+
+        assert exit_code == 1
+        assert len(fake.calls) == 1  # type: ignore[attr-defined]
+
+    def test_non_targeted_tier_applies_quarantine(self, tmp_path, monkeypatch) -> None:
+        """Non-targeted tier invocations have quarantine deselection applied."""
+        quarantine_path = tmp_path / "tests" / "quarantine.yaml"
+        quarantine_path.parent.mkdir(parents=True, exist_ok=True)
+        quarantine_path.write_text(
+            "- test_id: tests/unit/x.py::test_y\n"
+            '  added_at: "2026-06-27T12:00:00Z"\n'
+            "  reason: flaky\n"
+            "  auto_added: false\n",
+            encoding="utf-8",
+        )
+        history_path = tmp_path / ".ralph" / "test-failure-history.jsonl"
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(validate, "QUARANTINE_FILE", quarantine_path)
+        monkeypatch.setattr(validate, "TEST_FAILURE_HISTORY_FILE", history_path)
+        monkeypatch.setattr(validate, "PYTEST_ADOPTS", [])
+        monkeypatch.setattr(validate, "is_critical_run", lambda force=False: False)
+
+        recorded_cmds: list[list[str]] = []
+
+        def fake_run(cmd, check=False, env=None, timeout=None):
+            recorded_cmds.append(cmd)
+            return mock.MagicMock(returncode=0, stdout="", stderr="")
+
+        monkeypatch.setattr(validate, "run", fake_run)
+
+        exit_code = validate.run_pytest("smoke")
+
+        assert exit_code == 0
+        assert len(recorded_cmds) == 1
+        cmd = recorded_cmds[0]
+        assert "--deselect" in cmd
+        assert "tests/unit/x.py::test_y" in cmd
