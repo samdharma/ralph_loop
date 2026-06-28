@@ -24,8 +24,11 @@ Tests verify:
 
 from __future__ import annotations
 
+import datetime as dt_real
 import json
 import sys
+import types
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -34,6 +37,21 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "core"))
 
 from core import doctor  # noqa: E402
+
+
+def _patch_datetime_now(monkeypatch: pytest.MonkeyPatch, fixed_now: datetime) -> None:
+    """Replace ``doctor.datetime`` with a module whose ``now()`` is frozen."""
+    fake_module = types.ModuleType("datetime")
+
+    class FakeDateTime(dt_real.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now
+
+    fake_module.datetime = FakeDateTime
+    fake_module.timedelta = dt_real.timedelta
+    fake_module.timezone = dt_real.timezone
+    monkeypatch.setattr(doctor, "datetime", fake_module)
 
 
 def test_run_doctor_no_args_scans_all_issues(
@@ -229,6 +247,9 @@ class TestRepeatFailures:
         """A test failing 3+ times in 30 days is reported."""
         monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
 
+        fixed_now = datetime(2026, 6, 28, 12, 0, 0, tzinfo=timezone.utc)
+        _patch_datetime_now(monkeypatch, fixed_now)
+
         history = tmp_path / ".ralph" / "test-failure-history.jsonl"
         history.parent.mkdir(parents=True, exist_ok=True)
         now = "2026-06-28T12:00:00+00:00"
@@ -252,6 +273,9 @@ class TestRepeatFailures:
     ) -> None:
         """Failures older than 30 days do not count."""
         monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
+
+        fixed_now = datetime(2026, 6, 28, 12, 0, 0, tzinfo=timezone.utc)
+        _patch_datetime_now(monkeypatch, fixed_now)
 
         history = tmp_path / ".ralph" / "test-failure-history.jsonl"
         history.parent.mkdir(parents=True, exist_ok=True)
@@ -300,6 +324,30 @@ class TestQuietMode:
         assert rc == 2
         assert "Stuck issues" not in captured.out
         assert "Environment problems" in captured.out
+
+    def test_quiet_suppresses_scanning_message(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Quiet mode hides the 'scanning N issue(s)' banner."""
+        monkeypatch.setattr(doctor, "PROJECT_ROOT", tmp_path)
+
+        issues_root = tmp_path / ".ralph" / "issues"
+        issues_root.mkdir(parents=True, exist_ok=True)
+        (issues_root / "1").mkdir()
+
+        monkeypatch.setattr(doctor, "_detect_stuck_issues", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_long_blocked", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_repeat_failures", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_orphan_subprocesses", lambda: [])
+        monkeypatch.setattr(doctor, "_detect_environment_problems", lambda: [])
+
+        rc = doctor.run_doctor(None, quiet=True)
+        captured = capsys.readouterr()
+        assert rc == 0
+        assert "scanning" not in captured.out.lower()
 
     def test_main_passes_quiet_flag(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """CLI ``--quiet`` is forwarded to ``run_doctor``."""

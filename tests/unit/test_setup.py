@@ -32,16 +32,7 @@ class TestCheckGhLabels:
 
     def test_all_required_labels_present_passes(self, monkeypatch: pytest.MonkeyPatch):
         """All documented labels are present → check passes."""
-        required = [
-            "status:ready",
-            "status:design",
-            "status:build",
-            "status:build-retry",
-            "status:verify",
-            "status:verify-retry",
-            "status:review",
-            "status:blocked",
-        ]
+        required = setup.REQUIRED_LABELS
 
         def fake_run(args, **kwargs):
             if args[:2] == ["git", "remote"]:

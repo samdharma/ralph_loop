@@ -27,10 +27,19 @@ Five diagnostic categories per spec §3.10:
 
 from __future__ import annotations
 
+import datetime
 import os
 import sys
 from pathlib import Path
 from typing import Optional
+
+# Ensure ``from core.constants...`` works whether this file is run as
+# ``python core/doctor.py`` or imported as ``core.doctor``.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from core.constants import REQUIRED_LABELS  # noqa: E402
 
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 
@@ -157,13 +166,12 @@ def _detect_repeat_failures() -> list[tuple[str, int]]:
     tests that failed 3 or more times within the last 30 days.
     """
     import json
-    from datetime import datetime, timedelta, timezone
 
     history = PROJECT_ROOT / ".ralph" / "test-failure-history.jsonl"
     if not history.exists():
         return []
 
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)
     counts: dict[str, int] = {}
     for raw in history.read_text(encoding="utf-8").splitlines():
         if not raw.strip():
@@ -174,9 +182,9 @@ def _detect_repeat_failures() -> list[tuple[str, int]]:
             ts_str = rec.get("timestamp")
             if not test_id or not ts_str:
                 continue
-            ts = datetime.fromisoformat(ts_str)
+            ts = datetime.datetime.fromisoformat(ts_str)
             if ts.tzinfo is None:
-                ts = ts.replace(tzinfo=timezone.utc)
+                ts = ts.replace(tzinfo=datetime.timezone.utc)
             if ts >= cutoff:
                 counts[test_id] = counts.get(test_id, 0) + 1
         except Exception:
@@ -230,15 +238,7 @@ def _detect_environment_problems() -> list[tuple[str, str]]:
 
             labels = json.loads(result.stdout or b"[]")
             label_names = {label.get("name", "") for label in labels}
-            required = {
-                "status:ready",
-                "status:design",
-                "status:build",
-                "status:verify",
-                "status:review",
-                "status:blocked",
-            }
-            missing = required - label_names
+            missing = set(REQUIRED_LABELS) - label_names
             for name in sorted(missing):
                 findings.append(("missing_label", name))
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
@@ -333,19 +333,23 @@ def run_doctor(issue_num: Optional[int], quiet: bool = False) -> int:
             print("\nStatus: ERRORS (exit 2)")
         return sev
     else:
-        print(f"Ralph doctor: focusing on issue #{issue_num}")
+        if not quiet:
+            print(f"Ralph doctor: focusing on issue #{issue_num}")
         issue_dir = _issues_root() / str(issue_num)
         if not issue_dir.exists():
-            print(f"  #{issue_num}: ⚠️  no per-issue directory at {issue_dir}")
+            if not quiet:
+                print(f"  #{issue_num}: ⚠️  no per-issue directory at {issue_dir}")
             return 1
         traj = issue_dir / "trajectory.jsonl"
         idemp = issue_dir / "idempotency.jsonl"
-        print(f"  trajectory.jsonl: {'present' if traj.exists() else 'absent'}")
-        print(f"  idempotency.jsonl: {'present' if idemp.exists() else 'absent'}")
+        if not quiet:
+            print(f"  trajectory.jsonl: {'present' if traj.exists() else 'absent'}")
+            print(f"  idempotency.jsonl: {'present' if idemp.exists() else 'absent'}")
         stuck = [s for s in _detect_stuck_issues() if s[0] == issue_num]
         if stuck:
-            for _, desc in stuck:
-                print(f"  ⚠️  stuck: {desc}")
+            if not quiet:
+                for _, desc in stuck:
+                    print(f"  ⚠️  stuck: {desc}")
             return 1
         return 0
 

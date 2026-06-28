@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import project_sync
+from constants import REQUIRED_LABELS
 
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 
@@ -182,17 +183,7 @@ def check_gh_labels():
 
         labels = [item["name"] for item in json.loads(result.stdout)]
 
-        required = [
-            "status:ready",
-            "status:design",
-            "status:build",
-            "status:build-retry",
-            "status:verify",
-            "status:verify-retry",
-            "status:review",
-            "status:blocked",
-        ]
-        missing = [label for label in required if label not in labels]
+        missing = [label for label in REQUIRED_LABELS if label not in labels]
 
         if not missing:
             return True, "all required labels present"
