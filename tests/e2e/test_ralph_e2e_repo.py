@@ -28,6 +28,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Optional
@@ -137,6 +138,7 @@ def _copy_ralph_into(ralph_src: Path, target: Path) -> None:
             "logs",
             ".pytest_cache",
             ".mypy_cache",
+            ".ralph",
         }:
             continue
         dest = target / item.name
@@ -153,7 +155,7 @@ def _bootstrap_labels(repo: str) -> None:
     idempotently lets the E2E test run against a fresh clone without
     relying on the repo already having a complete label set.
     """
-    result = _gh("label", "list", "--repo", repo, "--json", "name")
+    result = _gh("label", "list", "--repo", repo, "--json", "name", "--limit", "100")
     if result.returncode != 0:
         raise RuntimeError(f"gh label list failed: {result.stderr}")
     existing = {label["name"] for label in json.loads(result.stdout or "[]")}
@@ -193,7 +195,7 @@ def _run_engine(
         "PYTHONPATH": f"{ralph_src}:{ralph_src / 'core'}",
         "RALPH_PROJECT_DIR": str(target),
     }
-    cmd = ["python", "-m", "core.engine"]
+    cmd = [sys.executable, "-m", "core.engine"]
     if issue_num is not None:
         cmd += ["--issue", str(issue_num)]
     if extra_args:
@@ -222,7 +224,7 @@ def _wait_for_terminal_status(
     status.
     """
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    while True:
         result = _gh(
             "issue",
             "view",
@@ -238,6 +240,8 @@ def _wait_for_terminal_status(
             terminal = labels & _TERMINAL_LABELS
             if terminal:
                 return terminal.pop()
+        if time.monotonic() >= deadline:
+            break
         time.sleep(interval)
     raise TimeoutError(
         f"Issue #{issue_num} did not reach a terminal status within {timeout}s"
@@ -261,10 +265,10 @@ def test_full_pipeline_on_e2e_repo(tmp_path: Path) -> None:
     ralph_src = Path(__file__).resolve().parents[2]
     _copy_ralph_into(ralph_src, target)
 
+    _bootstrap_labels(E2E_REPO)
+
     phase = os.environ.get("RALPH_E2E_PHASE", "a")
     issue_num = _make_e2e_issue(phase, "E2E pipeline smoke test", target)
-
-    _bootstrap_labels(E2E_REPO)
 
     result = _run_engine(ralph_src, target, issue_num)
     assert result.returncode == 0, (
@@ -315,8 +319,9 @@ def test_phase_b_trajectory_and_idempotency_artifacts(tmp_path: Path) -> None:
     ralph_src = Path(__file__).resolve().parents[2]
     _copy_ralph_into(ralph_src, target)
 
-    issue_num = _make_e2e_issue("b", "Phase B idempotency + trajectory", target)
     _bootstrap_labels(E2E_REPO)
+
+    issue_num = _make_e2e_issue("b", "Phase B idempotency + trajectory", target)
 
     result = _run_engine(ralph_src, target, issue_num)
     assert result.returncode == 0, (
