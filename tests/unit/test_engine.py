@@ -1658,9 +1658,9 @@ class TestRetryLabelRecognition:
         """The ``status:retry`` label is recognized by the engine (in RETRY_LABEL_MAP)."""
         from core.pipeline.issue_ops import RETRY_LABEL_MAP
 
-        assert "status:retry" in RETRY_LABEL_MAP, (
-            f"status:retry missing from RETRY_LABEL_MAP: {RETRY_LABEL_MAP}"
-        )
+        assert (
+            "status:retry" in RETRY_LABEL_MAP
+        ), f"status:retry missing from RETRY_LABEL_MAP: {RETRY_LABEL_MAP}"
 
     def test_old_labels_still_accepted(self) -> None:
         """Old labels (status:build-retry, status:verify-retry) still work (no deprecation in v3.1)."""

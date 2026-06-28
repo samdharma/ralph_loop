@@ -317,18 +317,21 @@ def run_loop(auto_close: bool = False, single_issue: Optional[int] = None):
             # ── Check retry labels first (smallest scope = fastest) ──
             retry = fetch_retry_issue()
             if retry is not None:
-                issue, resume_stage = retry
+                issue, resume_stage, label = retry
                 tried_agents.clear()
                 issue_num = issue["number"]
                 if resume_stage == "verify":
-                    transition_label(issue_num, "status:verify", "status:verify-retry")
+                    transition_label(issue_num, "status:verify", label)
                     gh_comment(
                         issue_num,
                         f"🔄 Ralph claimed #{issue_num} for VERIFY retry "
                         "(skipping DESIGN + BUILD).",
                     )
                 else:
-                    transition_label(issue_num, "status:build", "status:build-retry")
+                    # ``status:build`` resumes BUILD+VERIFY; both
+                    # ``status:build-retry`` (legacy) and
+                    # ``status:retry`` (new, per spec §3.5/D2) map here.
+                    transition_label(issue_num, "status:build", label)
                     gh_comment(
                         issue_num,
                         f"🔄 Ralph claimed #{issue_num} for BUILD retry "

@@ -65,18 +65,38 @@ def fetch_ready_ticket() -> Optional[dict]:
 
 # Retry labels let humans re-queue a blocked issue without re-running all stages.
 # Ordered smallest scope first — verify-only is faster than build+verify.
+#
+# Per spec §3.5 + §10.4 D2 + plan §3 R-12: ``status:retry`` is the
+# single allowed ADDITION to the retry label set in v3.1.x. It maps
+# to ``build`` (the broadest scope — re-runs BUILD + VERIFY) so that
+# the unified label provides the same resume semantics as the older
+# ``status:build-retry`` label. Both old and new labels are accepted
+# (additive; no deprecation in v3.1).
 RETRY_LABEL_MAP = {
     "status:verify-retry": "verify",
     "status:build-retry": "build",
+    "status:retry": "build",
 }
 
 
-def fetch_retry_issue() -> Optional[tuple[dict, str]]:
+def fetch_retry_issue() -> Optional[tuple[dict, str, str]]:
     """
     Fetch the open retry-labeled issue with the smallest number.
 
-    Checks status:verify-retry first (fastest), then status:build-retry.
-    Returns (issue_dict, resume_stage) or None.
+    Iterates ``RETRY_LABEL_MAP`` in order (smallest scope first:
+    ``status:verify-retry`` → ``status:build-retry`` → ``status:retry``).
+    The first issue whose dependencies are met wins.
+
+    Per spec §3.5 + §10.4 D2: ``status:retry`` is the additive
+    single retry label accepted alongside the legacy labels.
+    ``RETRY_LABEL_MAP`` order means smaller scopes win first — the
+    new unified label is consulted LAST so a legacy label on an
+    issue still takes precedence over the unified one.
+
+    Returns ``(issue_dict, resume_stage, matched_label)`` or ``None``.
+    The ``matched_label`` is the exact ``status:*`` label that won
+    the match — callers use it for the transition off that label
+    (per spec §3.5 / D2).
     """
     for label, resume_stage in RETRY_LABEL_MAP.items():
         try:
@@ -98,7 +118,7 @@ def fetch_retry_issue() -> Optional[tuple[dict, str]]:
             issues.sort(key=lambda i: i["number"])
             for issue in issues:
                 if _dependencies_met(issue):
-                    return issue, resume_stage
+                    return issue, resume_stage, label
                 else:
                     print(f"[ralph] Skipping #{issue['number']} — unmet dependencies")
         except subprocess.CalledProcessError:
