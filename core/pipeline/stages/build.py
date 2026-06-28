@@ -43,12 +43,16 @@ from core.pipeline.test_tracking import (  # noqa: E402
 )
 
 
-def run_build_stage(issue: dict) -> bool:
+def run_build_stage(issue: dict, is_retry: bool = False) -> bool:
     """
     STAGE 2: BUILD — spawns two sub-agents:
       1. TEST sub-agent (Mode A — isolated, fresh session)
       2. IMPLEMENT sub-agent (Mode B — full context)
     Sequential: TEST runs first (writes tests), then IMPLEMENT (writes code).
+
+    Args:
+        is_retry: When True, the validation gate is invoked with
+            ``--retry`` so expensive tiers are skipped (spec §10.3 C4).
     """
     issue_num = issue["number"]
     print(f"\n[ralph] STAGE 2/3: BUILD for #{issue_num}")
@@ -124,29 +128,26 @@ def run_build_stage(issue: dict) -> bool:
         t for t in qa_tests if t.endswith(".py") and "__pycache__" not in t
     ]  # Defense: skip cache artifacts
     qa_tests = _resolve_existing_test_paths(qa_tests)
+    validate_cmd = [
+        sys.executable,
+        os.path.join(core_dir, "validate.py"),
+        "--tier",
+        "targeted",
+    ]
+    if is_retry:
+        validate_cmd.append("--retry")
+
     if qa_tests:
         print(f"[ralph] Running QA-written tests from TEST stage: {qa_tests}")
         val_result = run(
-            [
-                sys.executable,
-                os.path.join(core_dir, "validate.py"),
-                "--tier",
-                "targeted",
-                "--pytest-paths",
-            ]
-            + qa_tests,
+            validate_cmd + ["--pytest-paths"] + qa_tests,
             check=False,
             capture=True,
         )
     else:
         print("[ralph] No QA-written tests detected; falling back to targeted tier")
         val_result = run(
-            [
-                sys.executable,
-                os.path.join(core_dir, "validate.py"),
-                "--tier",
-                "targeted",
-            ],
+            validate_cmd,
             check=False,
             capture=True,
         )

@@ -22,6 +22,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -305,6 +306,52 @@ def retry_action_for_stage(classified_action: str, stage: str) -> str:
 
 _STDOUT_TAIL_LINES = 50  # Spec §10.1 A5: tail of agent stdout in failure reports
 
+# Pytest result lines look like:
+#   FAILED tests/unit/test_x.py::test_y - message
+#   PASSED tests/unit/test_x.py::test_y
+_PYTEST_RESULT_LINE_RE = re.compile(r"^(PASSED|FAILED|ERROR)\s+(\S+)")
+
+
+def _parse_pytest_test_ids(stdout: str) -> tuple[list[str], list[str]]:
+    """Parse PASSED/FAILED/ERROR test node IDs from pytest stdout."""
+    failures: list[str] = []
+    passes: list[str] = []
+    for line in stdout.splitlines():
+        match = _PYTEST_RESULT_LINE_RE.match(line.strip())
+        if not match:
+            continue
+        status, test_id = match.groups()
+        if status == "PASSED":
+            passes.append(test_id)
+        elif status in ("FAILED", "ERROR"):
+            failures.append(test_id)
+    return failures, passes
+
+
+def _process_pytest_result_for_quarantine(exit_code: int, stdout: str) -> None:
+    """Record the run and auto-quarantine tests that failed twice consecutively.
+
+    Per spec §10.3 C3: a test that fails in two consecutive runs with no
+    intervening pass is auto-added to ``tests/quarantine.yaml`` and a GitHub
+    issue is posted.
+    """
+    failures, passes = _parse_pytest_test_ids(stdout)
+    run_at = datetime.now(timezone.utc).isoformat()
+    record_test_result(failures, passes, run_at=run_at)
+
+    for test_id in failures:
+        if should_auto_quarantine(test_id):
+            if auto_quarantine_test(test_id):
+                history = _load_failure_history()
+                timestamps = [
+                    run.get("run_at", run_at)
+                    for run in history[-2:]
+                    if test_id in run.get("failures", [])
+                ]
+                post_flake_quarantined_issue(
+                    test_id, failure_timestamps=timestamps or [run_at, run_at]
+                )
+
 
 def run_pytest_invocation(cmd: list[str], env: dict[str, str] | None = None) -> dict:
     """Run a single pytest invocation. Returns a structured result dict.
@@ -319,6 +366,8 @@ def run_pytest_invocation(cmd: list[str], env: dict[str, str] | None = None) -> 
     Returns 124 on timeout (mimics `timeout` command convention) so the
     caller can distinguish a hung test from a genuine failure.
     """
+    # C3: deselect quarantined tests before running.
+    cmd = apply_quarantine_to_cmd(cmd)
     print(f"[ralph] pytest invocation: {' '.join(cmd)}")
     timeout = PYTEST_TIMEOUT if PYTEST_TIMEOUT > 0 else None
 
@@ -343,6 +392,9 @@ def run_pytest_invocation(cmd: list[str], env: dict[str, str] | None = None) -> 
         print(f"[ralph] pytest timed out after {PYTEST_TIMEOUT}s")
         exit_code = 124
         stdout = ""
+
+    # C3: record results and auto-quarantine repeat offenders.
+    _process_pytest_result_for_quarantine(exit_code, stdout)
 
     classification = classify_pytest_exit_code(exit_code)
     stdout_tail = "\n".join(stdout.splitlines()[-_STDOUT_TAIL_LINES:])
@@ -531,6 +583,12 @@ def validate(tier: str = DEFAULT_TIER, pytest_paths: list[str] | None = None) ->
     # Normalize empty list to None
     if not pytest_paths:
         pytest_paths = None
+
+    # C3: auto-remove stale quarantine entries on every validate run.
+    removed = unquarantine_stale_entries()
+    if removed:
+        print(f"[ralph] Auto-removed {removed} stale quarantine entries (>7 days).")
+
     # ── Policy enforcement ──
     if tier in ("e2e", "performance") and not ALLOW_E2E:
         print(f"[ralph] ERROR: {tier} tier is blocked in the Ralph loop.")

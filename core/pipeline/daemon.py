@@ -108,7 +108,7 @@ def run_loop(auto_close: bool = False, single_issue: Optional[int] = None):
                     )
                     save_checkpoint(issue_num, "build")
                     try:
-                        success = run_build_stage(issue)
+                        success = run_build_stage(issue, is_retry=True)
                     except ProviderError as e:
                         if _handle_provider_error(issue, e, tried_agents) == "break":
                             break

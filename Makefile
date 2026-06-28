@@ -16,7 +16,7 @@
 # Per plan §2.1 order 1: the `release` target is DEFERRED to Phase C (task C-011).
 # Per plan §2.1: scripts/release.sh is also deferred to Phase C.
 
-PYTHON ?= python3
+PYTHON ?= $(shell if [ -x .venv/bin/python ]; then echo .venv/bin/python; else echo python3; fi)
 PIP ?= $(PYTHON) -m pip
 RALPH_HOME := $(shell pwd)
 BIN := $(RALPH_HOME)/bin/ralph
@@ -60,14 +60,14 @@ test-integration:  ## Run integration tests.
 # ─────────────────────────────────────────────────────────
 
 lint:  ## black + isort + flake8 + mypy (check only).
-	black --target-version py310 --check core tests bin
-	isort --check-only --profile black core tests bin
-	flake8 core tests bin
-	mypy --explicit-package-bases core/migrate.py core/validate.py core/pipeline/__init__.py core/pipeline/state.py core/pipeline/agents/artifacts.py core/pipeline/agents/base.py core/pipeline/agents/pi.py core/pipeline/agents/kimi.py
+	$(PYTHON) -m black --target-version py310 --check core tests bin
+	$(PYTHON) -m isort --check-only --profile black core tests bin
+	$(PYTHON) -m flake8 core tests bin
+	$(PYTHON) -m mypy --explicit-package-bases core/validate.py core/pipeline/
 
 format:  ## black + isort (apply).
-	black --target-version py310 core tests bin
-	isort --profile black core tests bin
+	$(PYTHON) -m black --target-version py310 core tests bin
+	$(PYTHON) -m isort --profile black core tests bin
 
 # ─────────────────────────────────────────────────────────
 # Validate

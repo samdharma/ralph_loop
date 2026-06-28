@@ -5,6 +5,7 @@ Owns ``run_pipeline`` — the single-issue 3-stage orchestrator.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from typing import Optional
 
@@ -28,6 +29,7 @@ from core.pipeline.shell import PREFLIGHT_SCRIPT, PROJECT_ROOT, gh, run
 from core.pipeline.stages.build import run_build_stage
 from core.pipeline.stages.design import run_design_stage
 from core.pipeline.stages.verify import run_verify_stage
+from core.pipeline.state import generate_run_id
 
 
 def run_pipeline(
@@ -48,6 +50,9 @@ def run_pipeline(
                       None runs the full pipeline from DESIGN.
     """
     issue_num = issue["number"]
+
+    # C3: stable run id for idempotency (quarantine issue posts, etc.)
+    os.environ.setdefault("RALPH_RUN_ID", generate_run_id())
 
     print(f"\n{'='*50}")
     print(f"[ralph] Pipeline starting for #{issue_num}: {issue['title']}")
@@ -127,7 +132,7 @@ def run_pipeline(
     else:
         save_checkpoint(issue_num, "build")
         try:
-            build_ok = run_build_stage(issue)
+            build_ok = run_build_stage(issue, is_retry=(resume_stage == "build"))
         except ProviderError:
             clear_checkpoint()
             raise

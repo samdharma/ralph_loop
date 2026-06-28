@@ -17,8 +17,14 @@ else
 fi
 
 CORE_DIR="${RALPH_HOME}/core"
-PYTHON_CMD="${RALPH_PYTHON_CMD:-python3}"
+PYTHON_CMD="${RALPH_PYTHON_CMD:-}"
 PROJECT_DIR="${RALPH_PROJECT_DIR:-$(pwd)}"
+
+# Prefer the project's virtual environment if it exists.
+if [[ -z "${PYTHON_CMD}" && -x "${RALPH_HOME}/.venv/bin/python" ]]; then
+    PYTHON_CMD="${RALPH_HOME}/.venv/bin/python"
+fi
+PYTHON_CMD="${PYTHON_CMD:-python3}"
 
 export RALPH_PROJECT_DIR="${PROJECT_DIR}"
 export RALPH_CORE_DIR="${CORE_DIR}"

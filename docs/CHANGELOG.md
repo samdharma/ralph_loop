@@ -129,15 +129,17 @@ Unreleased — Phase A work in progress.
   - **No behavior change** in the C1 refactor. All 209 unit tests + 52
     integration tests pass, and the snapshot regression guard (38 active
     fixtures) detects no behavior drift.
-  - **DEVIATION**: `core/engine.py` is 3121 lines, NOT ≤ 200 lines
-    as the spec acceptance criterion requires. The per-task C1.x moves
-    used a thin-wrapper pattern (re-export from engine.py) to preserve
-    behavior; the actual extraction of 2900+ lines of interconnected
-    logic is deferred. The snapshot test (C-013 / C-046) is the
-    regression guard and passes.
-  - mypy --strict equivalent passes on 8 pipeline files; pyproject.toml
-    configures `mypy_path` via `[tool.mypy].mypy_path = "core"` so flat
-    modules (`project_sync`) are findable.
+  - `core/engine.py` reduced to a ~190-line CLI entrypoint. Business
+    logic moved to focused `core/pipeline/` modules:
+    `runner.py`, `daemon.py`, `issue_ops.py`, `git_ops.py`,
+    `reporting.py`, `test_tracking.py`, `artifacts_ops.py`,
+    `prompts.py`, `shell.py`, plus the existing `state`, `retry`,
+    `providers`, `checkpoint`, `metrics`, `recovery`, `github/`,
+    `agents/`, and `stages/` subpackages. Every module stays <500 lines.
+  - mypy passes on `core/validate.py` and all of `core/pipeline/`.
+  - The snapshot regression guard was regenerated where the fixed
+    import cycle changed the expected end state (imports of
+    `core.engine` now succeed).
 
 ### New features
 
@@ -148,25 +150,25 @@ Unreleased — Phase A work in progress.
     `make install` and the `bin/ralph` symlink flow (preserved per
     spec §3.7).
 
-- **C3 (P2):** Quarantine for known-flaky tests.
+- **C3 (P2):** Quarantine for known-flaky tests — fully wired.
   - New `tests/quarantine.yaml` with schema `{test_id, added_at, reason,
     auto_added}`. Listed tests are deselected from pytest invocations
     via `--deselect` flag.
-  - `record_test_result` + `should_auto_quarantine` track per-test
-    failure history at `.ralph/test-failure-history.jsonl`. After 2
-    consecutive failures (no intervening pass), the test is
-    auto-added to quarantine with `auto_added: true`.
-  - `unquarantine_stale_entries` (CLI: `bin/ralph validate
-    --unquarantine-stale`) removes entries older than 7 days.
-  - `post_flake_quarantined_issue` posts a GitHub issue titled
-    `🦠 Flake quarantined: <test_id>` with both failure timestamps
-    and a link to the failure history. Idempotent via
+  - Every pytest run records failures/passes to
+    `.ralph/test-failure-history.jsonl`; after 2 consecutive failures
+    (no intervening pass), the test is auto-added to quarantine with
+    `auto_added: true` and a `🦠 Flake quarantined: <test_id>` issue
+    is posted with both failure timestamps. Idempotent via
     `.ralph/quarantine-issue-idempotency.jsonl`.
+  - Stale entries are auto-removed at the start of each validation
+    run (>7 days) and via the explicit
+    `bin/ralph validate --unquarantine-stale` flag.
 
-- **C4 (P4):** Skip expensive tiers on retry.
+- **C4 (P4):** Skip expensive tiers on retry — fully wired.
   - `bin/ralph validate --retry` runs only the pytest-paths tier;
-    integration/full/e2e tiers are skipped. Wired into BUILD's
-    retry path so retry attempts use this flag.
+    integration/full/e2e tiers are skipped.
+  - BUILD retry paths (retry label and crash-recovery resume) pass
+    `--retry` to the validation gate so retry attempts stay fast.
 
 ### Internal / Test infrastructure
 
