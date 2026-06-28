@@ -22,6 +22,8 @@ from core.pipeline import (  # noqa: E402
     reporting,
     test_tracking,
 )
+from core.pipeline.stages import build_subagents  # noqa: E402
+from core.pipeline.stages import verify as verify_stage  # noqa: E402
 
 # ─────────────────────────────────────────────────────────
 # A2.1 — QA-test permission lock (spec §10.1 A2)
@@ -46,20 +48,20 @@ class TestRunTestSubagent:
         qa_file = self._setup_qa_test_file(tmp_path)
 
         # Force PROJECT_ROOT to tmp_path so .ralph/ and tests/ resolve correctly.
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(build_subagents, "PROJECT_ROOT", tmp_path)
 
         # Mock all side-effecting helpers + the agent invocation.
         with (
-            mock.patch.object(engine, "invoke_agent", return_value=True),
-            mock.patch.object(engine, "gh_comment"),
-            mock.patch.object(engine, "log_metrics"),
-            mock.patch.object(engine, "_snapshot_tests_dir"),
+            mock.patch.object(build_subagents, "invoke_agent", return_value=True),
+            mock.patch.object(build_subagents, "gh_comment"),
+            mock.patch.object(build_subagents, "log_metrics"),
+            mock.patch.object(build_subagents, "_snapshot_tests_dir"),
             mock.patch.object(
-                engine,
+                build_subagents,
                 "_detect_new_tests",
                 return_value=[str(qa_file.relative_to(tmp_path))],
             ),
-            mock.patch.object(engine, "_save_test_tracking"),
+            mock.patch.object(build_subagents, "_save_test_tracking"),
         ):
             issue = {"number": 1, "title": "Test issue"}
             ok = engine._run_test_subagent(issue)
@@ -73,19 +75,19 @@ class TestRunTestSubagent:
     ) -> None:
         """IMPLEMENT sub-agent attempting to write to a QA test file raises PermissionError."""
         qa_file = self._setup_qa_test_file(tmp_path)
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(build_subagents, "PROJECT_ROOT", tmp_path)
 
         with (
-            mock.patch.object(engine, "invoke_agent", return_value=True),
-            mock.patch.object(engine, "gh_comment"),
-            mock.patch.object(engine, "log_metrics"),
-            mock.patch.object(engine, "_snapshot_tests_dir"),
+            mock.patch.object(build_subagents, "invoke_agent", return_value=True),
+            mock.patch.object(build_subagents, "gh_comment"),
+            mock.patch.object(build_subagents, "log_metrics"),
+            mock.patch.object(build_subagents, "_snapshot_tests_dir"),
             mock.patch.object(
-                engine,
+                build_subagents,
                 "_detect_new_tests",
                 return_value=[str(qa_file.relative_to(tmp_path))],
             ),
-            mock.patch.object(engine, "_save_test_tracking"),
+            mock.patch.object(build_subagents, "_save_test_tracking"),
         ):
             engine._run_test_subagent({"number": 1, "title": "Test issue"})
 
@@ -99,7 +101,7 @@ class TestRunTestSubagent:
     def test_chmod_happens_after_subagent_returns(self, tmp_path, monkeypatch) -> None:
         """Test files are NOT chmod'd before the TEST sub-agent returns. Ordering matters."""
         qa_file = self._setup_qa_test_file(tmp_path)
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(build_subagents, "PROJECT_ROOT", tmp_path)
 
         observed_modes: list[int] = []
 
@@ -109,16 +111,18 @@ class TestRunTestSubagent:
             return True
 
         with (
-            mock.patch.object(engine, "invoke_agent", side_effect=fake_invoke_agent),
-            mock.patch.object(engine, "gh_comment"),
-            mock.patch.object(engine, "log_metrics"),
-            mock.patch.object(engine, "_snapshot_tests_dir"),
             mock.patch.object(
-                engine,
+                build_subagents, "invoke_agent", side_effect=fake_invoke_agent
+            ),
+            mock.patch.object(build_subagents, "gh_comment"),
+            mock.patch.object(build_subagents, "log_metrics"),
+            mock.patch.object(build_subagents, "_snapshot_tests_dir"),
+            mock.patch.object(
+                build_subagents,
                 "_detect_new_tests",
                 return_value=[str(qa_file.relative_to(tmp_path))],
             ),
-            mock.patch.object(engine, "_save_test_tracking"),
+            mock.patch.object(build_subagents, "_save_test_tracking"),
         ):
             engine._run_test_subagent({"number": 1, "title": "Test issue"})
 
@@ -1357,7 +1361,7 @@ class TestSubagentsUseWorktree:
         """_run_test_subagent calls create_worktree and remove_worktree."""
         from core.pipeline.agents import base as agents_base
 
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(build_subagents, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
         # Disable the pre-flight check so we don't need a real git repo.
         monkeypatch.setattr(agents_base, "_preflight_check", lambda: None)
@@ -1367,15 +1371,17 @@ class TestSubagentsUseWorktree:
 
         with (
             mock.patch.object(
-                agents_base, "create_worktree", return_value=wt_path
+                build_subagents, "create_worktree", return_value=wt_path
             ) as create_wt,
-            mock.patch.object(agents_base, "remove_worktree") as remove_wt,
-            mock.patch.object(engine, "invoke_agent", return_value=True),
-            mock.patch.object(engine, "gh_comment"),
-            mock.patch.object(engine, "log_metrics"),
-            mock.patch.object(engine, "_snapshot_tests_dir", return_value=set()),
-            mock.patch.object(engine, "_detect_new_tests", return_value=[]),
-            mock.patch.object(engine, "_save_test_tracking"),
+            mock.patch.object(build_subagents, "remove_worktree") as remove_wt,
+            mock.patch.object(build_subagents, "invoke_agent", return_value=True),
+            mock.patch.object(build_subagents, "gh_comment"),
+            mock.patch.object(build_subagents, "log_metrics"),
+            mock.patch.object(
+                build_subagents, "_snapshot_tests_dir", return_value=set()
+            ),
+            mock.patch.object(build_subagents, "_detect_new_tests", return_value=[]),
+            mock.patch.object(build_subagents, "_save_test_tracking"),
         ):
             engine._run_test_subagent({"number": 1, "title": "Test issue"})
 
@@ -1388,7 +1394,7 @@ class TestSubagentsUseWorktree:
         """remove_worktree runs in finally — survives agent failure."""
         from core.pipeline.agents import base as agents_base
 
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(build_subagents, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(agents_base, "_preflight_check", lambda: None)
 
@@ -1396,14 +1402,16 @@ class TestSubagentsUseWorktree:
         wt_path.mkdir(parents=True, exist_ok=True)
 
         with (
-            mock.patch.object(agents_base, "create_worktree", return_value=wt_path),
-            mock.patch.object(agents_base, "remove_worktree") as remove_wt,
-            mock.patch.object(engine, "invoke_agent", return_value=False),
-            mock.patch.object(engine, "gh_comment"),
-            mock.patch.object(engine, "log_metrics"),
-            mock.patch.object(engine, "_snapshot_tests_dir", return_value=set()),
-            mock.patch.object(engine, "_detect_new_tests", return_value=[]),
-            mock.patch.object(engine, "_save_test_tracking"),
+            mock.patch.object(build_subagents, "create_worktree", return_value=wt_path),
+            mock.patch.object(build_subagents, "remove_worktree") as remove_wt,
+            mock.patch.object(build_subagents, "invoke_agent", return_value=False),
+            mock.patch.object(build_subagents, "gh_comment"),
+            mock.patch.object(build_subagents, "log_metrics"),
+            mock.patch.object(
+                build_subagents, "_snapshot_tests_dir", return_value=set()
+            ),
+            mock.patch.object(build_subagents, "_detect_new_tests", return_value=[]),
+            mock.patch.object(build_subagents, "_save_test_tracking"),
         ):
             engine._run_test_subagent({"number": 1, "title": "Test issue"})
 
@@ -1416,7 +1424,6 @@ class TestSubagentsUseWorktree:
         """run_verify_stage calls create_worktree and remove_worktree."""
         from core.pipeline.agents import base as agents_base
 
-        monkeypatch.setattr(engine, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(agents_base, "_preflight_check", lambda: None)
 
@@ -1425,16 +1432,16 @@ class TestSubagentsUseWorktree:
 
         with (
             mock.patch.object(
-                agents_base, "create_worktree", return_value=wt_path
+                verify_stage, "create_worktree", return_value=wt_path
             ) as create_wt,
-            mock.patch.object(agents_base, "remove_worktree") as remove_wt,
-            mock.patch.object(engine, "invoke_agent", return_value=True),
-            mock.patch.object(engine, "gh_comment"),
-            mock.patch.object(engine, "log_metrics"),
-            mock.patch.object(engine, "git"),
-            mock.patch.object(engine, "_has_commits", return_value=False),
+            mock.patch.object(verify_stage, "remove_worktree") as remove_wt,
+            mock.patch.object(verify_stage, "invoke_agent", return_value=True),
+            mock.patch.object(verify_stage, "gh_comment"),
+            mock.patch.object(verify_stage, "log_metrics"),
+            mock.patch.object(verify_stage, "git"),
+            mock.patch.object(verify_stage, "_has_commits", return_value=False),
             mock.patch.object(
-                engine,
+                verify_stage,
                 "run",
                 return_value=mock.Mock(returncode=0, stdout="", stderr=""),
             ),
