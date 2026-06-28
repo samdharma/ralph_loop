@@ -55,6 +55,9 @@ test-unit:  ## Run unit tests.
 test-integration:  ## Run integration tests.
 	$(PYTHON) -m pytest tests/integration/ -q
 
+test-e2e:  ## Run E2E tests (requires RALPH_E2E=1 and a real GitHub repo).
+	RALPH_E2E=1 $(PYTHON) -m pytest tests/e2e/ -v
+
 # ─────────────────────────────────────────────────────────
 # Lint
 # ─────────────────────────────────────────────────────────

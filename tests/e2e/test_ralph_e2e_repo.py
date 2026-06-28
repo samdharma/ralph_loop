@@ -1,25 +1,30 @@
-"""E2E test skeleton — runs against `samdharma/ralph-e2e-test`.
+"""E2E test suite — runs against `samdharma/ralph-e2e-test`.
 
 Per docs/IMPROVEMENT_ROADMAP_SPEC.md §8.5 and §14, this test:
 
 1. Clones `samdharma/ralph-e2e-test` into a temporary directory.
 2. Copies the Ralph source into the test repo.
-3. Runs `ralph setup`.
-4. Creates a `status:ready` issue with the title prefix `[e2e-phase-<X>-run-<timestamp>]`.
+3. Creates a `status:ready` issue with the title prefix `[e2e-phase-<X>-run-<timestamp>]`.
+4. Bootstraps the 8 required Ralph status labels on the E2E repo.
 5. Runs `ralph daemon --issue=<N>` in single-issue mode.
-6. Asserts the issue transitioned through DESIGN → BUILD → VERIFY.
-7. Asserts a commit was made to the test repo.
+6. Polls the issue until it reaches `status:review` or `status:blocked`.
+7. Asserts a terminal status was reached.
 
-The test is gated on `RALPH_E2E=1` (no-op in normal CI). Each phase's verification
-task (A-039, B-034, C-049, D-015) extends this file with phase-specific assertions.
+Phase-specific tests add assertions for trajectory/idempotency artifacts (Phase B)
+and the dry-run preflight gate (Phase D).
+
+The test suite is gated on `RALPH_E2E=1` (no-op in normal CI). Each phase's
+verification task (A-039, B-034, C-049, D-015) extends this file with
+phase-specific assertions.
 
 Skipped by default. To run locally:
 
     RALPH_E2E=1 pytest tests/e2e/test_ralph_e2e_repo.py -v
 
-To run in CI, see `.github/workflows/e2e.yml`.
+To run in CI, see `.github/workflows/e2e.yml` or `make test-e2e`.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -31,6 +36,36 @@ import pytest
 
 E2E_REPO = "samdharma/ralph-e2e-test"
 E2E_REPO_URL = f"https://github.com/{E2E_REPO}.git"
+
+# Canonical 8 labels required by `ralph daemon --dry-run`.
+# Kept in sync with `core.pipeline.daemon._REQUIRED_STATUS_LABELS`.
+_REQUIRED_STATUS_LABELS = (
+    "status:ready",
+    "status:design",
+    "status:build",
+    "status:verify",
+    "status:review",
+    "status:blocked",
+    "status:build-retry",
+    "status:verify-retry",
+)
+
+_LABEL_COLORS = {
+    "status:ready": "0E8A16",
+    "status:design": "1D76DB",
+    "status:build": "0052CC",
+    "status:verify": "5319E7",
+    "status:review": "D4C5F9",
+    "status:blocked": "B60205",
+    "status:build-retry": "FBCA04",
+    "status:verify-retry": "FEF2C0",
+}
+
+_TERMINAL_LABELS = {"status:review", "status:blocked"}
+
+_E2E_POLL_INTERVAL = 15
+_E2E_POLL_TIMEOUT = 25 * 60
+_E2E_DAEMON_TIMEOUT = 30 * 60
 
 
 def _gh(*args: str, cwd: Optional[Path] = None) -> subprocess.CompletedProcess:
@@ -111,6 +146,104 @@ def _copy_ralph_into(ralph_src: Path, target: Path) -> None:
             shutil.copy2(item, dest)
 
 
+def _bootstrap_labels(repo: str) -> None:
+    """Create the 8 required Ralph status labels on the E2E repo if missing.
+
+    The daemon dry-run preflight requires these labels. Creating them
+    idempotently lets the E2E test run against a fresh clone without
+    relying on the repo already having a complete label set.
+    """
+    result = _gh("label", "list", "--repo", repo, "--json", "name")
+    if result.returncode != 0:
+        raise RuntimeError(f"gh label list failed: {result.stderr}")
+    existing = {label["name"] for label in json.loads(result.stdout or "[]")}
+
+    for name in _REQUIRED_STATUS_LABELS:
+        if name in existing:
+            continue
+        create_result = _gh(
+            "label",
+            "create",
+            name,
+            "--repo",
+            repo,
+            "--color",
+            _LABEL_COLORS[name],
+            "--description",
+            f"Ralph {name}",
+        )
+        if create_result.returncode != 0:
+            raise RuntimeError(f"gh label create {name} failed: {create_result.stderr}")
+
+
+def _run_engine(
+    ralph_src: Path,
+    target: Path,
+    issue_num: Optional[int] = None,
+    extra_args: Optional[list[str]] = None,
+) -> subprocess.CompletedProcess:
+    """Invoke ``python -m core.engine`` against the target repo.
+
+    Sets ``PYTHONPATH`` to include both the Ralph source tree and the
+    ``core/`` directory so ``from core.pipeline.shell import ...`` resolves
+    correctly, and sets ``RALPH_PROJECT_DIR`` to the cloned E2E repo. The
+    agent binary is propagated from the caller's ``RALPH_AGENT`` environment.
+    """
+    env_overrides = {
+        "PYTHONPATH": f"{ralph_src}:{ralph_src / 'core'}",
+        "RALPH_PROJECT_DIR": str(target),
+    }
+    cmd = ["python", "-m", "core.engine"]
+    if issue_num is not None:
+        cmd += ["--issue", str(issue_num)]
+    if extra_args:
+        cmd.extend(extra_args)
+    return subprocess.run(
+        cmd,
+        cwd=ralph_src,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=_E2E_DAEMON_TIMEOUT,
+        env={**os.environ, **env_overrides},
+    )
+
+
+def _wait_for_terminal_status(
+    issue_num: int,
+    repo: str,
+    timeout: int = _E2E_POLL_TIMEOUT,
+    interval: int = _E2E_POLL_INTERVAL,
+) -> str:
+    """Poll ``gh issue view`` until the issue reaches a terminal status label.
+
+    Returns the terminal label name (``status:review`` or ``status:blocked``).
+    Raises ``TimeoutError`` if the timeout expires without reaching a terminal
+    status.
+    """
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        result = _gh(
+            "issue",
+            "view",
+            str(issue_num),
+            "--repo",
+            repo,
+            "--json",
+            "labels",
+        )
+        if result.returncode == 0:
+            data = json.loads(result.stdout or "{}")
+            labels = {label["name"] for label in data.get("labels", [])}
+            terminal = labels & _TERMINAL_LABELS
+            if terminal:
+                return terminal.pop()
+        time.sleep(interval)
+    raise TimeoutError(
+        f"Issue #{issue_num} did not reach a terminal status within {timeout}s"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Test cases
 # ---------------------------------------------------------------------------
@@ -121,31 +254,26 @@ def _copy_ralph_into(ralph_src: Path, target: Path) -> None:
     reason="E2E tests require RALPH_E2E=1 and a real GitHub repo",
 )
 def test_full_pipeline_on_e2e_repo(tmp_path: Path) -> None:
-    """End-to-end: create a status:ready issue on the E2E test repo and observe
-    the pipeline progress through DESIGN → BUILD → VERIFY.
-
-    Skeleton implementation (A-006). Phase-specific assertions are added in
-    A-039 (Phase A), B-034 (Phase B), C-049 (Phase C), D-015 (Phase D).
+    """End-to-end: create a status:ready issue on the E2E test repo, run the
+    daemon against it, and assert it reaches a terminal status.
     """
-    # 1. Clone the test repo
     target = _clone_e2e_repo(tmp_path)
-
-    # 2. Copy Ralph source into the repo
     ralph_src = Path(__file__).resolve().parents[2]
     _copy_ralph_into(ralph_src, target)
 
-    # 3. Create a status:ready issue
     phase = os.environ.get("RALPH_E2E_PHASE", "a")
     issue_num = _make_e2e_issue(phase, "E2E pipeline smoke test", target)
 
-    # 4. (Skeleton) The actual `ralph daemon --issue=<N>` invocation lands in
-    # the phase-specific verification task. For now, just assert the issue was
-    # created and the repo is reachable.
-    assert issue_num > 0
-    assert target.exists()
+    _bootstrap_labels(E2E_REPO)
 
-    # 5. Cleanup: leave the issue open for the operator to review the result
-    # of the actual daemon run (spec §14.2 retention policy: 30 days).
+    result = _run_engine(ralph_src, target, issue_num)
+    assert result.returncode == 0, (
+        f"ralph daemon --issue={issue_num} exited {result.returncode}; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+
+    terminal = _wait_for_terminal_status(issue_num, E2E_REPO)
+    assert terminal in _TERMINAL_LABELS, f"Unexpected terminal status: {terminal}"
 
 
 @pytest.mark.skipif(
@@ -173,7 +301,7 @@ def test_e2e_reachable() -> None:
     reason="E2E tests require RALPH_E2E=1 and a real GitHub repo",
 )
 def test_phase_b_trajectory_and_idempotency_artifacts(tmp_path: Path) -> None:
-    """Phase B E2E: verify per-issue trajectory.jsonl and idempotency.jsonl exist.
+    """Phase B E2E: run the daemon and verify per-issue artifacts exist.
 
     Per spec §10.2 B2 + B4 the engine writes:
 
@@ -181,27 +309,34 @@ def test_phase_b_trajectory_and_idempotency_artifacts(tmp_path: Path) -> None:
       - .ralph/issues/<N>/trajectory.jsonl — one TrajectoryEvent per pipeline
         event.
 
-    Both must exist after a successful pipeline run.
-
-    The daemon invocation lands in a follow-up commit (the e2e.yml workflow
-    already triggers it); this test asserts the artifacts once they exist.
-    For dry-run purposes we check the path resolution and write the empty
-    files so the structure is verifiable.
+    Both must exist and be non-empty after a successful pipeline run.
     """
     target = _clone_e2e_repo(tmp_path)
-    _copy_ralph_into(Path(__file__).resolve().parents[2], target)
+    ralph_src = Path(__file__).resolve().parents[2]
+    _copy_ralph_into(ralph_src, target)
 
     issue_num = _make_e2e_issue("b", "Phase B idempotency + trajectory", target)
-    issue_dir = target / ".ralph" / "issues" / str(issue_num)
+    _bootstrap_labels(E2E_REPO)
 
-    # Path layout (per spec §6.2). The daemon populates these during its run;
-    # we only assert the expected directory structure here.
-    issue_dir.mkdir(parents=True, exist_ok=True)
-    assert issue_dir.exists()
-    # Note: idempotency.jsonl and trajectory.jsonl are created by the daemon.
-    # They may not exist yet at this point in the test — the assertion runs
-    # after `ralph daemon --issue=<N>` in the CI workflow.
-    assert target.exists()
+    result = _run_engine(ralph_src, target, issue_num)
+    assert result.returncode == 0, (
+        f"ralph daemon --issue={issue_num} exited {result.returncode}; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+
+    terminal = _wait_for_terminal_status(issue_num, E2E_REPO)
+    assert terminal in _TERMINAL_LABELS, f"Unexpected terminal status: {terminal}"
+
+    issue_dir = target / ".ralph" / "issues" / str(issue_num)
+    idempotency_path = issue_dir / "idempotency.jsonl"
+    trajectory_path = issue_dir / "trajectory.jsonl"
+
+    assert (
+        idempotency_path.exists() and idempotency_path.stat().st_size > 0
+    ), f"Expected non-empty idempotency log at {idempotency_path}"
+    assert (
+        trajectory_path.exists() and trajectory_path.stat().st_size > 0
+    ), f"Expected non-empty trajectory log at {trajectory_path}"
 
 
 # ---------------------------------------------------------------------------
@@ -214,13 +349,13 @@ def test_phase_b_trajectory_and_idempotency_artifacts(tmp_path: Path) -> None:
     reason="E2E tests require RALPH_E2E=1 and a real GitHub repo",
 )
 def test_phase_d_dry_run_exits_zero(tmp_path: Path) -> None:
-    """Phase D E2E (D-015): ``ralph daemon --dry-run`` exits 0 on the E2E repo.
+    """Phase D E2E (D-015): dry-run gate passes and daemon reaches terminal status.
 
     Per spec §10.4 D E2E gate: ``ralph daemon --dry-run`` must exit 0
-    on the E2E repo. This validates that gh auth, git remote, and
-    the 8 status labels are all in place — the precondition for any
-    pipeline run. The test also creates a phase-d issue as the
-    ticket-tracking artifact.
+    on the E2E repo once the 8 status labels are in place. This test
+    bootstraps the labels, asserts ``--dry-run`` exits 0, then runs the
+    daemon against a phase-d issue and asserts it reaches
+    ``status:review`` or ``status:blocked``.
 
     Note: The dry-run is a fast check (no agent invoked). For the
     parallel-BUILD 30% speedup measurement (spec §10.4 D E2E gate),
@@ -228,81 +363,28 @@ def test_phase_d_dry_run_exits_zero(tmp_path: Path) -> None:
     test does not measure wall-clock time.
     """
     target = _clone_e2e_repo(tmp_path)
-    _copy_ralph_into(Path(__file__).resolve().parents[2], target)
-
-    # Create a phase-d ticket so the E2E test leaves an artifact per
-    # spec §14 lifecycle. Note: the ticket is left OPEN (not auto-closed)
-    # because the daemon does not run against it in this test.
-    issue_num = _make_e2e_issue("d", "Phase D dry-run + parallel BUILD", target)
-    assert issue_num > 0
-
-    # Run `ralph daemon --dry-run` against the cloned repo. It will
-    # fail with non-zero exit because the cloned E2E repo is a vanilla
-    # template without Ralph labels; the test asserts the dry-run
-    # machinery is invoked (returns non-zero with a label-missing
-    # message — the same code path that runs in CI).
-    #
-    # Invoke via ``python -m core.engine`` rather than the ``ralph``
-    # bash dispatcher — the CI runner does not install ``bin/ralph``
-    # to PATH (it runs against a source checkout, not an install).
     ralph_src = Path(__file__).resolve().parents[2]
+    _copy_ralph_into(ralph_src, target)
 
-    def _run_dry_run(args: list[str]) -> subprocess.CompletedProcess:
-        """Invoke ``python -m core.engine <args>`` from the Ralph source tree.
+    _bootstrap_labels(E2E_REPO)
 
-        Sets ``PYTHONPATH`` to include both the Ralph source tree and
-        the ``core/`` directory so ``from core.pipeline.shell import
-        ...`` resolves correctly (mirrors the bootstrap in
-        ``core/engine.py``).
-        """
-        env_overrides = {
-            "PYTHONPATH": f"{ralph_src}:{ralph_src / 'core'}",
-            "RALPH_PROJECT_DIR": str(target),
-        }
-        return subprocess.run(
-            ["python", "-m", "core.engine", *args],
-            cwd=ralph_src,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=60,
-            env={**os.environ, **env_overrides},
-        )
-
-    result = _run_dry_run(["--dry-run"])
-    # Dry-run can exit 0 (when all 8 labels exist) OR non-zero with a
-    # clear error message (when labels are missing). Both outcomes
-    # prove the dry-run machinery is invoked. We accept either, but
-    # assert that gh label list WAS called (proves the validation
-    # path ran).
-    if result.returncode != 0:
-        # E2E repo doesn't have the 8 Ralph labels yet — this is
-        # expected. We just confirm the error mentions the labels.
-        combined = (result.stdout or "") + (result.stderr or "")
-        assert (
-            "label" in combined.lower() or "Missing required" in combined
-        ), f"dry-run failure should mention labels; got: {result.stdout!r}"
-    else:
-        # 0 exit means all 8 labels are present (rare for the
-        # default E2E template; happens after init --create-labels).
-        assert result.returncode == 0
-
-    # Also exercise `ralph status --dry-run` to confirm it works.
-    # status.py is a separate entrypoint; invoke it directly.
-    result_status = subprocess.run(
-        ["python", "core/status.py", "--dry-run"],
-        cwd=ralph_src,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=60,
-        env={
-            **os.environ,
-            "PYTHONPATH": f"{ralph_src}:{ralph_src / 'core'}",
-            "RALPH_PROJECT_DIR": str(target),
-        },
+    # Run `ralph daemon --dry-run` against the cloned repo. Labels now
+    # exist, so the dry-run should exit 0.
+    dry_run = _run_engine(ralph_src, target, extra_args=["--dry-run"])
+    assert dry_run.returncode == 0, (
+        f"ralph daemon --dry-run exited {dry_run.returncode}; "
+        f"stdout={dry_run.stdout!r} stderr={dry_run.stderr!r}"
     )
-    # status --dry-run has the same exit-code semantics as daemon --dry-run.
-    if result_status.returncode != 0:
-        combined = (result_status.stdout or "") + (result_status.stderr or "")
-        assert "label" in combined.lower() or "Missing required" in combined
+
+    issue_num = _make_e2e_issue(
+        "d", "Phase D dry-run + parallel BUILD + daemon run", target
+    )
+
+    result = _run_engine(ralph_src, target, issue_num)
+    assert result.returncode == 0, (
+        f"ralph daemon --issue={issue_num} exited {result.returncode}; "
+        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+    )
+
+    terminal = _wait_for_terminal_status(issue_num, E2E_REPO)
+    assert terminal in _TERMINAL_LABELS, f"Unexpected terminal status: {terminal}"
