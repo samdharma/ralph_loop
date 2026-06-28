@@ -47,7 +47,7 @@ from core.pipeline.test_tracking import (  # noqa: E402
 
 def _run_test_subagent(issue: dict) -> bool:
     """
-    TEST sub-agent — Mode A (isolated, fresh session).
+    TEST sub-agent — isolated, fresh session.
     Sees design spec ONLY. Writes tests that SHOULD FAIL.
     No implementation code visibility.
     Snapshots tests/ before and after so VERIFY can run only these QA-written tests.
@@ -64,7 +64,7 @@ def _run_test_subagent(issue: dict) -> bool:
     """
     issue_num = issue["number"]
 
-    print(f"\n  [ralph] BUILD / TEST sub-agent for #{issue_num} (Mode A — isolated)")
+    print(f"\n  [ralph] BUILD / TEST sub-agent for #{issue_num} (isolated)")
     gh_comment(issue_num, "🧪 TEST sub-agent started (isolated).")
     log_metrics("subagent_start", issue=str(issue_num), subagent="test", mode="A")
 
@@ -150,7 +150,7 @@ def _run_test_subagent(issue: dict) -> bool:
 
 def _run_implement_subagent(issue: dict) -> bool:
     """
-    IMPLEMENT sub-agent — Mode B (inherits DESIGN context via artifacts).
+    IMPLEMENT sub-agent — artifact-based handoff.
     Reads the DESIGN artifacts and the QA-written test list, then
     implements code to make those tests pass.
 
@@ -161,9 +161,9 @@ def _run_implement_subagent(issue: dict) -> bool:
     """
     issue_num = issue["number"]
     print(
-        f"\n  [ralph] BUILD / IMPLEMENT sub-agent for #{issue_num} (Mode B — inherits DESIGN context)"
+        f"\n  [ralph] BUILD / IMPLEMENT sub-agent for #{issue_num} (artifact-based handoff)"
     )
-    gh_comment(issue_num, "🛠️ IMPLEMENT sub-agent started (continuing DESIGN context).")
+    gh_comment(issue_num, "🛠️ IMPLEMENT sub-agent started (artifact-based handoff).")
     log_metrics("subagent_start", issue=str(issue_num), subagent="implement", mode="B")
 
     prompt = _assemble_subagent_prompt(issue, "implement.md", mode="B")

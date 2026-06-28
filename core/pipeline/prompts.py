@@ -57,13 +57,13 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
     """
     Build a prompt for a sub-agent invocation.
 
-    Mode A (Isolated): issue body + design spec + stage persona + recent comments.
-      No codebase context, no reference docs. Fresh pi --print session.
-      Used for TEST and VERIFY sub-agents — genuine independent perspective.
+    Isolated (TEST/VERIFY): issue body + design spec + stage persona + recent comments.
+      No codebase context, no reference docs. Fresh agent session.
+      Genuine independent perspective.
 
-    Mode B (Artifact-based): issue body + DESIGN artifacts + stage persona + recent comments.
+    Artifact-based handoff (IMPLEMENT): issue body + DESIGN artifacts + stage persona + recent comments.
       Context is carried by the artifact directory, not by a continued session.
-      Used for IMPLEMENT sub-agent — builds on DESIGN's codebase knowledge.
+      Builds on DESIGN's codebase knowledge.
     """
     base = ""
     if PROMPT_FILE.exists():
@@ -81,7 +81,7 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
     section_label = (
         "Sub-Agent Instructions"
         if mode == "A"
-        else "Sub-Agent Instructions (Mode B — continuing from DESIGN artifacts)"
+        else "Sub-Agent Instructions (artifact-based handoff)"
     )
     prompt = (
         f"{base}\n\n"
@@ -94,7 +94,7 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
     )
 
     # Design spec — read per-issue file. Legacy fallback removed in A7.1.
-    # Injected in both Mode A and Mode B so the prompt is self-contained.
+    # Injected for both isolated and artifact-based handoff sub-agents so the prompt is self-contained.
     design_file = _design_spec_path(issue["number"])
     if design_file.exists():
         design_spec = design_file.read_text(encoding="utf-8")
@@ -105,7 +105,7 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
             f"this is the design for the current issue only._"
         )
 
-    # A3.2: artifact-based handoff for IMPLEMENT sub-agent (Mode B).
+    # A3.2: artifact-based handoff for the IMPLEMENT sub-agent.
     # The IMPLEMENT agent reads its inputs from disk, not from session context.
     if mode == "B":
         artifact_dir = (
@@ -179,13 +179,13 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
             "Do NOT attempt to read implementation code — work from the specification above ONLY."
         )
 
-    # Mode B continuation notice
+    # Artifact-based handoff context note
     if mode == "B":
         prompt += (
             "\n\n---\n\n"
-            "**CONTEXT NOTE:** You are a Mode B sub-agent continuing from the DESIGN artifacts. "
-            "You inherit full knowledge of the codebase, design decisions, and the issue. "
-            "Test files were written by an independent QA sub-agent (Mode A) who never saw the code. "
+            "**CONTEXT NOTE:** You are an IMPLEMENT sub-agent reading from the DESIGN artifacts. "
+            "The DESIGN stage captured the codebase knowledge, design decisions, and issue context on disk. "
+            "Test files were written by an independent QA sub-agent in an isolated session. "
             "Find the test files in tests/ and implement minimal code to make them pass. "
             "Do NOT write new test files or modify existing tests — the QA tests are the verification truth."
         )

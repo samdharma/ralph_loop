@@ -1,9 +1,9 @@
 """BUILD stage (C1.4b — per plan §1.1 C1.4).
 
 Per docs/IMPROVEMENT_ROADMAP_SPEC.md §6.1, the BUILD stage lives at
-``core/pipeline/stages/build.py``. It runs the TEST sub-agent (Mode A —
-isolated) followed by the IMPLEMENT sub-agent (Mode B — inherits DESIGN
-context), then executes the validation gate.
+``core/pipeline/stages/build.py``. It runs the TEST sub-agent (isolated,
+fresh session) followed by the IMPLEMENT sub-agent (artifact-based
+handoff), then executes the validation gate.
 """
 
 from __future__ import annotations
@@ -47,8 +47,8 @@ from core.pipeline.test_tracking import (  # noqa: E402
 def run_build_stage(issue: dict, is_retry: bool = False) -> bool:
     """
     STAGE 2: BUILD — spawns two sub-agents:
-      1. TEST sub-agent (Mode A — isolated, fresh session)
-      2. IMPLEMENT sub-agent (Mode B — full context)
+      1. TEST sub-agent (isolated, fresh session)
+      2. IMPLEMENT sub-agent (artifact-based handoff)
     Sequential: TEST runs first (writes tests), then IMPLEMENT (writes code).
 
     Args:
@@ -138,19 +138,19 @@ def run_build_stage(issue: dict, is_retry: bool = False) -> bool:
 
             return _post_parallel_validate(issue, issue_num, is_retry)
 
-    # ── Step 2a: TEST sub-agent (Mode A — isolated) ──
+    # ── Step 2a: TEST sub-agent (isolated) ──
     if not _run_test_subagent(issue):
         _write_stage_report(
             issue_num,
             "BUILD",
             "TEST sub-agent",
-            "TEST sub-agent (Mode A) failed to write tests.",
+            "TEST sub-agent failed to write tests.",
         )
         _rollback_working_tree()
         log_metrics("stage_complete", issue=str(issue_num), stage="build")
         return False
 
-    # ── Step 2b: IMPLEMENT sub-agent (Mode B — full context) ──
+    # ── Step 2b: IMPLEMENT sub-agent (artifact-based handoff) ──
     # Snapshot QA test files before IMPLEMENT to detect tampering.
     qa_test_paths_before = _load_test_tracking(issue_num)
     qa_test_paths_before = [
@@ -163,7 +163,7 @@ def run_build_stage(issue: dict, is_retry: bool = False) -> bool:
             issue_num,
             "BUILD",
             "IMPLEMENT sub-agent",
-            "IMPLEMENT sub-agent (Mode B) failed to implement code.",
+            "IMPLEMENT sub-agent failed to implement code.",
         )
         _rollback_working_tree()
         log_metrics("stage_complete", issue=str(issue_num), stage="build")

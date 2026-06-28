@@ -38,8 +38,8 @@ def run_pipeline(
     """
     Phase 3: 3-stage pipeline with sub-agents.
     DESIGN writes structured artifacts for the IMPLEMENT stage.
-    BUILD spawns TEST (Mode A isolated) + IMPLEMENT (Mode B artifact-based)
-    sub-agents. VERIFY runs as a Mode A isolated sub-agent.
+    BUILD spawns TEST (isolated, fresh session) + IMPLEMENT (artifact-based
+    handoff) sub-agents. VERIFY runs as an isolated, fresh-session sub-agent.
 
     Args:
         issue: The GitHub issue dict.

@@ -48,8 +48,9 @@ def run_design_stage(issue: dict) -> bool:
 
     The agent is invoked through the retry-policy wrapper. DESIGN is
     fail-fast: non-zero exits are classified as ``block`` and are not
-    retried. Successful runs write structured DESIGN artifacts for the
-    IMPLEMENT stage via the artifact directory (per spec §10.1 A3).
+    retried. Successful runs use artifact-based handoff: they write
+    structured DESIGN artifacts for the IMPLEMENT stage to the artifact
+    directory (per spec §10.1 A3).
     """
     issue_num = issue["number"]
     print(f"\n[ralph] STAGE 1/3: DESIGN for #{issue_num}")

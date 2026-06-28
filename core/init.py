@@ -114,17 +114,17 @@ This repository is managed by **Ralph v3**, an automated build system.
 
 Ralph runs each ticket through a 3-stage pipeline:
 
-1. **DESIGN** — Systems architect researches the codebase and writes a design spec in `docs/agent/PROGRESS.md`.
+1. **DESIGN** — Systems architect researches the codebase and writes a design spec in `docs/designs/<issue-number>.md` and structured artifacts in `.ralph/issues/<issue-number>/artifacts/`.
 2. **BUILD** — Two sub-agents run in sequence:
-   - **TEST** (Mode A — isolated) writes tests from the spec only.
-   - **IMPLEMENT** (Mode B — continues DESIGN context) writes code to make the tests pass.
-3. **VERIFY** — Independent reviewer (Mode A — isolated) reviews the diff against the issue and spec.
+   - **TEST** (isolated, fresh session) writes tests from the spec only.
+   - **IMPLEMENT** (artifact-based handoff) reads the DESIGN artifacts and writes code to make the tests pass.
+3. **VERIFY** — Independent reviewer (isolated, fresh session) reviews the diff against the issue and spec.
 
 ## For Agents
 
 - Read `docs/agent/PROMPT.md` for universal rules and the failure-reporting contract.
 - Read the stage prompt for your current role in `docs/agent/prompts/<stage>.md`.
-- Read `docs/agent/PROGRESS.md` for the active design spec and progress log.
+- Read `docs/designs/<issue-number>.md` for the design spec and `.ralph/issues/<issue-number>/artifacts/` for the structured handoff artifacts.
 - Follow existing code conventions. Research the codebase before writing.
 - Run `ralph validate --tier=targeted` when your stage work is complete.
 - Do NOT modify GitHub labels or issues — the orchestrator handles transitions.
@@ -223,7 +223,7 @@ DESIGN_MD = """\
 You are a **systems architect**. Your job is to understand the issue, research the codebase, and produce a design spec.
 
 ## Your Goal
-Write a design spec in `docs/agent/PROGRESS.md` that the TEST and IMPLEMENT sub-agents can execute without further research.
+Write the design spec to `docs/designs/<issue-number>.md` so the TEST and IMPLEMENT sub-agents can execute it without further research.
 
 ## Process
 1. Read the issue and recent comments.
@@ -350,9 +350,11 @@ Write tests that validate every acceptance criterion in the design spec. Tests s
 """
 
 IMPLEMENT_MD = """\
-# IMPLEMENT Stage — Developer (Mode B — Continues DESIGN Context)
+# IMPLEMENT Stage — Developer (Artifact-Based Handoff)
 
-You are a **developer** continuing from the DESIGN session. You inherit full codebase knowledge, design decisions, and the issue context.
+You are a **developer** implementing the design spec for issue #<num>.
+
+**Read your inputs from `.ralph/issues/<N>/artifacts/` (not from session context).**
 
 ## Your Goal
 Find the tests written by the independent QA sub-agent and write the minimal implementation to make them pass.
