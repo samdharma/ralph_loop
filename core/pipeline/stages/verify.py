@@ -20,7 +20,11 @@ for p in (str(_PROJECT_ROOT), str(_CORE_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from core.pipeline.agents.base import create_worktree, remove_worktree  # noqa: E402
+from core.pipeline.agents.base import (  # noqa: E402
+    WorktreeError,
+    create_worktree,
+    remove_worktree,
+)
 from core.pipeline.agents.pi import invoke_agent  # noqa: E402
 from core.pipeline.git_ops import _has_commits  # noqa: E402
 from core.pipeline.github.comments import gh_comment  # noqa: E402
@@ -60,8 +64,22 @@ def run_verify_stage(issue: dict) -> bool:
     wt_path: Optional[Path] = None
     try:
         wt_path = create_worktree(issue_num)
-    except RuntimeError as e:
-        print(f"[ralph] WARNING: worktree unavailable, running in repo root: {e}")
+    except WorktreeError as e:
+        # Worktree isolation is a hard requirement (Phase D follow-up B3).
+        # Do not fall back to the repo root; block the issue instead.
+        print(f"[ralph] ERROR: worktree creation failed for #{issue_num}: {e}")
+        gh_comment(
+            issue_num,
+            "🚫 VERIFY blocked: unable to create isolated git worktree. "
+            "Worktree isolation is required; check daemon logs for details.",
+        )
+        log_metrics(
+            "worktree_failed",
+            issue=str(issue_num),
+            subagent="verify",
+            detail=str(e),
+        )
+        return False
 
     final_success: bool = False
     try:

@@ -124,6 +124,53 @@ class TestParallelScheduler:
         assert wt_test == test_wt
         assert wt_impl == impl_wt
 
+    def test_worktree_failure_blocks_parallel_build(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """WorktreeError in parallel setup blocks the issue (no sequential fallback)."""
+        from core.pipeline.agents import base as agents_base
+        from core.pipeline.stages import build as build_mod
+
+        monkeypatch.setenv("RALPH_PARALLEL_BUILD", "true")
+        monkeypatch.setattr(build_mod, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(build_mod, "PREFLIGHT_SCRIPT", tmp_path / "no-preflight")
+        monkeypatch.setattr(build_mod, "_run_test_subagent", lambda issue: True)
+        monkeypatch.setattr(build_mod, "_run_implement_subagent", lambda issue: True)
+
+        from core.pipeline.agents.base import WorktreeError
+
+        with (
+            mock.patch.object(
+                build_mod,
+                "create_worktree",
+                side_effect=WorktreeError("git worktree not available"),
+            ) as create_wt,
+            mock.patch.object(build_mod, "gh_comment") as comment,
+            mock.patch.object(build_mod, "log_metrics") as log,
+        ):
+            from core.pipeline.stages.build import run_build_stage
+
+            result = run_build_stage({"number": 1, "title": "Test"})
+
+        assert result is False
+        assert create_wt.called
+        # Should NOT fall back to sequential (sub-agents are not invoked).
+        # create_worktree is only called by the parallel scheduler.
+        assert create_wt.call_count == 1
+        # Should emit worktree_failed metric, not fallback metric.
+        assert any(
+            call.args and call.args[0] == "worktree_failed"
+            for call in log.call_args_list
+        ), f"Expected worktree_failed metric; got {log.call_args_list}"
+        assert not any(
+            call.args and "fallback" in str(call.args[0]) for call in log.call_args_list
+        ), f"Did not expect fallback metric; got {log.call_args_list}"
+        # Should post a blocking comment.
+        assert any(
+            "blocked" in str(call.args[1]).lower() for call in comment.call_args_list
+        ), f"Expected blocking comment; got {comment.call_args_list}"
+
 
 # ─────────────────────────────────────────────────────────
 # D1.3 — Conflict-resolution policy (spec §10.4 D1)

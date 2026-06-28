@@ -13,8 +13,8 @@ check-out.
 Pre-flight check (per plan §3 R-5): the first invocation runs a
 ``git worktree add /tmp/ralph-wt-test HEAD`` to confirm the host
 supports git worktrees. If that fails, ``create_worktree`` raises
-``RuntimeError`` with a clear remediation message — there is no
-silent fallback that would surprise the user later.
+:class:`WorktreeError` with a clear remediation message — there is
+no silent fallback that would surprise the user later.
 
 Read-only ``src/`` enforcement (per plan §3 R-5): after creating a
 worktree, ``create_worktree`` invokes :func:`_enforce_readonly_src`
@@ -40,6 +40,16 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 _LOG = logging.getLogger(__name__)
+
+
+class WorktreeError(RuntimeError):
+    """Raised when git worktree creation or pre-flight checks fail.
+
+    Per Phase D follow-up B3: worktree isolation is a hard requirement.
+    Stages catching this error must block the issue rather than falling
+    back to the parent working tree, which would defeat mechanism-enforced
+    isolation.
+    """
 
 
 def _run_git(argv: list[str]) -> "subprocess.CompletedProcess[bytes]":
@@ -92,7 +102,7 @@ def _preflight_check() -> None:
     probe_path.parent.mkdir(parents=True, exist_ok=True)
     result = _run_git(["worktree", "add", "--detach", str(probe_path), "HEAD"])
     if result.returncode != 0:
-        raise RuntimeError(
+        raise WorktreeError(
             "git worktree not available on this host "
             "(see docs/development_workflow.md for workarounds). "
             f"stderr: {result.stderr.decode('utf-8', errors='replace')}"
@@ -201,7 +211,7 @@ def create_worktree(issue_num) -> Path:
         ]
     )
     if result.returncode != 0:
-        raise RuntimeError(
+        raise WorktreeError(
             f"git worktree add failed for issue #{issue_num} at {wt_path}: "
             f"{result.stderr.decode('utf-8', errors='replace')}"
         )
@@ -236,6 +246,7 @@ __all__ = [
     "remove_worktree",
     "merge_worktrees",
     "OverlapError",
+    "WorktreeError",
     "PROJECT_ROOT",
     "_enforce_readonly_src",
     "_cleanup_readonly_src",

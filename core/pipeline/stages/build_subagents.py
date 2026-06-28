@@ -22,7 +22,11 @@ for p in (str(_PROJECT_ROOT), str(_CORE_DIR)):
         sys.path.insert(0, p)
 
 from core.pipeline.agents.artifacts import write_qa_tests  # noqa: E402
-from core.pipeline.agents.base import create_worktree, remove_worktree  # noqa: E402
+from core.pipeline.agents.base import (  # noqa: E402
+    WorktreeError,
+    create_worktree,
+    remove_worktree,
+)
 from core.pipeline.github.comments import gh_comment  # noqa: E402
 from core.pipeline.prompts import _assemble_subagent_prompt  # noqa: E402
 from core.pipeline.retry import (  # noqa: E402
@@ -67,10 +71,22 @@ def _run_test_subagent(issue: dict) -> bool:
     wt_path: Optional[Path] = None
     try:
         wt_path = create_worktree(issue_num)
-    except RuntimeError as e:
-        # Worktree unavailable (e.g., git too old). Fall back to running
-        # in the repo root — operators get a clear error message in logs.
-        print(f"[ralph] WARNING: worktree unavailable, running in repo root: {e}")
+    except WorktreeError as e:
+        # Worktree isolation is a hard requirement (Phase D follow-up B3).
+        # Do not fall back to the repo root; block the issue instead.
+        print(f"[ralph] ERROR: worktree creation failed for #{issue_num}: {e}")
+        gh_comment(
+            issue_num,
+            "🚫 BUILD blocked: unable to create isolated git worktree. "
+            "Worktree isolation is required; check daemon logs for details.",
+        )
+        log_metrics(
+            "worktree_failed",
+            issue=str(issue_num),
+            subagent="test",
+            detail=str(e),
+        )
+        return False
 
     try:
         before_tests = _snapshot_tests_dir()

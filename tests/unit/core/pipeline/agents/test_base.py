@@ -23,6 +23,33 @@ class TestAgentBaseAtNewPath:
         assert callable(create_worktree)
         assert callable(remove_worktree)
 
+    def test_worktree_error_is_runtime_error(self) -> None:
+        """WorktreeError is a RuntimeError subclass exposed from base."""
+        from core.pipeline.agents.base import WorktreeError
+
+        assert issubclass(WorktreeError, RuntimeError)
+
+    def test_create_worktree_raises_worktree_error_on_failure(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """create_worktree raises WorktreeError when git worktree add fails."""
+        from core.pipeline.agents import base as agents_base
+
+        monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(agents_base, "_preflight_check", lambda: None)
+
+        def fake_git(argv):
+            if "worktree" in argv and "add" in argv:
+                return mock.Mock(returncode=1, stdout=b"", stderr=b"git says no")
+            return mock.Mock(returncode=0, stdout=b"", stderr=b"")
+
+        with mock.patch.object(agents_base, "_run_git", side_effect=fake_git):
+            from core.pipeline.agents.base import WorktreeError, create_worktree
+
+            with __import__("pytest").raises(WorktreeError) as exc_info:
+                create_worktree(42)
+            assert "git says no" in str(exc_info.value)
+
     def test_agent_base_defines_abstract_invoke(self) -> None:
         from core.pipeline.agents.base import AgentBase
 

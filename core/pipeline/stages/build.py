@@ -21,7 +21,7 @@ for p in (str(_PROJECT_ROOT), str(_CORE_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from core.pipeline.agents.base import create_worktree  # noqa: E402
+from core.pipeline.agents.base import WorktreeError, create_worktree  # noqa: E402
 from core.pipeline.git_ops import _rollback_working_tree  # noqa: E402
 from core.pipeline.github.comments import gh_comment  # noqa: E402
 from core.pipeline.reporting import (  # noqa: E402
@@ -98,6 +98,25 @@ def run_build_stage(issue: dict, is_retry: bool = False) -> bool:
                 )
                 if not ok:
                     return False
+        except WorktreeError as exc:
+            # Phase D follow-up B3: worktree creation failure must block
+            # the issue, not silently fall back to the repo root.
+            log_metrics(
+                "worktree_failed",
+                issue=str(issue_num),
+                subagent="build_parallel",
+                detail=str(exc),
+            )
+            print(
+                f"[ralph] ERROR: Parallel BUILD worktree creation failed for #{issue_num}: {exc}. "
+                "Blocking issue."
+            )
+            gh_comment(
+                issue_num,
+                "🚫 BUILD blocked: unable to create isolated git worktrees for parallel run. "
+                "Worktree isolation is required; check daemon logs for details.",
+            )
+            return False
         except Exception as exc:  # noqa: BLE001
             log_metrics(
                 "build_fallback_to_sequential",
@@ -358,9 +377,20 @@ def _parallel_create_worktrees(issue_num: int) -> tuple[Path, Path]:
 
     Uses the module-level ``create_worktree`` import so tests can
     patch ``build_mod.create_worktree`` to swap the implementation.
+
+    If the second worktree cannot be created, any worktree already
+    created by this call is removed so the stage fails cleanly.
     """
     test_wt = create_worktree(f"{issue_num}-test")
-    impl_wt = create_worktree(f"{issue_num}-impl")
+    try:
+        impl_wt = create_worktree(f"{issue_num}-impl")
+    except WorktreeError:
+        # Best-effort cleanup: the first worktree is unusable without
+        # its partner, and the caller will block the issue.
+        from core.pipeline.agents.base import remove_worktree
+
+        remove_worktree(test_wt)
+        raise
     return test_wt, impl_wt
 
 
