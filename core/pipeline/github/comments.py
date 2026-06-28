@@ -50,10 +50,11 @@ def gh_comment(issue_num: int, body: str, run_id: Optional[str] = None) -> bool:
     safe — a daemon SIGKILL followed by a restart must not
     double-post comments.
 
-    Per spec §10.2 B4.3, every successful comment also emits a
-    ``TrajectoryEvent`` (specifically, a SubagentInvocation-shaped
-    record is emitted via ``_emit_trajectory`` so the trajectory file
-    remains the canonical log of engine side effects).
+    Per spec §10.2 B4.3, every comment attempt (success or failure)
+    also emits a ``TrajectoryEvent`` (specifically, a
+    SubagentInvocation-shaped record is emitted via ``_emit_trajectory``
+    so the trajectory file remains the canonical log of engine side
+    effects).
     """
     if run_id is None:
         run_id = os.environ.get("RALPH_RUN_ID")
