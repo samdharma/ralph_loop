@@ -14,6 +14,7 @@ The trajectory event emission ``_emit_trajectory`` lives in
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -39,10 +40,11 @@ def _run_gh(argv: list[str]) -> "subprocess.CompletedProcess[bytes]":
 def gh_comment(issue_num: int, body: str, run_id: Optional[str] = None) -> bool:
     """Post a comment on the GitHub issue. Fail-soft.
 
-    When ``run_id`` is provided the call is wrapped in an idempotency
-    check: the (run_id, "comment", issue_num, body_hash) tuple is
-    recorded to ``.ralph/issues/<N>/idempotency.jsonl`` BEFORE invoking
-    ``gh``. Subsequent calls with the same tuple short-circuit.
+    When ``run_id`` is provided (or ``RALPH_RUN_ID`` is set in the
+    environment) the call is wrapped in an idempotency check: the
+    (run_id, "comment", issue_num, body_hash) tuple is recorded to
+    ``.ralph/issues/<N>/idempotency.jsonl`` BEFORE invoking ``gh``.
+    Subsequent calls with the same tuple short-circuit.
 
     Per spec §10.2 B2, this is what makes the engine crash-restart
     safe — a daemon SIGKILL followed by a restart must not
@@ -53,6 +55,9 @@ def gh_comment(issue_num: int, body: str, run_id: Optional[str] = None) -> bool:
     record is emitted via ``_emit_trajectory`` so the trajectory file
     remains the canonical log of engine side effects).
     """
+    if run_id is None:
+        run_id = os.environ.get("RALPH_RUN_ID")
+
     ok: bool
     if run_id is not None:
         # _build_github_client lives in core.pipeline.github.client

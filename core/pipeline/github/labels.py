@@ -15,6 +15,7 @@ and 14).
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -48,8 +49,9 @@ def transition_label(
 ):
     """Update issue labels via ``gh issue edit``. Retries on transient failures.
 
-    When ``run_id`` is provided the call is wrapped in an idempotency
-    check via :class:`GitHubClient`. The ``(run_id, action, issue_num,
+    When ``run_id`` is provided (or ``RALPH_RUN_ID`` is set in the
+    environment) the call is wrapped in an idempotency check via
+    :class:`GitHubClient`. The ``(run_id, action, issue_num,
     label-pair-hash)`` tuple is recorded to
     ``.ralph/issues/<N>/idempotency.jsonl`` BEFORE invoking ``gh``.
     Subsequent calls with the same tuple short-circuit and return
@@ -59,6 +61,9 @@ def transition_label(
     safe — a daemon SIGKILL followed by a restart must not
     double-transition labels.
     """
+    if run_id is None:
+        run_id = os.environ.get("RALPH_RUN_ID")
+
     if run_id is not None:
         # Lazy import — _build_github_client lives in
         # core.pipeline.github.client (C1 step 6).

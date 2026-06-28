@@ -199,7 +199,6 @@ def run_pipeline(
                 "✅ VERIFY passed. Handing off for review — external tools and reviewers may now update labels on this issue. Ralph will not touch this issue again unless a retry label is set.",
             )
             transition_label(issue_num, "status:review", "status:verify")
-            transition_label(issue_num, "status:review", "status:verify")
             log_metrics("pipeline_complete", issue=str(issue_num), result="review")
     else:
         print(f"\n[ralph] #{issue_num} FAILED VERIFY — marking blocked")
@@ -212,7 +211,6 @@ def run_pipeline(
                 f"📋 Full VERIFY failure report at "
                 f"`.ralph/blocked/issue-{issue_num}/issue-{issue_num}-report.md`.",
             )
-        transition_label(issue_num, "status:blocked", "status:verify")
         transition_label(issue_num, "status:blocked", "status:verify")
         log_metrics(
             "pipeline_complete", issue=str(issue_num), result="blocked", stage="verify"
