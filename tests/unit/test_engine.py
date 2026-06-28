@@ -1631,3 +1631,50 @@ class TestDaemonDryRun:
             assert not any(
                 agent in str(argv).lower() for agent in ("pi", "kimi")
             ), f"dry_run should not invoke agent subprocess; got argv={argv}"
+
+
+# ─────────────────────────────────────────────────────────
+# D2.1 — status:retry label recognition (spec §10.4 D2)
+# ─────────────────────────────────────────────────────────
+
+
+class TestRetryLabelRecognition:
+    """D2.1: the engine recognizes ``status:retry`` ALONGSIDE existing retry labels.
+
+    Per spec §3.5 + §10.4 D2 + plan §3 R-12: the new ``status:retry``
+    label works ADDITIVELY. The old labels (``status:build-retry``,
+    ``status:verify-retry``) continue to work. No deprecation in v3.1.
+
+    These tests assert:
+
+      - ``status:retry`` is included in ``RETRY_LABEL_MAP`` (the canonical
+        engine-side list of accepted retry labels).
+      - All three labels map to a resume stage.
+      - The mapping is exhaustive: every accepted retry label has a
+        pipeline stage it resumes at.
+    """
+
+    def test_status_retry_in_accepted_labels(self) -> None:
+        """The ``status:retry`` label is recognized by the engine (in RETRY_LABEL_MAP)."""
+        from core.pipeline.issue_ops import RETRY_LABEL_MAP
+
+        assert "status:retry" in RETRY_LABEL_MAP, (
+            f"status:retry missing from RETRY_LABEL_MAP: {RETRY_LABEL_MAP}"
+        )
+
+    def test_old_labels_still_accepted(self) -> None:
+        """Old labels (status:build-retry, status:verify-retry) still work (no deprecation in v3.1)."""
+        from core.pipeline.issue_ops import RETRY_LABEL_MAP
+
+        assert "status:build-retry" in RETRY_LABEL_MAP
+        assert "status:verify-retry" in RETRY_LABEL_MAP
+
+    def test_retry_labels_map_to_resume_stages(self) -> None:
+        """Each accepted retry label maps to a valid resume stage."""
+        from core.pipeline.issue_ops import RETRY_LABEL_MAP
+
+        valid_stages = {"build", "verify"}
+        for label, resume_stage in RETRY_LABEL_MAP.items():
+            assert (
+                resume_stage in valid_stages
+            ), f"{label} maps to unknown stage {resume_stage!r}"
