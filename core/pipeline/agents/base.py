@@ -70,7 +70,7 @@ def _run_umount(argv: list[str]) -> "subprocess.CompletedProcess[bytes]":
     )
 
 
-def _worktree_path(issue_num: int) -> Path:
+def _worktree_path(issue_num) -> Path:
     """Return the on-disk path for issue ``issue_num``'s worktree."""
     return PROJECT_ROOT / ".ralph" / "worktrees" / str(issue_num)
 
@@ -171,13 +171,18 @@ def _cleanup_readonly_src(wt_path: Path) -> None:
     # On macOS no umount is needed.
 
 
-def create_worktree(issue_num: int) -> Path:
+def create_worktree(issue_num) -> Path:
     """Create a worktree for issue ``issue_num`` and return its path.
 
     On first call (per-process), runs the pre-flight check. Subsequent
     calls skip the check (it's a per-process one-shot). After the
     worktree is created, :func:`_enforce_readonly_src` is invoked so
     the sub-agent cannot write to ``src/``.
+
+    ``issue_num`` is accepted as either ``int`` or ``str`` so the
+    parallel BUILD scheduler (D1.1) can pass ``"<N>-test"`` /
+    ``"<N>-impl"`` to create two distinct worktrees for the same
+    issue (one per sub-agent).
     """
     if not getattr(create_worktree, "_preflight_done", False):
         _preflight_check()
@@ -229,6 +234,8 @@ __all__ = [
     "AgentBase",
     "create_worktree",
     "remove_worktree",
+    "merge_worktrees",
+    "OverlapError",
     "PROJECT_ROOT",
     "_enforce_readonly_src",
     "_cleanup_readonly_src",
@@ -256,3 +263,126 @@ class AgentBase(ABC):
     def invoke(self, *args, **kwargs):
         """Invoke the agent. Subclasses implement this."""
         raise NotImplementedError
+
+
+# ─────────────────────────────────────────────────────────
+# D1.2 — Worktree merge logic (spec §10.4 D1)
+# ─────────────────────────────────────────────────────────
+
+
+class OverlapError(RuntimeError):
+    """Raised when two parallel worktrees conflict outside their domains.
+
+    Per plan §3 R-8: path-domain merge policy means ``tests/`` and
+    ``src/`` are reconciled with TEST/IMPLEMENT winning
+    respectively. Any other overlap (e.g., ``docs/``,
+    ``__init__.py``, ``pyproject.toml``) means the design spec
+    wasn't precise enough about file ownership; D1 surfaces this
+    via FAIL FAST instead of papering over it.
+
+    The build stage catches this error and falls back to sequential
+    execution (see D1.3 — :func:`_conflict_policy`).
+    """
+
+
+# Per plan §3 R-8 path-domain merge policy. TEST wins for tests/;
+# IMPLEMENT wins for src/. Anything else is FAIL FAST.
+_TEST_DOMAIN = "tests/"
+_IMPLEMENT_DOMAIN = "src/"
+
+
+def _classify_paths(paths: list[str]) -> tuple[list[str], list[str], list[str]]:
+    """Partition a list of changed paths into (test, impl, other).
+
+    Per plan §3 R-8. Each path is a repo-relative path with leading
+    components (e.g., ``tests/unit/test_qa.py``,
+    ``src/feature.py``, ``docs/spec.md``).
+    """
+    test_paths: list[str] = []
+    impl_paths: list[str] = []
+    other_paths: list[str] = []
+    for p in paths:
+        if p.startswith(_TEST_DOMAIN):
+            test_paths.append(p)
+        elif p.startswith(_IMPLEMENT_DOMAIN):
+            impl_paths.append(p)
+        else:
+            other_paths.append(p)
+    return test_paths, impl_paths, other_paths
+
+
+def merge_worktrees(test_wt: Path, impl_wt: Path, base: str = "HEAD") -> Path:
+    """Merge two worktrees per the path-domain policy.
+
+    Per spec §10.4 D1 + plan §3 R-8:
+
+      1. Run ``git diff --name-only`` between the two worktrees
+         (compared against ``base``) to enumerate overlapping paths.
+      2. If any overlap is OUTSIDE ``tests/`` or ``src/``, raise
+         :class:`OverlapError` naming the offending files. The build
+         stage catches this and falls back to sequential execution
+         (D1.3).
+      3. Otherwise, apply ``git merge -X ours -- tests/`` (TEST
+         wins) and ``git merge -X theirs -- src/`` (IMPLEMENT wins)
+         in the parent repo's working copy. The function returns
+         ``PROJECT_ROOT`` on success — the parent repo is now the
+         merged tree.
+
+    The merge is implemented at the parent-repo level because
+    that's where the design spec, configs, and on-disk state
+    live. The worktrees provide isolation during the sub-agent
+    runs; reconciliation happens back in the main repo.
+
+    Args:
+        test_wt: Path to the TEST worktree.
+        impl_wt: Path to the IMPLEMENT worktree.
+        base: Git ref to compare against (default ``HEAD``).
+
+    Returns:
+        The path of the merged tree (``PROJECT_ROOT``).
+
+    Raises:
+        OverlapError: When an overlap is detected outside
+            ``tests/`` or ``src/``. Per plan §3 R-8 the build stage
+            catches this and falls back to sequential.
+    """
+    # Step 1: enumerate overlapping paths.
+    diff_result = _run_git(
+        [
+            "diff",
+            "--name-only",
+            base,
+            "--",
+            str(test_wt),
+            str(impl_wt),
+        ]
+    )
+    if diff_result.returncode != 0:
+        # Fall back to a simpler comparison: list both worktrees'
+        # files vs base. This branch runs when the worktrees don't
+        # share a common ancestor in the diff invocation above.
+        diff_result = _run_git(["diff", "--name-only", base])
+    raw_paths = (diff_result.stdout or b"").decode("utf-8", errors="replace")
+    paths = [p.strip() for p in raw_paths.splitlines() if p.strip()]
+
+    # Step 2: classify paths.
+    test_paths, impl_paths, other_paths = _classify_paths(paths)
+    if other_paths:
+        # Per plan §3 R-8: FAIL FAST on off-domain overlap.
+        raise OverlapError(
+            "Off-domain overlap between parallel TEST and IMPLEMENT "
+            f"worktrees: {', '.join(other_paths)}. The design spec "
+            "did not constrain file ownership clearly enough; "
+            "falling back to sequential execution."
+        )
+
+    # Step 3: apply domain-specific merges. The actual git
+    # invocations are best-effort — if there are no files in a
+    # given domain, the merge is a no-op. We run them in series
+    # to keep the log readable.
+    if test_paths:
+        _run_git(["merge", "-X", "ours", "--", _TEST_DOMAIN.rstrip("/")])
+    if impl_paths:
+        _run_git(["merge", "-X", "theirs", "--", _IMPLEMENT_DOMAIN.rstrip("/")])
+
+    return PROJECT_ROOT

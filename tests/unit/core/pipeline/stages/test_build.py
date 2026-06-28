@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from unittest import mock
 
 
@@ -70,8 +68,6 @@ class TestParallelScheduler:
 
     def test_env_flag_true_enables_parallel(self, monkeypatch) -> None:
         """``RALPH_PARALLEL_BUILD=true`` enables parallel mode."""
-        from core.pipeline.stages import build as build_mod
-
         monkeypatch.setenv("RALPH_PARALLEL_BUILD", "true")
         from core.pipeline.stages.build import _is_parallel_build_enabled
 
@@ -95,8 +91,8 @@ class TestParallelScheduler:
 
     def test_parallel_mode_creates_two_worktrees(self, tmp_path, monkeypatch) -> None:
         """When parallel is enabled, the scheduler creates 2 worktrees (test + implement)."""
-        from core.pipeline.stages import build as build_mod
         from core.pipeline.agents import base as agents_base
+        from core.pipeline.stages import build as build_mod
 
         monkeypatch.setenv("RALPH_PARALLEL_BUILD", "true")
         monkeypatch.setattr(build_mod, "PROJECT_ROOT", tmp_path)
@@ -115,10 +111,6 @@ class TestParallelScheduler:
                 "create_worktree",
                 side_effect=[test_wt, impl_wt],
             ) as create_wt,
-            mock.patch.object(
-                build_mod,
-                "remove_worktree",
-            ) as remove_wt,
         ):
             # Verify the parallel scheduler makes 2 create_worktree
             # calls (1 for test, 1 for implement).
@@ -154,8 +146,8 @@ class TestConflictPolicy:
         self, tmp_path, monkeypatch
     ) -> None:
         """``OverlapError`` → fallback to sequential + metric emitted."""
-        from core.pipeline.stages import build as build_mod
         from core.pipeline.agents import base as agents_base
+        from core.pipeline.stages import build as build_mod
 
         monkeypatch.setattr(build_mod, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
@@ -192,8 +184,8 @@ class TestConflictPolicy:
         self, tmp_path, monkeypatch
     ) -> None:
         """Successful merge → BUILD continues, NO fallback metric."""
-        from core.pipeline.stages import build as build_mod
         from core.pipeline.agents import base as agents_base
+        from core.pipeline.stages import build as build_mod
 
         monkeypatch.setattr(build_mod, "PROJECT_ROOT", tmp_path)
         monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
@@ -205,7 +197,7 @@ class TestConflictPolicy:
             merge_wt.return_value = tmp_path  # successful merge
             from core.pipeline.stages.build import _conflict_policy
 
-            result = _conflict_policy(
+            _conflict_policy(
                 issue={"number": 1, "title": "Test"},
                 issue_num=1,
                 test_wt=tmp_path / "wt-test",

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from unittest import mock
 
 
@@ -72,12 +71,8 @@ class TestMergeWorktrees:
         impl_wt.mkdir()
 
         # git diff --name-only: empty output (no overlap)
-        with mock.patch.object(
-            agents_base, "_run_git"
-        ) as run_git:
-            run_git.return_value = mock.Mock(
-                returncode=0, stdout=b"", stderr=b""
-            )
+        with mock.patch.object(agents_base, "_run_git") as run_git:
+            run_git.return_value = mock.Mock(returncode=0, stdout=b"", stderr=b"")
             from core.pipeline.agents.base import merge_worktrees
 
             # Should not raise.
@@ -120,9 +115,7 @@ class TestMergeWorktrees:
             assert result is not None
 
         # At least one merge was invoked with -X ours (TEST wins).
-        ours_calls = [
-            argv for argv in call_log if "-X" in argv and "ours" in argv
-        ]
+        ours_calls = [argv for argv in call_log if "-X" in argv and "ours" in argv]
         assert ours_calls, f"Expected `git merge -X ours` for tests/; got {call_log}"
 
     def test_src_conflict_implement_wins(self, tmp_path, monkeypatch) -> None:
@@ -155,9 +148,7 @@ class TestMergeWorktrees:
             assert result is not None
 
         # At least one merge was invoked with -X theirs (IMPLEMENT wins).
-        theirs_calls = [
-            argv for argv in call_log if "-X" in argv and "theirs" in argv
-        ]
+        theirs_calls = [argv for argv in call_log if "-X" in argv and "theirs" in argv]
         assert theirs_calls, f"Expected `git merge -X theirs` for src/; got {call_log}"
 
     def test_offdomain_conflict_raises_overlap_error(
