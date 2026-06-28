@@ -78,6 +78,7 @@ def run_design_stage(issue: dict) -> bool:
     session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
     # assemble_stage_prompt lives in core.pipeline.prompts.
     from core.pipeline.agents.pi import invoke_agent
+    from core.pipeline.artifacts_ops import write_design_artifacts
     from core.pipeline.prompts import assemble_stage_prompt
 
     prompt = assemble_stage_prompt(issue, "design.md")
@@ -95,6 +96,12 @@ def run_design_stage(issue: dict) -> bool:
                 )
             else:
                 print(f"[ralph] Design spec written to {design_file}")
+                # R1 artifact handoff: write structured inputs for IMPLEMENT.
+                write_design_artifacts(issue_num, content)
+                print(
+                    f"[ralph] DESIGN artifacts written to "
+                    f".ralph/issues/{issue_num}/artifacts/"
+                )
 
     log_metrics("stage_complete", issue=str(issue_num), stage="design")
     return success

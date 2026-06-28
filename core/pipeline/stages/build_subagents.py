@@ -21,6 +21,7 @@ for p in (str(_PROJECT_ROOT), str(_CORE_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+from core.pipeline.agents.artifacts import write_qa_tests  # noqa: E402
 from core.pipeline.agents.base import create_worktree, remove_worktree  # noqa: E402
 from core.pipeline.agents.pi import invoke_agent  # noqa: E402
 from core.pipeline.github.comments import gh_comment  # noqa: E402
@@ -68,6 +69,8 @@ def _run_test_subagent(issue: dict) -> bool:
         after_tests = _snapshot_tests_dir()
         new_tests = _detect_new_tests(before_tests, after_tests)
         _save_test_tracking(issue_num, new_tests)
+        # R1: keep the artifact directory in sync with the QA-written tests.
+        write_qa_tests(issue_num, new_tests)
         if new_tests:
             print(f"  [ralph] TEST stage created/modified tests: {new_tests}")
             gh_comment(

@@ -741,10 +741,6 @@ def main() -> int:
     return validate(args.tier, pytest_paths=args.pytest_paths)
 
 
-if __name__ == "__main__":
-    sys.exit(main())
-
-
 # ─────────────────────────────────────────────────────────
 # C3.1 — Quarantine schema (spec §10.3 C3)
 # ─────────────────────────────────────────────────────────
@@ -1188,3 +1184,7 @@ def validate_with_retry(pytest_paths: list[str] | None = None) -> int:
         return validate(tier="targeted", pytest_paths=pytest_paths)
     finally:
         RETRY_MODE = saved
+
+
+if __name__ == "__main__":
+    sys.exit(main())
