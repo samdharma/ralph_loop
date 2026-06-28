@@ -37,9 +37,9 @@ def run_pipeline(
 ) -> bool:
     """
     Phase 3: 3-stage pipeline with sub-agents.
-    DESIGN saves session for Mode B context inheritance.
-    BUILD spawns TEST (Mode A) + IMPLEMENT (Mode B --continue) sub-agents.
-    VERIFY runs as Mode A isolated sub-agent.
+    DESIGN writes structured artifacts for the IMPLEMENT stage.
+    BUILD spawns TEST (Mode A isolated) + IMPLEMENT (Mode B artifact-based)
+    sub-agents. VERIFY runs as a Mode A isolated sub-agent.
 
     Args:
         issue: The GitHub issue dict.

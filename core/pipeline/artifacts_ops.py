@@ -110,16 +110,11 @@ def _archived_issue_dir(issue_num: int) -> Path:
 
 
 def _cleanup_issue_artifacts(issue_num: int):
-    """Remove session and per-issue test-tracking files after pipeline SUCCEEDS.
+    """Remove per-issue test-tracking files after pipeline SUCCEEDS.
 
     On failure, artifacts are MOVED to .ralph/blocked/issue-N/ instead of
     being deleted, so a human can inspect the evidence.
     """
-    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
-    if session_file.exists():
-        session_file.unlink()
-        print(f"[ralph] Cleaned up session: {session_file.name}")
-
     tracking_file = _test_tracking_file(issue_num)
     if tracking_file.exists():
         tracking_file.unlink()
@@ -127,15 +122,9 @@ def _cleanup_issue_artifacts(issue_num: int):
 
 
 def _archive_issue_artifacts(issue_num: int):
-    """Move session and test-tracking files to .ralph/blocked/ for inspection."""
+    """Move test-tracking files to .ralph/blocked/ for inspection."""
     archive_dir = _archived_issue_dir(issue_num)
     archive_dir.mkdir(parents=True, exist_ok=True)
-
-    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
-    if session_file.exists():
-        dest = archive_dir / session_file.name
-        session_file.rename(dest)
-        print(f"[ralph] Archived session: {session_file.name} → blocked/")
 
     tracking_file = _test_tracking_file(issue_num)
     if tracking_file.exists():

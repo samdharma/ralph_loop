@@ -376,14 +376,11 @@ class TestEnrichedFailureComments:
 class TestInvokeAgentNoContinue:
     """A3.3: invoke_agent never passes --continue or --session (artifact-based handoff).
 
-    The current v3 implementation adds --continue when callers pass
-    continue_session=True. After A3.3, that flag is ignored — neither
-    --continue nor --session ever appear in the command line.
+    The ``session_file`` and ``continue_session`` parameters were removed;
+    neither ``--continue`` nor ``--session`` ever appear in the command line.
     """
 
-    def _capture_invocation(
-        self, monkeypatch, agent_bin: str, **invoke_kwargs
-    ) -> list[str]:
+    def _capture_invocation(self, monkeypatch, agent_bin: str) -> list[str]:
         """Patch subprocess and capture the assembled command."""
         from core.pipeline.agents import pi as pi_mod
 
@@ -399,32 +396,23 @@ class TestInvokeAgentNoContinue:
 
         monkeypatch.setattr(pi_mod, "_resolve_agent_binary", lambda: agent_bin)
         monkeypatch.setattr(pi_mod, "_run_agent", fake_run)
-        engine.invoke_agent("do something", 1, **invoke_kwargs)
+        engine.invoke_agent("do something", 1)
         return captured.get("cmd", [])
 
     def test_pi_invocation_has_no_continue_flag(self, monkeypatch) -> None:
-        """invoke_agent with binary='pi' does not include --continue (even when continue_session=True)."""
-        captured_cmd = self._capture_invocation(
-            monkeypatch, agent_bin="pi", continue_session=True
-        )
+        """invoke_agent with binary='pi' does not include --continue."""
+        captured_cmd = self._capture_invocation(monkeypatch, agent_bin="pi")
         assert "--continue" not in captured_cmd
 
     def test_kimi_invocation_has_no_continue_flag(self, monkeypatch) -> None:
         """invoke_agent with binary='kimi' does not include --continue."""
-        captured_cmd = self._capture_invocation(
-            monkeypatch, agent_bin="kimi", continue_session=True
-        )
+        captured_cmd = self._capture_invocation(monkeypatch, agent_bin="kimi")
         assert "--continue" not in captured_cmd
 
     def test_no_session_flag_passed(self, monkeypatch) -> None:
-        """Neither pi nor kimi invocation passes --session <path> (even when session_file is provided)."""
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(suffix=".session") as tf:
-            captured_cmd = self._capture_invocation(
-                monkeypatch, agent_bin="pi", session_file=Path(tf.name)
-            )
-            assert "--session" not in captured_cmd
+        """Neither pi nor kimi invocation passes --session."""
+        captured_cmd = self._capture_invocation(monkeypatch, agent_bin="pi")
+        assert "--session" not in captured_cmd
 
     def test_pi_and_kimi_code_paths_are_identical(self, monkeypatch) -> None:
         """Per spec §10.1 A3, kimi and pi use the same invocation path (no kimi-specific workaround)."""
@@ -446,13 +434,13 @@ class TestInvokeAgentNoContinue:
         # Capture pi invocation
         monkeypatch.setattr(pi_mod, "_resolve_agent_binary", lambda: "pi")
         monkeypatch.setattr(pi_mod, "_run_agent", make_fake_run("pi"))
-        engine.invoke_agent("do something", 1, continue_session=True)
+        engine.invoke_agent("do something", 1)
         pi_cmd = captured["pi"]
 
         # Capture kimi invocation
         monkeypatch.setattr(pi_mod, "_resolve_agent_binary", lambda: "kimi")
         monkeypatch.setattr(pi_mod, "_run_agent", make_fake_run("kimi"))
-        engine.invoke_agent("do something", 1, continue_session=True)
+        engine.invoke_agent("do something", 1)
         kimi_cmd = captured["kimi"]
 
         # Both commands end with the prompt
@@ -1239,9 +1227,7 @@ class TestAgentReinvocation:
             ]
         )
 
-        def fake_invoke_agent(
-            prompt, issue_num, session_file=None, continue_session=False
-        ):
+        def fake_invoke_agent(prompt, issue_num):
             result = next(responses)
             return (result.returncode == 0, result.stdout.decode())
 
@@ -1272,9 +1258,7 @@ class TestAgentReinvocation:
 
         captured_prompts: list[str] = []
 
-        def fake_invoke_agent(
-            prompt, issue_num, session_file=None, continue_session=False
-        ):
+        def fake_invoke_agent(prompt, issue_num):
             captured_prompts.append(prompt)
             if len(captured_prompts) == 1:
                 return (False, "previous failure output line 1\nline 2")

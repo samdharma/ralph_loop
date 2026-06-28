@@ -18,7 +18,6 @@ if str(_PROJECT_ROOT) not in sys.path:
 # ``core.pipeline.*`` modules.
 from core.pipeline.agents.pi import (  # noqa: E402,F401
     _PI_FLAGS,
-    _get_kimi_session_id,
     _parse_pi_valid_flags,
     _resolve_agent_binary,
     invoke_agent,

@@ -61,9 +61,8 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
       No codebase context, no reference docs. Fresh pi --print session.
       Used for TEST and VERIFY sub-agents — genuine independent perspective.
 
-    Mode B (Context inherit): issue body + reference docs + stage persona + recent comments.
-      Session context is inherited via pi --continue.
-      Design spec is already in the session — no need to re-inject.
+    Mode B (Artifact-based): issue body + DESIGN artifacts + stage persona + recent comments.
+      Context is carried by the artifact directory, not by a continued session.
       Used for IMPLEMENT sub-agent — builds on DESIGN's codebase knowledge.
     """
     base = ""
@@ -82,7 +81,7 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
     section_label = (
         "Sub-Agent Instructions"
         if mode == "A"
-        else "Sub-Agent Instructions (Mode B — continuing DESIGN session)"
+        else "Sub-Agent Instructions (Mode B — continuing from DESIGN artifacts)"
     )
     prompt = (
         f"{base}\n\n"
@@ -184,7 +183,7 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
     if mode == "B":
         prompt += (
             "\n\n---\n\n"
-            "**CONTEXT NOTE:** You are a Mode B sub-agent continuing from the DESIGN session. "
+            "**CONTEXT NOTE:** You are a Mode B sub-agent continuing from the DESIGN artifacts. "
             "You inherit full knowledge of the codebase, design decisions, and the issue. "
             "Test files were written by an independent QA sub-agent (Mode A) who never saw the code. "
             "Find the test files in tests/ and implement minimal code to make them pass. "

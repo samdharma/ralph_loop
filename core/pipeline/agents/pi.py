@@ -18,7 +18,6 @@ now, with only the non-interactive flag differing
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import sys
@@ -182,48 +181,6 @@ def _resolve_agent_binary() -> str:
     return ""
 
 
-def _get_kimi_session_id(project_root: Path) -> Optional[str]:
-    """Find the most recent Kimi session ID for ``project_root``.
-
-    Kimi stores a session index at
-    ``<kimi-home>/session_index.jsonl``. Each line maps a workDir
-    to a sessionId. We look for the latest entry whose workDir
-    matches the project root.
-    """
-    try:
-        result = subprocess.run(
-            ["which", "kimi"], capture_output=True, text=True, check=False
-        )
-        if result.returncode != 0:
-            return None
-
-        # Derive Kimi home from the binary location, e.g.
-        # ``~/.kimi-code/bin/kimi``.
-        kimi_bin = Path(result.stdout.strip())
-        kimi_home = kimi_bin.parent.parent
-        index_file = kimi_home / "session_index.jsonl"
-        if not index_file.exists():
-            return None
-
-        target = project_root.resolve()
-        session_id = None
-        with open(index_file, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    entry = json.loads(line)
-                    entry_workdir = entry.get("workDir")
-                    if entry_workdir and Path(entry_workdir).resolve() == target:
-                        session_id = entry.get("sessionId")
-                except (json.JSONDecodeError, OSError):
-                    continue
-        return session_id
-    except Exception:
-        return None
-
-
 # ─────────────────────────────────────────────────────────
 # Agent invocation
 # ─────────────────────────────────────────────────────────
@@ -232,27 +189,18 @@ def _get_kimi_session_id(project_root: Path) -> Optional[str]:
 def invoke_agent(
     prompt: str,
     issue_num: int,
-    session_file: Optional[Path] = None,
-    continue_session: bool = False,
 ) -> bool:
     """Invoke the AI agent (pi or kimi) with the assembled prompt.
 
     Per spec §10.1 A3 (R1) and plan §3 R-1: ``--continue`` and
-    ``--session`` are NO LONGER used. The ``session_file`` and
-    ``continue_session`` parameters are kept as no-ops for API
-    compatibility with existing callers; both pi and kimi use the
-    same invocation path now. The IMPLEMENT sub-agent reads its
-    inputs from the artifact directory
-    (``.ralph/issues/<N>/artifacts/``) instead of inheriting
-    session context.
+    ``--session`` are NOT used. Both pi and kimi use the same
+    invocation path now; the IMPLEMENT sub-agent reads its inputs
+    from the artifact directory (``.ralph/issues/<N>/artifacts/``)
+    instead of inheriting session context.
 
     Args:
         prompt: The assembled prompt text.
         issue_num: GitHub issue number (for logging).
-        session_file: Deprecated. Ignored. (Was the path to a
-            session file for pi; a text file containing a Kimi
-            session UUID for kimi.)
-        continue_session: Deprecated. Ignored. (Was the Mode B flag.)
 
     Returns True if agent exits successfully.
     """
@@ -273,7 +221,6 @@ def invoke_agent(
         "agent_invoke",
         issue=str(issue_num),
         agent=agent_bin,
-        # No continue_session flag — always artifact-based per spec §10.1 A3.
     )
 
     try:
@@ -310,20 +257,6 @@ def invoke_agent(
         _check_interrupt()
 
         if result.returncode == 0:
-            # After a successful kimi invocation that should establish
-            # context (DESIGN), capture the session UUID so Mode B can
-            # resume it explicitly.
-            if agent_bin == "kimi" and session_file and not continue_session:
-                session_id = _get_kimi_session_id(PROJECT_ROOT)
-                if session_id:
-                    session_file.parent.mkdir(parents=True, exist_ok=True)
-                    session_file.write_text(session_id, encoding="utf-8")
-                    print(f"[ralph] Saved Kimi session {session_id} for #{issue_num}")
-                else:
-                    print(
-                        f"[ralph] WARNING: Could not determine Kimi session ID for #{issue_num}. "
-                        "Mode B continuation may fail."
-                    )
             return True
 
         # Non-zero exit: inspect output for provider-side failures.
@@ -461,8 +394,7 @@ class PiAgent(AgentBase):
     name = "pi"
 
     def invoke(self, *args, **kwargs):
-        """Delegate to :func:`invoke_agent` with ``binary='pi'``."""
-        kwargs.setdefault("binary", "pi")
+        """Delegate to :func:`invoke_agent`."""
         return invoke_agent(*args, **kwargs)
 
 
@@ -470,7 +402,6 @@ __all__ = [
     "invoke_agent",
     "invoke_agent_with_output",
     "_resolve_agent_binary",
-    "_get_kimi_session_id",
     "_parse_pi_valid_flags",
     "validate_pi_flags",
     "_PI_FLAGS",

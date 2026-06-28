@@ -38,8 +38,7 @@ class KimiAgent(AgentBase):
     name = "kimi"
 
     def invoke(self, *args: Any, **kwargs: Any) -> Any:
-        """Delegate to :func:`invoke_agent` with ``binary='kimi'``."""
-        kwargs.setdefault("binary", "kimi")
+        """Delegate to :func:`invoke_agent`."""
         return invoke_agent(*args, **kwargs)
 
 

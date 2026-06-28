@@ -7,9 +7,8 @@ spec to ``docs/designs/<N>.md``.
 
 Per spec §10.1 A3 (R1), the artifact-based handoff means the
 DESIGN agent writes its outputs to the artifact directory
-(``.ralph/issues/<N>/artifacts/``). The session-file write that
-previously carried Mode-B context is now a no-op
-(``--continue`` / ``--session`` are no longer used).
+(``.ralph/issues/<N>/artifacts/``). No session file or ``--continue``
+flag is used.
 """
 
 from __future__ import annotations
