@@ -161,10 +161,10 @@ This is the FIRST logical feature of Phase A. Per spec §3.6 and plan §1.3 orde
     - [ ] `python -c "from core.migrate import migrate; print(migrate(dry_run=True))"` returns a JSON-serializable dict listing planned actions.
     - [ ] Running `migrate()` then `migrate()` a second time is idempotent (no diff in `.ralph/` except possibly archive dir).
     - [ ] `migrate()` raises `RuntimeError` when `.ralph/daemon.pid` is present.
-    - [ ] `bin/ralph migrate` dispatches to `core.migrate.migrate()` (via `python -m core.engine migrate` or direct call) and exits 0 on success.
+    - [ ] `bin/ralph migrate` dispatches directly to `core.migrate.migrate()` and exits 0 on success.
     - [ ] `pytest tests/unit/test_migrate.py` all pass.
   - **Verify:** `pytest tests/unit/test_migrate.py -v && bin/ralph migrate --dry-run` exits 0 with JSON on stdout
-  - **Files:** `core/migrate.py` (modify), `bin/ralph` (modify), `core/engine.py` (modify — add `migrate` subcommand dispatch)
+  - **Files:** `core/migrate.py` (modify), `bin/ralph` (modify)
   - **Dependencies:** A-009
   - **Spec citation:** §3.6, §5.2, §6.2, §11.2
 

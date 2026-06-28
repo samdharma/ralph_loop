@@ -136,7 +136,7 @@ def test_migrate_refuses_when_daemon_pid_exists(tmp_path: Path) -> None:
 
 
 def test_migrated_project_supports_daemon_dry_run(tmp_path: Path) -> None:
-    """After migrate, the project's CLI surface is intact: `python -m core.engine --help` exits 0."""
+    """After migrate, the migrate CLI surface is intact: `python -m core.migrate --dry-run` exits 0."""
     _setup_v3_project(tmp_path)
     cwd = os.getcwd()
     try:
