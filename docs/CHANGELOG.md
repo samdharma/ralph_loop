@@ -116,7 +116,7 @@ Ralph v3 baseline. See `docs/v3-redesign.md` and `docs/getting_started.md`.
 ## Unreleased
 
 Unreleased — Phase A work in progress.
-## 3.1.2 — 2026-06-27 (Phase C complete)
+## 3.1.2 — 2026-06-28 (Phase C complete)
 
 ### Refactor
 
