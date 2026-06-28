@@ -131,3 +131,93 @@ class TestParallelScheduler:
         assert create_wt.call_count == 2
         assert wt_test == test_wt
         assert wt_impl == impl_wt
+
+
+# ─────────────────────────────────────────────────────────
+# D1.3 — Conflict-resolution policy (spec §10.4 D1)
+# ─────────────────────────────────────────────────────────
+
+
+class TestConflictPolicy:
+    """D1.3: post-merge fallback policy.
+
+    Per plan §3 R-8: when ``merge_worktrees`` raises ``OverlapError``
+    OR the post-merge validation gate fails, the build stage must:
+
+      1. Emit a ``build.fallback_to_sequential`` metric (per plan §3
+         R-8 mitigation).
+      2. Fall back to sequential execution (re-run TEST + IMPLEMENT
+         in a single worktree).
+    """
+
+    def test_overlap_falls_back_to_sequential_and_emits_metric(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """``OverlapError`` → fallback to sequential + metric emitted."""
+        from core.pipeline.stages import build as build_mod
+        from core.pipeline.agents import base as agents_base
+
+        monkeypatch.setattr(build_mod, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(agents_base, "_preflight_check", lambda: None)
+
+        with (
+            mock.patch.object(agents_base, "merge_worktrees") as merge_wt,
+            mock.patch.object(build_mod, "log_metrics") as log,
+            mock.patch.object(build_mod, "_run_test_subagent", return_value=True),
+            mock.patch.object(build_mod, "_run_implement_subagent", return_value=True),
+        ):
+            from core.pipeline.agents.base import OverlapError
+            from core.pipeline.stages.build import _conflict_policy
+
+            merge_wt.side_effect = OverlapError("off-domain overlap in docs/")
+            result = _conflict_policy(
+                issue={"number": 1, "title": "Test"},
+                issue_num=1,
+                test_wt=tmp_path / "wt-test",
+                impl_wt=tmp_path / "wt-impl",
+                base="HEAD",
+            )
+
+        # Should fall back: return True (sequential succeeded).
+        assert result is True
+        # Should emit the fallback metric.
+        assert any(
+            call.kwargs.get("event") == "build_fallback_to_sequential"
+            or (call.args and call.args[0] == "build_fallback_to_sequential")
+            for call in log.call_args_list
+        ), f"Expected build_fallback_to_sequential metric; got {log.call_args_list}"
+
+    def test_successful_merge_continues_without_fallback(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Successful merge → BUILD continues, NO fallback metric."""
+        from core.pipeline.stages import build as build_mod
+        from core.pipeline.agents import base as agents_base
+
+        monkeypatch.setattr(build_mod, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
+
+        with (
+            mock.patch.object(agents_base, "merge_worktrees") as merge_wt,
+            mock.patch.object(build_mod, "log_metrics") as log,
+        ):
+            merge_wt.return_value = tmp_path  # successful merge
+            from core.pipeline.stages.build import _conflict_policy
+
+            result = _conflict_policy(
+                issue={"number": 1, "title": "Test"},
+                issue_num=1,
+                test_wt=tmp_path / "wt-test",
+                impl_wt=tmp_path / "wt-impl",
+                base="HEAD",
+            )
+
+        # No fallback metric emitted.
+        fallback = [
+            call
+            for call in log.call_args_list
+            if (call.args and "fallback" in str(call.args[0]))
+            or (call.kwargs.get("event") and "fallback" in str(call.kwargs["event"]))
+        ]
+        assert not fallback, f"Did not expect fallback metric; got {fallback}"
