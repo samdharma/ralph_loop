@@ -170,11 +170,11 @@ def _assemble_subagent_prompt(issue: dict, stage_prompt_file: str, mode: str) ->
             else:
                 prompt += f"### {ref}\n\n(File not found: {ref})\n\n"
 
-    # Mode A isolation notice
+    # Isolation notice for isolated sub-agents
     if mode == "A":
         prompt += (
             "\n\n---\n\n"
-            "**ISOLATION NOTICE:** You are a Mode A sub-agent in a fresh session. "
+            "**ISOLATION NOTICE:** You are an isolated sub-agent in a fresh session. "
             "You have NO prior context about the codebase. "
             "Do NOT attempt to read implementation code — work from the specification above ONLY."
         )

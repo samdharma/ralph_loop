@@ -269,7 +269,7 @@ Brief summary of the change.
 """
 
 VERIFY_MD = """\
-# VERIFY Stage — Independent Reviewer (Mode A — Isolated)
+# VERIFY Stage — Independent Reviewer (Isolated, Fresh Session)
 
 You are an **independent reviewer** in a fresh session. You did not write the code. Your context is: the issue, the design spec, and the git diff provided below.
 
@@ -313,7 +313,7 @@ Critically review the diff against the issue and spec, then report PASS/FAIL.
 """
 
 TEST_MD = """\
-# TEST Stage — QA Engineer (Mode A — Isolated)
+# TEST Stage — QA Engineer (Isolated, Fresh Session)
 
 You are a **QA engineer** in a fresh, isolated session. You have NO knowledge of the codebase and must NOT read implementation code.
 
