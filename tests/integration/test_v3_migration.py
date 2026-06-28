@@ -145,11 +145,13 @@ def test_migrated_project_supports_daemon_dry_run(tmp_path: Path) -> None:
 
         migrate.migrate(dry_run=False)
 
-        # Invoke the engine CLI as a dry-run smoke check.
+        # Invoke the migrate module directly as a dry-run smoke check.
+        # bin/ralph migrate dispatches to core/migrate.py; engine.py no longer
+        # has a special-case migrate branch.
         env = os.environ.copy()
         env["PYTHONPATH"] = str(Path(__file__).parent.parent.parent / "core")
         result = subprocess.run(
-            [sys.executable, "-m", "core.engine", "migrate", "--dry-run"],
+            [sys.executable, "-m", "core.migrate", "--dry-run"],
             cwd=Path(__file__).parent.parent.parent,
             env=env,
             capture_output=True,

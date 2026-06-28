@@ -1,12 +1,12 @@
 {
   "argv": [
     "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
-    "/Users/sam.dharma/Trading/ralph/core/engine.py",
-    "migrate",
+    "-m",
+    "core.migrate",
     "--help"
   ],
   "exit_code": 0,
-  "stdout_pattern": "usage: engine.py [-h] [--dry-run]\n\nMigrate v3 state files to v3.1 layout.\n\noptions:\n  -h, --help  show this help message and exit\n  --dry-run   List planned actions as JSON without modifying the files",
+  "stdout_pattern": "usage: python -m core.migrate [-h] [--dry-run]\n\nMigrate v3 state files to v3.1 layout.\n\noptions:\n  -h, --help  show this help message and exit\n  --dry-run   List planned actions as JSON without modify",
   "stderr_pattern": "",
-  "description": "engine migrate --help exits 0 with usage"
+  "description": "core.migrate --help exits 0 with usage"
 }
