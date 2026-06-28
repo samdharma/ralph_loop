@@ -23,10 +23,14 @@ for p in (str(_PROJECT_ROOT), str(_CORE_DIR)):
 
 from core.pipeline.agents.artifacts import write_qa_tests  # noqa: E402
 from core.pipeline.agents.base import create_worktree, remove_worktree  # noqa: E402
-from core.pipeline.agents.pi import invoke_agent  # noqa: E402
 from core.pipeline.github.comments import gh_comment  # noqa: E402
 from core.pipeline.prompts import _assemble_subagent_prompt  # noqa: E402
-from core.pipeline.retry import log_metrics  # noqa: E402
+from core.pipeline.retry import (  # noqa: E402
+    _invoke_with_retry,
+    _make_classifier,
+    load_retry_config,
+    log_metrics,
+)
 from core.pipeline.shell import PROJECT_ROOT  # noqa: E402
 from core.pipeline.test_tracking import (  # noqa: E402
     _detect_new_tests,
@@ -47,6 +51,12 @@ def _run_test_subagent(issue: dict) -> bool:
     Per spec §10.2 B3, the agent runs inside a git worktree so it
     cannot corrupt the parent repo. ``create_worktree`` runs first;
     ``remove_worktree`` runs in a finally block to survive failures.
+
+    The agent is invoked through the retry-policy wrapper. Non-zero
+    exits with timeout/interrupted/killed/timed-out signals are retried
+    under the L1 budget; other non-zero exits are retried under the L2
+    budget (default 2 attempts). On success, QA-written tests are saved,
+    synced to the artifact directory, and chmod'd to 0o444.
     """
     issue_num = issue["number"]
 
@@ -65,7 +75,9 @@ def _run_test_subagent(issue: dict) -> bool:
     try:
         before_tests = _snapshot_tests_dir()
         prompt = _assemble_subagent_prompt(issue, "test.md", mode="A")
-        success = invoke_agent(prompt, issue_num)
+        success, _ = _invoke_with_retry(
+            prompt, issue_num, _make_classifier("test"), load_retry_config()
+        )
         after_tests = _snapshot_tests_dir()
         new_tests = _detect_new_tests(before_tests, after_tests)
         _save_test_tracking(issue_num, new_tests)
@@ -118,9 +130,14 @@ def _run_test_subagent(issue: dict) -> bool:
 
 def _run_implement_subagent(issue: dict) -> bool:
     """
-    IMPLEMENT sub-agent — Mode B (true context inheritance via --continue).
-    Continues the DESIGN session, inheriting full codebase knowledge.
-    Finds test files on disk and implements code to make them pass.
+    IMPLEMENT sub-agent — Mode B (inherits DESIGN context via artifacts).
+    Reads the DESIGN artifacts and the QA-written test list, then
+    implements code to make those tests pass.
+
+    The agent is invoked through the retry-policy wrapper. Non-zero
+    exits with timeout/interrupted/killed/timed-out signals are retried
+    under the L1 budget; other non-zero exits are retried under the L2
+    budget (default 2 attempts).
     """
     issue_num = issue["number"]
     print(
@@ -129,7 +146,6 @@ def _run_implement_subagent(issue: dict) -> bool:
     gh_comment(issue_num, "🛠️ IMPLEMENT sub-agent started (continuing DESIGN context).")
     log_metrics("subagent_start", issue=str(issue_num), subagent="implement", mode="B")
 
-    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
     prompt = _assemble_subagent_prompt(issue, "implement.md", mode="B")
 
     # Inject the exact list of QA-written test files so the agent knows
@@ -149,8 +165,8 @@ def _run_implement_subagent(issue: dict) -> bool:
             f"  ralph validate --tier=targeted --pytest-paths {' '.join(qa_tests)}\n"
         )
 
-    success = invoke_agent(
-        prompt, issue_num, session_file=session_file, continue_session=True
+    success, _ = _invoke_with_retry(
+        prompt, issue_num, _make_classifier("implement"), load_retry_config()
     )
 
     if success:

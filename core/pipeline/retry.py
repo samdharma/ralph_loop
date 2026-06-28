@@ -29,7 +29,9 @@ import tomllib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
+
+from core.pipeline.providers import _classify_provider_error
 
 # Bootstrap sys.path.
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -129,6 +131,58 @@ def _max_attempts_for_action(action: str, budget: RetryBudget) -> int:
     return 1
 
 
+# Signals that indicate a transient (infrastructure) failure rather than a
+# code/test failure. Kept conservative to avoid masking real bugs.
+_TRANSIENT_FAILURE_SIGNALS = (
+    "timeout",
+    "interrupted",
+    "killed",
+    "timed-out",
+)
+
+
+def _classify_subagent_result(stdout: str, returncode: int, stage: str) -> str:
+    """Map a subagent invocation result to a retry-policy action.
+
+    The classifier is intentionally conservative:
+      - ``returncode == 0`` with no provider-failure signal → ``accept``.
+      - DESIGN stage non-zero → ``block`` (DESIGN is fail-fast).
+      - Non-zero output containing timeout/interrupted/killed/timed-out
+        signals → ``retry_transient``.
+      - Other non-zero BUILD/TEST/IMPLEMENT results → ``retry_l2``.
+      - Any provider-failure signal (rate-limit, quota, billing) → ``block``
+        so it bubbles to the engine's provider-error handler.
+
+    Args:
+        stdout: captured stdout + stderr from the agent invocation.
+        returncode: process exit code (0 for success).
+        stage: pipeline stage identifier (``design``, ``test``,
+            ``implement``, etc.).
+
+    Returns:
+        One of ``accept | retry_l2 | retry_transient | block``.
+    """
+    if _classify_provider_error(stdout):
+        return "block"
+    if returncode == 0:
+        return "accept"
+    if stage == "design":
+        return "block"
+    lowered = stdout.lower()
+    if any(signal in lowered for signal in _TRANSIENT_FAILURE_SIGNALS):
+        return "retry_transient"
+    return "retry_l2"
+
+
+def _make_classifier(stage: str) -> Callable[[str, int], str]:
+    """Return a classifier bound to ``stage``."""
+
+    def classifier(stdout: str, returncode: int) -> str:
+        return _classify_subagent_result(stdout, returncode, stage)
+
+    return classifier
+
+
 def _invoke_with_retry(
     prompt: str,
     issue_num: int,
@@ -165,9 +219,15 @@ def _invoke_with_retry(
     for attempt in range(1, upper_bound + 1):
         try:
             ok, last_stdout = invoke_agent_with_output(current_prompt, issue_num)
-        except Exception:
+        except Exception as exc:
             # ProviderError propagates without retry (engine's provider
             # handler decides whether to fall back / pause / stop).
+            from core.pipeline.providers import ProviderError
+
+            if isinstance(exc, ProviderError):
+                raise
+            # Other unexpected errors should not be silently retried;
+            # surface them so the caller's logs capture the traceback.
             raise
         action = classify_fn(last_stdout, 0 if ok else 1)
         if action == "accept":
@@ -250,6 +310,8 @@ __all__ = [
     "load_retry_config",
     "_max_attempts_for_action",
     "_invoke_with_retry",
+    "_classify_subagent_result",
+    "_make_classifier",
     "log_metrics",
     "_emit_trajectory",
     "PROJECT_ROOT",

@@ -403,7 +403,30 @@ def invoke_agent_with_output(
         captured = ((result.stdout or b"") + (result.stderr or b"")).decode(
             "utf-8", errors="replace"
         )
+        if result.returncode != 0:
+            # Surface provider-side failures so the retry wrapper's caller
+            # (the engine's provider-error handler) can act on them.
+            from core.pipeline.providers import (
+                ProviderQuotaError,
+                ProviderRateLimitError,
+                _classify_provider_error,
+            )
+
+            kind = _classify_provider_error(captured)
+            if kind == "rate_limit":
+                raise ProviderRateLimitError(
+                    f"{agent_bin} rate limit for #{issue_num}: {captured[:500]}"
+                )
+            if kind == "quota":
+                raise ProviderQuotaError(
+                    f"{agent_bin} quota exhausted for #{issue_num}: {captured[:500]}"
+                )
         return result.returncode == 0, captured
+    except (
+        ProviderRateLimitError,
+        ProviderQuotaError,
+    ):
+        raise
     except Exception as e:
         return False, f"agent invocation error: {e}"
 

@@ -55,7 +55,9 @@ class TestRunTestSubagent:
 
         # Mock all side-effecting helpers + the agent invocation.
         with (
-            mock.patch.object(build_subagents, "invoke_agent", return_value=True),
+            mock.patch.object(
+                build_subagents, "_invoke_with_retry", return_value=(True, "")
+            ),
             mock.patch.object(build_subagents, "gh_comment"),
             mock.patch.object(build_subagents, "log_metrics"),
             mock.patch.object(build_subagents, "_snapshot_tests_dir"),
@@ -81,7 +83,9 @@ class TestRunTestSubagent:
         monkeypatch.setattr(build_subagents, "PROJECT_ROOT", tmp_path)
 
         with (
-            mock.patch.object(build_subagents, "invoke_agent", return_value=True),
+            mock.patch.object(
+                build_subagents, "_invoke_with_retry", return_value=(True, "")
+            ),
             mock.patch.object(build_subagents, "gh_comment"),
             mock.patch.object(build_subagents, "log_metrics"),
             mock.patch.object(build_subagents, "_snapshot_tests_dir"),
@@ -108,14 +112,16 @@ class TestRunTestSubagent:
 
         observed_modes: list[int] = []
 
-        def fake_invoke_agent(prompt, issue_num):
+        def fake_invoke_with_retry(prompt, issue_num, classifier, budget):
             # Snapshot the file mode WHILE the agent is running.
             observed_modes.append(qa_file.stat().st_mode & 0o777)
-            return True
+            return True, ""
 
         with (
             mock.patch.object(
-                build_subagents, "invoke_agent", side_effect=fake_invoke_agent
+                build_subagents,
+                "_invoke_with_retry",
+                side_effect=fake_invoke_with_retry,
             ),
             mock.patch.object(build_subagents, "gh_comment"),
             mock.patch.object(build_subagents, "log_metrics"),
@@ -1375,7 +1381,9 @@ class TestSubagentsUseWorktree:
                 build_subagents, "create_worktree", return_value=wt_path
             ) as create_wt,
             mock.patch.object(build_subagents, "remove_worktree") as remove_wt,
-            mock.patch.object(build_subagents, "invoke_agent", return_value=True),
+            mock.patch.object(
+                build_subagents, "_invoke_with_retry", return_value=(True, "")
+            ),
             mock.patch.object(build_subagents, "gh_comment"),
             mock.patch.object(build_subagents, "log_metrics"),
             mock.patch.object(
@@ -1405,7 +1413,9 @@ class TestSubagentsUseWorktree:
         with (
             mock.patch.object(build_subagents, "create_worktree", return_value=wt_path),
             mock.patch.object(build_subagents, "remove_worktree") as remove_wt,
-            mock.patch.object(build_subagents, "invoke_agent", return_value=False),
+            mock.patch.object(
+                build_subagents, "_invoke_with_retry", return_value=(False, "")
+            ),
             mock.patch.object(build_subagents, "gh_comment"),
             mock.patch.object(build_subagents, "log_metrics"),
             mock.patch.object(

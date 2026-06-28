@@ -47,8 +47,10 @@ def _design_spec_path(issue_num: int) -> Path:
 def run_design_stage(issue: dict) -> bool:
     """STAGE 1: Architect persona — reads issue + codebase, writes design spec.
 
-    The session-file write for Mode B is preserved as a no-op for
-    API compatibility with the (removed) ``--continue`` mechanism.
+    The agent is invoked through the retry-policy wrapper. DESIGN is
+    fail-fast: non-zero exits are classified as ``block`` and are not
+    retried. Successful runs write structured DESIGN artifacts for the
+    IMPLEMENT stage via the artifact directory (per spec §10.1 A3).
     """
     issue_num = issue["number"]
     print(f"\n[ralph] STAGE 1/3: DESIGN for #{issue_num}")
@@ -75,14 +77,19 @@ def run_design_stage(issue: dict) -> bool:
         )
         print(f"[ralph] Created placeholder {design_file}")
 
-    session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
     # assemble_stage_prompt lives in core.pipeline.prompts.
-    from core.pipeline.agents.pi import invoke_agent
     from core.pipeline.artifacts_ops import write_design_artifacts
     from core.pipeline.prompts import assemble_stage_prompt
+    from core.pipeline.retry import (
+        _invoke_with_retry,
+        _make_classifier,
+        load_retry_config,
+    )
 
     prompt = assemble_stage_prompt(issue, "design.md")
-    success = invoke_agent(prompt, issue_num, session_file=session_file)
+    success, _ = _invoke_with_retry(
+        prompt, issue_num, _make_classifier("design"), load_retry_config()
+    )
 
     if success:
         if not design_file.exists():
