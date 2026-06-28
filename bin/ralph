@@ -34,7 +34,7 @@ export RALPH_CORE_DIR="${CORE_DIR}"
 # ─────────────────────────────────────────────────────────
 
 cmd_version() {
-    echo "ralph v3.1.2"
+    echo "ralph v3.1.3"
 }
 
 cmd_help() {
