@@ -189,6 +189,7 @@ def _invoke_with_retry(
     classify_fn,
     budget: RetryBudget,
     stage: Optional[str] = None,
+    worktree_path: Optional[Path] = None,
 ) -> tuple[bool, str]:
     """Invoke the agent with retry-policy enforcement.
 
@@ -207,6 +208,8 @@ def _invoke_with_retry(
         budget: ``RetryBudget`` from :func:`load_retry_config`.
         stage: pipeline stage identifier (``design``, ``test``,
             ``implement``, etc.) for metrics.
+        worktree_path: Optional git-worktree path forwarded to the
+            agent invocation so the subprocess runs inside the worktree.
 
     Returns:
         ``(success, last_stdout)`` — success is True iff the final
@@ -231,7 +234,9 @@ def _invoke_with_retry(
             attempt=attempt,
         )
         try:
-            ok, last_stdout = invoke_agent_with_output(current_prompt, issue_num)
+            ok, last_stdout = invoke_agent_with_output(
+                current_prompt, issue_num, worktree_path=worktree_path
+            )
         except Exception as exc:
             # ProviderError propagates without retry (engine's provider
             # handler decides whether to fall back / pause / stop).

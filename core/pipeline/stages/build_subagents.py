@@ -97,6 +97,7 @@ def _run_test_subagent(issue: dict) -> bool:
             _make_classifier("test"),
             load_retry_config(),
             stage="test",
+            worktree_path=wt_path,
         )
         after_tests = _snapshot_tests_dir()
         new_tests = _detect_new_tests(before_tests, after_tests)

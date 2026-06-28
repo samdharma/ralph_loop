@@ -77,3 +77,35 @@ class TestInvokeAgentWithOutput:
         captured = capsys.readouterr()
         assert "stdout line" in captured.out
         assert "stderr line" in captured.err
+
+    def test_worktree_path_is_passed_to_run_agent(self, monkeypatch, tmp_path) -> None:
+        """When a worktree path is given, _run_agent receives cwd=worktree_path."""
+        from core.pipeline.agents import pi as pi_mod
+
+        monkeypatch.setattr(pi_mod, "_resolve_agent_binary", lambda: "pi")
+        run_agent_spy = mock.Mock(
+            return_value=mock.Mock(returncode=0, stdout=b"", stderr=b"")
+        )
+        monkeypatch.setattr(pi_mod, "_run_agent", run_agent_spy)
+
+        wt_path = tmp_path / "worktree"
+        pi_mod.invoke_agent_with_output("prompt", 1, worktree_path=wt_path)
+
+        assert run_agent_spy.call_count == 1
+        _, kwargs = run_agent_spy.call_args
+        assert kwargs.get("worktree_path") == wt_path
+
+    def test_default_cwd_is_project_root(self, monkeypatch) -> None:
+        """Without a worktree path, _run_agent uses cwd=PROJECT_ROOT."""
+        from core.pipeline.agents import pi as pi_mod
+
+        monkeypatch.setattr(pi_mod, "_resolve_agent_binary", lambda: "pi")
+        run_agent_spy = mock.Mock(
+            return_value=mock.Mock(returncode=0, stdout=b"", stderr=b"")
+        )
+        monkeypatch.setattr(pi_mod, "_run_agent", run_agent_spy)
+
+        pi_mod.invoke_agent_with_output("prompt", 1)
+
+        _, kwargs = run_agent_spy.call_args
+        assert kwargs.get("worktree_path") is None

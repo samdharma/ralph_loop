@@ -1153,8 +1153,12 @@ class TestRunPytestRoutesThroughInvocation:
     def _fake_invocation(self, returncode: int = 0):
         """Return a fake run_pytest_invocation that records calls."""
 
-        def fake(cmd: list[str], env: dict[str, str] | None = None) -> dict:
-            fake.calls.append((cmd, env))  # type: ignore[attr-defined]
+        def fake(
+            cmd: list[str],
+            env: dict[str, str] | None = None,
+            skip_quarantine: bool = False,
+        ) -> dict:
+            fake.calls.append((cmd, env, skip_quarantine))  # type: ignore[attr-defined]
             return {
                 "exit_code": returncode,
                 "classification": "success" if returncode == 0 else "test_failure",
@@ -1183,10 +1187,11 @@ class TestRunPytestRoutesThroughInvocation:
 
         assert exit_code == 0
         assert len(fake.calls) == 1  # type: ignore[attr-defined]
-        cmd, env = fake.calls[0]  # type: ignore[attr-defined]
+        cmd, env, skip_quarantine = fake.calls[0]  # type: ignore[attr-defined]
         assert cmd[0] == validate.PYTHON_CMD
         assert cmd[1:3] == ["-m", "pytest"]
         assert env == {"RALPH_NO_RECURSIVE_PYTEST": "1"}
+        assert skip_quarantine is False
 
     def test_critical_path_uses_run_pytest_invocation(self, monkeypatch) -> None:
         """Critical-path runs call run_pytest_invocation before the main tier."""
@@ -1206,13 +1211,15 @@ class TestRunPytestRoutesThroughInvocation:
 
         assert exit_code == 0
         assert len(fake.calls) == 2  # type: ignore[attr-defined]
-        crit_cmd, crit_env = fake.calls[0]  # type: ignore[attr-defined]
+        crit_cmd, crit_env, crit_skip = fake.calls[0]  # type: ignore[attr-defined]
         assert "tests/unit/core/test_smoke.py::test_x" in crit_cmd
         assert "-q" in crit_cmd
         assert crit_env == {"RALPH_NO_RECURSIVE_PYTEST": "1"}
-        main_cmd, main_env = fake.calls[1]  # type: ignore[attr-defined]
+        assert crit_skip is True
+        main_cmd, main_env, main_skip = fake.calls[1]  # type: ignore[attr-defined]
         assert "tests/unit/test_x.py" in main_cmd
         assert main_env == {"RALPH_NO_RECURSIVE_PYTEST": "1"}
+        assert main_skip is False
 
     def test_critical_path_failure_blocks_before_main_tier(self, monkeypatch) -> None:
         """A failing critical-path run returns its exit code and skips the main tier."""
@@ -1267,3 +1274,86 @@ class TestRunPytestRoutesThroughInvocation:
         cmd = recorded_cmds[0]
         assert "--deselect" in cmd
         assert "tests/unit/x.py::test_y" in cmd
+
+    def test_critical_path_invocation_skips_quarantine(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """Critical-path runs bypass quarantine deselection."""
+        quarantine_path = tmp_path / "tests" / "quarantine.yaml"
+        quarantine_path.parent.mkdir(parents=True, exist_ok=True)
+        quarantine_path.write_text(
+            "- test_id: tests/unit/core/test_smoke.py::test_x\n"
+            '  added_at: "2026-06-27T12:00:00Z"\n'
+            "  reason: flaky\n"
+            "  auto_added: true\n",
+            encoding="utf-8",
+        )
+        history_path = tmp_path / ".ralph" / "test-failure-history.jsonl"
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(validate, "QUARANTINE_FILE", quarantine_path)
+        monkeypatch.setattr(validate, "TEST_FAILURE_HISTORY_FILE", history_path)
+        monkeypatch.setattr(validate, "PYTEST_ADOPTS", [])
+        monkeypatch.setattr(
+            validate,
+            "get_critical_paths",
+            lambda: ["tests/unit/core/test_smoke.py::test_x"],
+        )
+
+        recorded_cmds: list[list[str]] = []
+
+        def fake_run(cmd, check=False, env=None, timeout=None):
+            recorded_cmds.append(cmd)
+            return mock.MagicMock(returncode=0, stdout="1 passed", stderr="")
+
+        monkeypatch.setattr(validate, "run", fake_run)
+
+        exit_code = validate.run_pytest(
+            "targeted", pytest_paths=["tests/unit/test_x.py"]
+        )
+
+        assert exit_code == 0
+        # Two invocations: critical path first, then the explicit pytest_paths.
+        assert len(recorded_cmds) == 2
+        crit_cmd = recorded_cmds[0]
+        main_cmd = recorded_cmds[1]
+        assert "tests/unit/core/test_smoke.py::test_x" in crit_cmd
+        assert "--deselect" not in crit_cmd
+        # The non-critical invocation still applies quarantine.
+        assert "--deselect" in main_cmd
+
+    def test_run_pytest_invocation_skip_quarantine_parameter(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """run_pytest_invocation(skip_quarantine=True) omits quarantine deselection."""
+        quarantine_path = tmp_path / "tests" / "quarantine.yaml"
+        quarantine_path.parent.mkdir(parents=True, exist_ok=True)
+        quarantine_path.write_text(
+            "- test_id: tests/unit/x.py::test_y\n"
+            '  added_at: "2026-06-27T12:00:00Z"\n'
+            "  reason: flaky\n"
+            "  auto_added: false\n",
+            encoding="utf-8",
+        )
+        history_path = tmp_path / ".ralph" / "test-failure-history.jsonl"
+        history_path.parent.mkdir(parents=True, exist_ok=True)
+
+        monkeypatch.setattr(validate, "QUARANTINE_FILE", quarantine_path)
+        monkeypatch.setattr(validate, "TEST_FAILURE_HISTORY_FILE", history_path)
+
+        fake_run = mock.Mock(
+            return_value=mock.MagicMock(returncode=0, stdout="1 passed", stderr="")
+        )
+        monkeypatch.setattr(validate, "run", fake_run)
+
+        result = validate.run_pytest_invocation(
+            ["python", "-m", "pytest", "tests/unit/x.py"],
+            skip_quarantine=True,
+        )
+
+        assert result["exit_code"] == 0
+        # The underlying run() should have been called without --deselect appended.
+        call_args = fake_run.call_args
+        assert call_args is not None
+        cmd = call_args.args[0]
+        assert "--deselect" not in cmd

@@ -82,7 +82,7 @@ class TestVerifyStageAtNewPath:
         with (
             mock.patch.object(verify_mod, "create_worktree", return_value=wt_path),
             mock.patch.object(verify_mod, "remove_worktree") as remove_wt,
-            mock.patch.object(verify_mod, "invoke_agent", return_value=True),
+            mock.patch.object(verify_mod, "invoke_agent", return_value=True) as invoke,
             mock.patch.object(verify_mod, "gh") as gh,
             mock.patch.object(verify_mod, "_has_commits", return_value=False),
         ):
@@ -98,3 +98,6 @@ class TestVerifyStageAtNewPath:
 
         assert result is True
         remove_wt.assert_called_once_with(wt_path)
+        invoke.assert_called_once()
+        _, kwargs = invoke.call_args
+        assert kwargs.get("worktree_path") == wt_path

@@ -62,7 +62,7 @@ class TestRunTestSubagentWorktreeHandling:
             mock.patch.object(subagents_mod, "remove_worktree") as remove_wt,
             mock.patch.object(
                 subagents_mod, "_invoke_with_retry", return_value=(False, None)
-            ),
+            ) as invoke_retry,
             mock.patch.object(subagents_mod, "_snapshot_tests_dir", return_value={}),
             mock.patch.object(subagents_mod, "_save_test_tracking"),
             mock.patch.object(subagents_mod, "write_qa_tests"),
@@ -74,3 +74,37 @@ class TestRunTestSubagentWorktreeHandling:
 
         assert result is False
         remove_wt.assert_called_once_with(wt_path)
+        invoke_retry.assert_called_once()
+        _, kwargs = invoke_retry.call_args
+        assert kwargs.get("worktree_path") == wt_path
+
+    def test_worktree_path_passed_to_agent_invocation(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """The created worktree path is forwarded to the agent invocation."""
+        from core.pipeline.agents import base as agents_base
+        from core.pipeline.stages import build_subagents as subagents_mod
+
+        monkeypatch.setattr(agents_base, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setattr(agents_base, "_preflight_check", lambda: None)
+
+        wt_path = tmp_path / ".ralph" / "worktrees" / "1"
+        wt_path.mkdir(parents=True, exist_ok=True)
+
+        with (
+            mock.patch.object(subagents_mod, "create_worktree", return_value=wt_path),
+            mock.patch.object(subagents_mod, "remove_worktree"),
+            mock.patch.object(
+                subagents_mod, "_invoke_with_retry", return_value=(True, "")
+            ) as invoke_retry,
+            mock.patch.object(subagents_mod, "_snapshot_tests_dir", return_value={}),
+            mock.patch.object(subagents_mod, "_save_test_tracking"),
+            mock.patch.object(subagents_mod, "write_qa_tests"),
+            mock.patch.object(subagents_mod, "gh_comment"),
+        ):
+            from core.pipeline.stages.build_subagents import _run_test_subagent
+
+            _run_test_subagent({"number": 1, "title": "Test"})
+
+        _, kwargs = invoke_retry.call_args
+        assert kwargs.get("worktree_path") == wt_path

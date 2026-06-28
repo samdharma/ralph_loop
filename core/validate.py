@@ -353,7 +353,11 @@ def _process_pytest_result_for_quarantine(exit_code: int, stdout: str) -> None:
                 )
 
 
-def run_pytest_invocation(cmd: list[str], env: dict[str, str] | None = None) -> dict:
+def run_pytest_invocation(
+    cmd: list[str],
+    env: dict[str, str] | None = None,
+    skip_quarantine: bool = False,
+) -> dict:
     """Run a single pytest invocation. Returns a structured result dict.
 
     Per spec §10.1 A1 (A1.2 emitter), the result dict has keys:
@@ -363,11 +367,18 @@ def run_pytest_invocation(cmd: list[str], env: dict[str, str] | None = None) -> 
       - stdout_tail: str (last 50 lines of pytest stdout)
       - junitxml_path: str | None (path to JUnit XML if --junitxml was passed)
 
+    Args:
+        skip_quarantine: When True, do not append quarantine --deselect
+            entries. Used for critical-path runs so critical tests cannot
+            be silently skipped by auto-quarantine.
+
     Returns 124 on timeout (mimics `timeout` command convention) so the
     caller can distinguish a hung test from a genuine failure.
     """
-    # C3: deselect quarantined tests before running.
-    cmd = apply_quarantine_to_cmd(cmd)
+    # C3: deselect quarantined tests before running, unless this is a
+    # critical-path invocation where skipping must be surfaced as a failure.
+    if not skip_quarantine:
+        cmd = apply_quarantine_to_cmd(cmd)
     print(f"[ralph] pytest invocation: {' '.join(cmd)}")
     timeout = PYTEST_TIMEOUT if PYTEST_TIMEOUT > 0 else None
 
@@ -451,7 +462,9 @@ def run_pytest(tier: str, pytest_paths: list[str] | None = None) -> int:
             print(f"[ralph] Running {len(critical_paths)} critical-path test(s) first")
             crit_cmd = base + critical_paths + ["-q"]
             crit_result = run_pytest_invocation(
-                crit_cmd, env={"RALPH_NO_RECURSIVE_PYTEST": "1"}
+                crit_cmd,
+                env={"RALPH_NO_RECURSIVE_PYTEST": "1"},
+                skip_quarantine=True,
             )
             if crit_result["exit_code"] != 0:
                 print("[ralph] Critical-path test(s) failed; blocking BUILD.")

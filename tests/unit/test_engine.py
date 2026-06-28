@@ -112,7 +112,9 @@ class TestRunTestSubagent:
 
         observed_modes: list[int] = []
 
-        def fake_invoke_with_retry(prompt, issue_num, classifier, budget, stage=None):
+        def fake_invoke_with_retry(
+            prompt, issue_num, classifier, budget, stage=None, worktree_path=None
+        ):
             # Snapshot the file mode WHILE the agent is running.
             observed_modes.append(qa_file.stat().st_mode & 0o777)
             return True, ""
@@ -1227,7 +1229,7 @@ class TestAgentReinvocation:
             ]
         )
 
-        def fake_invoke_agent(prompt, issue_num):
+        def fake_invoke_agent(prompt, issue_num, worktree_path=None):
             result = next(responses)
             return (result.returncode == 0, result.stdout.decode())
 
@@ -1258,7 +1260,7 @@ class TestAgentReinvocation:
 
         captured_prompts: list[str] = []
 
-        def fake_invoke_agent(prompt, issue_num):
+        def fake_invoke_agent(prompt, issue_num, worktree_path=None):
             captured_prompts.append(prompt)
             if len(captured_prompts) == 1:
                 return (False, "previous failure output line 1\nline 2")

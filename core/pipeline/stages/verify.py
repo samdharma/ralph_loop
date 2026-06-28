@@ -102,7 +102,7 @@ def run_verify_stage(issue: dict) -> bool:
             if len(diff) > 8000:
                 prompt += "\n\n(…diff truncated — review key files from the repo)"
 
-        agent_ok = invoke_agent(prompt, issue_num)
+        agent_ok = invoke_agent(prompt, issue_num, worktree_path=wt_path)
         if agent_ok:
             gh_comment(issue_num, "✅ VERIFY review sub-agent completed.")
         else:

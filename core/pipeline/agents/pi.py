@@ -50,20 +50,26 @@ def _run_agent(
     check: bool = False,
     capture: bool = True,
     timeout: Optional[int] = None,
+    worktree_path: Optional[Path] = None,
 ) -> subprocess.CompletedProcess:
     """Run a shell command for the agent-invocation path.
 
     Local seam (no engine dependency) so tests can monkeypatch
     ``core.pipeline.agents.pi._run_agent`` directly without
     pulling engine into the patch graph.
+
+    When ``worktree_path`` is provided, the subprocess runs with that
+    path as its working directory so the agent operates inside the
+    isolated git worktree rather than the parent working copy.
     """
+    cwd = worktree_path if worktree_path is not None else PROJECT_ROOT
     return subprocess.run(  # noqa: S603
         cmd,
         capture_output=capture,
         text=False,
         check=check,
         timeout=timeout,
-        cwd=PROJECT_ROOT,
+        cwd=cwd,
     )
 
 
@@ -189,6 +195,7 @@ def _resolve_agent_binary() -> str:
 def invoke_agent(
     prompt: str,
     issue_num: int,
+    worktree_path: Optional[Path] = None,
 ) -> bool:
     """Invoke the AI agent (pi or kimi) with the assembled prompt.
 
@@ -201,6 +208,8 @@ def invoke_agent(
     Args:
         prompt: The assembled prompt text.
         issue_num: GitHub issue number (for logging).
+        worktree_path: Optional git-worktree path; if provided, the
+            agent subprocess runs inside the worktree.
 
     Returns True if agent exits successfully.
     """
@@ -242,7 +251,9 @@ def invoke_agent(
         # Capture output so we can detect provider-side failures, then
         # echo it to the terminal so the operator still sees the agent
         # conversation.
-        result = _run_agent(cmd, check=False, capture=True, timeout=None)
+        result = _run_agent(
+            cmd, check=False, capture=True, timeout=None, worktree_path=worktree_path
+        )
         # Lazy import — _check_interrupt lives in core.pipeline.recovery
         # (C1 step 3).
         from core.pipeline.recovery import _check_interrupt
@@ -300,6 +311,7 @@ def invoke_agent(
 def invoke_agent_with_output(
     prompt: str,
     issue_num: int,
+    worktree_path: Optional[Path] = None,
 ) -> tuple[bool, str]:
     """Invoke the agent and return ``(ok, captured_stdout)``.
 
@@ -311,6 +323,8 @@ def invoke_agent_with_output(
     Args:
         prompt: The assembled prompt text.
         issue_num: GitHub issue number (for logging).
+        worktree_path: Optional git-worktree path; if provided, the
+            agent subprocess runs inside the worktree.
 
     Returns:
         ``(ok, captured_stdout)``. ``ok`` is True iff the underlying
@@ -343,7 +357,9 @@ def invoke_agent_with_output(
         return False, ""
 
     try:
-        result = _run_agent(cmd, check=False, capture=True, timeout=None)
+        result = _run_agent(
+            cmd, check=False, capture=True, timeout=None, worktree_path=worktree_path
+        )
         stdout = (result.stdout or b"").decode("utf-8", errors="replace")
         stderr = (result.stderr or b"").decode("utf-8", errors="replace")
         # Echo captured streams to the terminal so operators can follow

@@ -106,3 +106,84 @@ class TestTransitionLabelRunIdRouting:
         assert log.exists()
         records = [json.loads(line) for line in log.read_text().splitlines()]
         assert any(r["action"] == "transition_label" for r in records)
+
+
+class TestTransitionLabelFailureHandling:
+    """Failures from GitHubClient are surfaced, not silently ignored."""
+
+    def test_github_client_failure_warns_and_emits_trajectory(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+    ) -> None:
+        """If GitHubClient.transition_label returns False, emit a warning and trajectory event."""
+        from core.pipeline.github import client as gh_client_mod
+        from core.pipeline.github.labels import transition_label
+
+        monkeypatch.setattr(gh_client_mod, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setenv("RALPH_RUN_ID", "run-123")
+
+        trajectory_events: list[tuple[object, ...]] = []
+        monkeypatch.setattr(
+            "core.pipeline.retry._emit_trajectory",
+            lambda *args, **kwargs: trajectory_events.append((args, kwargs)),
+        )
+        monkeypatch.setattr(
+            "core.project_sync.sync_status",
+            lambda *args, **kwargs: None,
+        )
+
+        # GitHubClient's gh call fails; direct gh fallback also fails.
+        fail = mock.Mock(returncode=1, stdout=b"", stderr=b"boom")
+        with mock.patch.object(gh_client_mod, "_run_gh", return_value=fail):
+            transition_label(1, "status:design", "status:ready")
+
+        # A label_transition_failed trajectory event should have been emitted.
+        failed_events = [
+            event
+            for event in trajectory_events
+            if len(event[0]) >= 3 and event[0][2] == "label_transition_failed"
+        ]
+        assert len(failed_events) >= 1
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "label transition failed" in captured.out.lower()
+
+    def test_github_client_failure_falls_back_to_direct_gh(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """When GitHubClient fails, transition_label retries via direct gh."""
+        from core.pipeline.github import client as gh_client_mod
+        from core.pipeline.github.labels import transition_label
+
+        monkeypatch.setattr(gh_client_mod, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setenv("RALPH_RUN_ID", "run-123")
+
+        monkeypatch.setattr(
+            "core.pipeline.retry._emit_trajectory",
+            lambda *args, **kwargs: None,
+        )
+        monkeypatch.setattr(
+            "core.project_sync.sync_status",
+            lambda *args, **kwargs: None,
+        )
+
+        # First call (GitHubClient) fails; second call (direct gh) succeeds.
+        responses = iter(
+            [
+                mock.Mock(returncode=1, stdout=b"", stderr=b""),
+                mock.Mock(returncode=0, stdout=b"", stderr=b""),
+            ]
+        )
+
+        def fake_run_gh(argv):
+            return next(responses)
+
+        with (
+            mock.patch.object(gh_client_mod, "_run_gh", side_effect=fake_run_gh),
+            mock.patch(
+                "core.pipeline.github.labels._run_gh", side_effect=fake_run_gh
+            ) as direct_gh,
+        ):
+            transition_label(1, "status:design", "status:ready")
+
+        # Direct gh should have been invoked at least once as fallback.
+        assert direct_gh.call_count >= 1
