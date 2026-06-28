@@ -269,7 +269,7 @@ def test_phase_d_dry_run_exits_zero(tmp_path: Path) -> None:
             env={**os.environ, **env_overrides},
         )
 
-    result = _run_dry_run(["daemon", "--dry-run"])
+    result = _run_dry_run(["--dry-run"])
     # Dry-run can exit 0 (when all 8 labels exist) OR non-zero with a
     # clear error message (when labels are missing). Both outcomes
     # prove the dry-run machinery is invoked. We accept either, but
