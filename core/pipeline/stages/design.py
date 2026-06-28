@@ -88,7 +88,11 @@ def run_design_stage(issue: dict) -> bool:
 
     prompt = assemble_stage_prompt(issue, "design.md")
     success, _ = _invoke_with_retry(
-        prompt, issue_num, _make_classifier("design"), load_retry_config()
+        prompt,
+        issue_num,
+        _make_classifier("design"),
+        load_retry_config(),
+        stage="design",
     )
 
     if success:

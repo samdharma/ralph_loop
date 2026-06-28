@@ -62,6 +62,13 @@ class TestClassifySubagentResult:
 class TestInvokeWithRetry:
     """B1 retry wrapper consults the classifier and budget."""
 
+    @pytest.fixture(autouse=True)
+    def _patch_log_metrics(self, monkeypatch):
+        """Prevent retry metrics from writing to the project's log file."""
+        from core.pipeline import retry as retry_mod
+
+        monkeypatch.setattr(retry_mod, "log_metrics", mock.Mock())
+
     def _patch_agent(self, monkeypatch, side_effect):
         from core.pipeline.agents import pi as pi_mod
 
@@ -151,6 +158,38 @@ class TestInvokeWithRetry:
         assert ok is False
         assert fake.call_count == 2
 
+    def test_logs_agent_invoke_per_attempt(self, monkeypatch) -> None:
+        budget = RetryBudget(l1_max_attempts=1, l2_max_attempts=2)
+        self._patch_agent(
+            monkeypatch,
+            side_effect=[
+                (False, "fail"),
+                (True, "ok"),
+            ],
+        )
+        from core.pipeline import retry as retry_mod
+
+        spy = mock.Mock()
+        monkeypatch.setattr(retry_mod, "log_metrics", spy)
+
+        _invoke_with_retry("prompt", 1, _make_classifier("test"), budget, stage="test")
+
+        assert spy.call_count == 2
+        spy.assert_any_call(
+            "agent_invoke",
+            issue="1",
+            agent=mock.ANY,
+            stage="test",
+            attempt=1,
+        )
+        spy.assert_any_call(
+            "agent_invoke",
+            issue="1",
+            agent=mock.ANY,
+            stage="test",
+            attempt=2,
+        )
+
 
 class TestStageSideEffects:
     """Retry wiring preserves existing post-invocation side effects."""
@@ -232,7 +271,7 @@ class TestStageSideEffects:
 
         captured_prompts: list[str] = []
 
-        def fake_invoke_with_retry(prompt, issue_num, classifier, budget):
+        def fake_invoke_with_retry(prompt, issue_num, classifier, budget, stage=None):
             captured_prompts.append(prompt)
             return True, ""
 

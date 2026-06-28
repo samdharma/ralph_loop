@@ -76,7 +76,11 @@ def _run_test_subagent(issue: dict) -> bool:
         before_tests = _snapshot_tests_dir()
         prompt = _assemble_subagent_prompt(issue, "test.md", mode="A")
         success, _ = _invoke_with_retry(
-            prompt, issue_num, _make_classifier("test"), load_retry_config()
+            prompt,
+            issue_num,
+            _make_classifier("test"),
+            load_retry_config(),
+            stage="test",
         )
         after_tests = _snapshot_tests_dir()
         new_tests = _detect_new_tests(before_tests, after_tests)
@@ -166,7 +170,11 @@ def _run_implement_subagent(issue: dict) -> bool:
         )
 
     success, _ = _invoke_with_retry(
-        prompt, issue_num, _make_classifier("implement"), load_retry_config()
+        prompt,
+        issue_num,
+        _make_classifier("implement"),
+        load_retry_config(),
+        stage="implement",
     )
 
     if success:

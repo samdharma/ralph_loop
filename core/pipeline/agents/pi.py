@@ -384,6 +384,17 @@ def invoke_agent_with_output(
         agent exits 0. ``captured_stdout`` is the agent's combined
         stdout + stderr (best effort; on subprocess error it's "").
     """
+    # Eager import — the ``except (ProviderRateLimitError, ProviderQuotaError)``
+    # tuple is evaluated at function scope, so these names must be bound before
+    # any code that could raise (e.g. a missing agent binary raising
+    # FileNotFoundError). Otherwise the generic ``except Exception`` handler
+    # raises NameError instead of returning the intended error tuple.
+    from core.pipeline.providers import (
+        ProviderQuotaError,
+        ProviderRateLimitError,
+        _classify_provider_error,
+    )
+
     agent_bin = _resolve_agent_binary()
     if not agent_bin:
         return False, ""
@@ -400,18 +411,18 @@ def invoke_agent_with_output(
 
     try:
         result = _run_agent(cmd, check=False, capture=True, timeout=None)
-        captured = ((result.stdout or b"") + (result.stderr or b"")).decode(
-            "utf-8", errors="replace"
-        )
+        stdout = (result.stdout or b"").decode("utf-8", errors="replace")
+        stderr = (result.stderr or b"").decode("utf-8", errors="replace")
+        # Echo captured streams to the terminal so operators can follow
+        # subagent progress, matching the behavior of invoke_agent.
+        if stdout:
+            print(stdout, end="")
+        if stderr:
+            print(stderr, end="", file=sys.stderr)
+        captured = stdout + stderr
         if result.returncode != 0:
             # Surface provider-side failures so the retry wrapper's caller
             # (the engine's provider-error handler) can act on them.
-            from core.pipeline.providers import (
-                ProviderQuotaError,
-                ProviderRateLimitError,
-                _classify_provider_error,
-            )
-
             kind = _classify_provider_error(captured)
             if kind == "rate_limit":
                 raise ProviderRateLimitError(

@@ -112,7 +112,7 @@ class TestRunTestSubagent:
 
         observed_modes: list[int] = []
 
-        def fake_invoke_with_retry(prompt, issue_num, classifier, budget):
+        def fake_invoke_with_retry(prompt, issue_num, classifier, budget, stage=None):
             # Snapshot the file mode WHILE the agent is running.
             observed_modes.append(qa_file.stat().st_mode & 0o777)
             return True, ""
@@ -1211,6 +1211,13 @@ class TestAgentReinvocation:
     Tests patch the ``subprocess.run`` call inside ``invoke_agent``
     to control the agent's return code and output.
     """
+
+    @pytest.fixture(autouse=True)
+    def _patch_log_metrics(self, monkeypatch):
+        """Prevent retry metrics from writing to the project's log file."""
+        from core.pipeline import retry as retry_mod
+
+        monkeypatch.setattr(retry_mod, "log_metrics", mock.Mock())
 
     def test_retry_l2_triggers_reinvocation(self, tmp_path, monkeypatch) -> None:
         """retry_l2 action → second invocation up to l2_max_attempts."""

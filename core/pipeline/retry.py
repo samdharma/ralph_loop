@@ -188,6 +188,7 @@ def _invoke_with_retry(
     issue_num: int,
     classify_fn,
     budget: RetryBudget,
+    stage: Optional[str] = None,
 ) -> tuple[bool, str]:
     """Invoke the agent with retry-policy enforcement.
 
@@ -204,6 +205,8 @@ def _invoke_with_retry(
             ``(stdout, returncode)`` to an action
             (``accept | retry_l2 | retry_transient | block``).
         budget: ``RetryBudget`` from :func:`load_retry_config`.
+        stage: pipeline stage identifier (``design``, ``test``,
+            ``implement``, etc.) for metrics.
 
     Returns:
         ``(success, last_stdout)`` — success is True iff the final
@@ -211,12 +214,22 @@ def _invoke_with_retry(
     """
     # Lazy import — invoke_agent_with_output lives in core.pipeline.agents.pi
     # (C1 step 8). ProviderError is in core.pipeline.providers (C1 step 14a).
-    from core.pipeline.agents.pi import invoke_agent_with_output
+    from core.pipeline.agents.pi import _resolve_agent_binary, invoke_agent_with_output
 
+    agent_bin = _resolve_agent_binary() or "unknown"
     current_prompt = prompt
     last_stdout = ""
     upper_bound = max(budget.l1_max_attempts, budget.l2_max_attempts, 1)
     for attempt in range(1, upper_bound + 1):
+        # Per-attempt invocation metric, analogous to invoke_agent's
+        # agent_invoke log but with retry context.
+        log_metrics(
+            "agent_invoke",
+            issue=str(issue_num),
+            agent=agent_bin,
+            stage=stage or "unknown",
+            attempt=attempt,
+        )
         try:
             ok, last_stdout = invoke_agent_with_output(current_prompt, issue_num)
         except Exception as exc:
