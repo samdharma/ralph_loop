@@ -13,17 +13,13 @@ import sys
 from pathlib import Path
 from unittest import mock
 
-import pytest
-
 # Make core/ importable without installing Ralph.
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "core"))
-
-from core.pipeline import shell as shell_mod  # noqa: E402
 
 # The status module exposes ``main()``; we monkey-patch ``main`` to read
 # the dry-run path.
 import core.status as status_mod  # noqa: E402
-
+from core.pipeline import shell as shell_mod  # noqa: E402
 
 # ─────────────────────────────────────────────────────────
 # D3.2 — ralph status --dry-run (spec §10.4 D3)
@@ -81,15 +77,11 @@ class TestStatusDryRun:
         assert rc == 0
         # gh auth status was called
         assert any(
-            call_args
-            and call_args[0]
-            and "auth" in call_args[0]
+            call_args and call_args[0] and "auth" in call_args[0]
             for call_args in gh_mock.call_args_list
         ), f"Expected `gh auth` invocation; got: {gh_mock.call_args_list}"
 
-    def test_dry_run_validates_eight_status_labels(
-        self, tmp_path, monkeypatch
-    ) -> None:
+    def test_dry_run_validates_eight_status_labels(self, tmp_path, monkeypatch) -> None:
         """``--dry-run`` validates the 8 status labels exist."""
         monkeypatch.setattr(shell_mod, "PROJECT_ROOT", tmp_path)
         (tmp_path / ".ralph").mkdir(parents=True, exist_ok=True)
@@ -121,9 +113,7 @@ class TestStatusDryRun:
         # Should fail (missing 7 labels).
         assert rc != 0
 
-    def test_dry_run_does_not_invoke_gh_issue_list(
-        self, tmp_path, monkeypatch
-    ) -> None:
+    def test_dry_run_does_not_invoke_gh_issue_list(self, tmp_path, monkeypatch) -> None:
         """``--dry-run`` does NOT invoke ``gh issue list`` (no listing)."""
         monkeypatch.setattr(shell_mod, "PROJECT_ROOT", tmp_path)
         (tmp_path / ".ralph").mkdir(parents=True, exist_ok=True)
