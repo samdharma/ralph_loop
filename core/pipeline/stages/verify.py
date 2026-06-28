@@ -2,7 +2,7 @@
 
 Per docs/IMPROVEMENT_ROADMAP_SPEC.md §6.1, the VERIFY stage lives at
 ``core/pipeline/stages/verify.py``. It runs the independent reviewer
-sub-agent in Mode A (isolated) and then executes the validation gate.
+sub-agent in an isolated, fresh session and then executes the validation gate.
 """
 
 from __future__ import annotations
@@ -45,8 +45,8 @@ from core.pipeline.test_tracking import (  # noqa: E402
 
 def run_verify_stage(issue: dict) -> bool:
     """
-    STAGE 3: VERIFY — Mode A isolated sub-agent.
-    Fresh session. Sees only: issue + design spec + git diff.
+    STAGE 3: VERIFY — isolated, fresh-session sub-agent.
+    Sees only: issue + design spec + git diff.
     Does 5-axis review + validation gate.
 
     Per spec §10.2 B3, the agent runs inside a git worktree so it
@@ -91,7 +91,7 @@ def run_verify_stage(issue: dict) -> bool:
         )
         diff = git("diff", pre_sha, "HEAD").stdout if _has_commits() else ""
 
-        # Mode A: assemble prompt with minimal context (no codebase reference)
+        # Isolated sub-agent: assemble prompt with minimal context (no codebase reference)
         prompt = _assemble_subagent_prompt(issue, "verify.md", mode="A")
 
         # Include git diff
