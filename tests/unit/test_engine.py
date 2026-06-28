@@ -1451,3 +1451,183 @@ class TestSubagentsUseWorktree:
 
         assert create_wt.call_count == 1
         assert remove_wt.call_count == 1
+
+
+# ─────────────────────────────────────────────────────────
+# D3.1 — ralph daemon --dry-run (spec §10.4 D3)
+# ─────────────────────────────────────────────────────────
+
+
+class TestDaemonDryRun:
+    """D3.1: `ralph daemon --dry-run` validates the environment without invoking agents.
+
+    Per spec §10.4 D3 + plan §2.4 order 1: dry-run walks the pipeline up
+    to (but not including) agent invocation. Validates gh auth, git
+    remote, the 8 status labels, and on-disk paths. No `pi` or `kimi`
+    subprocess is invoked. Useful for CI health checks.
+
+    The dry-run helper lives at ``core.pipeline.daemon.dry_run`` and is
+    invoked from the CLI in ``core/engine.py`` when ``--dry-run`` is
+    passed.
+    """
+
+    def test_dry_run_invokes_gh_auth_status(self, tmp_path, monkeypatch) -> None:
+        """`dry_run()` invokes `gh auth status` (or equivalent) and exits 0 on success."""
+        from core.pipeline import daemon as daemon_mod
+        from core.pipeline import shell as shell_mod
+
+        monkeypatch.setattr(shell_mod, "PROJECT_ROOT", tmp_path)
+        # create a fake .ralph dir so the path check passes.
+        (tmp_path / ".ralph").mkdir(parents=True, exist_ok=True)
+
+        with (
+            mock.patch.object(daemon_mod, "gh") as gh_mock,
+            mock.patch.object(daemon_mod, "git") as git_mock,
+        ):
+            gh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+            git_mock.return_value = mock.Mock(
+                returncode=0, stdout="origin\tgit@github.com:foo/bar.git\n", stderr=""
+            )
+            # Mock `gh label list` to return all 8 labels.
+            def fake_gh(*args, **kwargs):
+                if args and args[0] == "label" and args[1] == "list":
+                    return mock.Mock(
+                        returncode=0,
+                        stdout='[{"name":"status:ready"},{"name":"status:design"},'
+                        '{"name":"status:build"},{"name":"status:verify"},'
+                        '{"name":"status:review"},{"name":"status:blocked"},'
+                        '{"name":"status:build-retry"},{"name":"status:verify-retry"}]',
+                        stderr="",
+                    )
+                return mock.Mock(returncode=0, stdout="", stderr="")
+
+            gh_mock.side_effect = fake_gh
+
+            rc = daemon_mod.dry_run()
+
+        assert rc == 0
+        # gh auth status was called
+        assert any(
+            call_args
+            and call_args[0]
+            and "auth" in call_args[0]
+            for call_args in gh_mock.call_args_list
+        ), f"Expected `gh auth status` invocation; got: {gh_mock.call_args_list}"
+
+    def test_dry_run_invokes_git_remote(self, tmp_path, monkeypatch) -> None:
+        """`dry_run()` invokes `git remote -v` to validate the remote."""
+        from core.pipeline import daemon as daemon_mod
+        from core.pipeline import shell as shell_mod
+
+        monkeypatch.setattr(shell_mod, "PROJECT_ROOT", tmp_path)
+        (tmp_path / ".ralph").mkdir(parents=True, exist_ok=True)
+
+        with (
+            mock.patch.object(daemon_mod, "gh") as gh_mock,
+            mock.patch.object(daemon_mod, "git") as git_mock,
+        ):
+            git_mock.return_value = mock.Mock(
+                returncode=0, stdout="origin\tgit@github.com:foo/bar.git\n", stderr=""
+            )
+            gh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+
+            def fake_gh(*args, **kwargs):
+                if args and args[0] == "label" and args[1] == "list":
+                    return mock.Mock(
+                        returncode=0,
+                        stdout='[{"name":"status:ready"},{"name":"status:design"},'
+                        '{"name":"status:build"},{"name":"status:verify"},'
+                        '{"name":"status:review"},{"name":"status:blocked"},'
+                        '{"name":"status:build-retry"},{"name":"status:verify-retry"}]',
+                        stderr="",
+                    )
+                return mock.Mock(returncode=0, stdout="", stderr="")
+
+            gh_mock.side_effect = fake_gh
+
+            daemon_mod.dry_run()
+
+        # git remote -v was called
+        assert any(
+            call_args and call_args[0] and "remote" in call_args[0]
+            for call_args in git_mock.call_args_list
+        ), f"Expected `git remote` invocation; got: {git_mock.call_args_list}"
+
+    def test_dry_run_validates_all_eight_status_labels(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """`dry_run()` validates all 8 status labels exist via `gh label list`."""
+        from core.pipeline import daemon as daemon_mod
+        from core.pipeline import shell as shell_mod
+
+        monkeypatch.setattr(shell_mod, "PROJECT_ROOT", tmp_path)
+        (tmp_path / ".ralph").mkdir(parents=True, exist_ok=True)
+
+        with (
+            mock.patch.object(daemon_mod, "gh") as gh_mock,
+            mock.patch.object(daemon_mod, "git") as git_mock,
+        ):
+            git_mock.return_value = mock.Mock(
+                returncode=0, stdout="origin\tgit@github.com:foo/bar.git\n", stderr=""
+            )
+            gh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+
+            def fake_gh(*args, **kwargs):
+                if args and args[0] == "label" and args[1] == "list":
+                    return mock.Mock(
+                        returncode=0,
+                        stdout='[{"name":"status:ready"}]',  # only 1 label
+                        stderr="",
+                    )
+                return mock.Mock(returncode=0, stdout="", stderr="")
+
+            gh_mock.side_effect = fake_gh
+
+            rc = daemon_mod.dry_run()
+
+        # Should fail with non-zero exit because labels are missing.
+        assert rc != 0
+
+    def test_dry_run_does_not_invoke_pi_or_kimi_subprocess(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """`dry_run()` does NOT invoke `subprocess.run` with `pi` or `kimi` in argv."""
+        from core.pipeline import daemon as daemon_mod
+        from core.pipeline import shell as shell_mod
+        import subprocess as subprocess_mod
+
+        monkeypatch.setattr(shell_mod, "PROJECT_ROOT", tmp_path)
+        (tmp_path / ".ralph").mkdir(parents=True, exist_ok=True)
+
+        with (
+            mock.patch.object(daemon_mod, "gh") as gh_mock,
+            mock.patch.object(daemon_mod, "git") as git_mock,
+            mock.patch.object(subprocess_mod, "run") as subp_run,
+        ):
+            git_mock.return_value = mock.Mock(
+                returncode=0, stdout="origin\tgit@github.com:foo/bar.git\n", stderr=""
+            )
+            gh_mock.return_value = mock.Mock(returncode=0, stdout="", stderr="")
+
+            def fake_gh(*args, **kwargs):
+                if args and args[0] == "label" and args[1] == "list":
+                    return mock.Mock(
+                        returncode=0,
+                        stdout='[{"name":"status:ready"},{"name":"status:design"},'
+                        '{"name":"status:build"},{"name":"status:verify"},'
+                        '{"name":"status:review"},{"name":"status:blocked"},'
+                        '{"name":"status:build-retry"},{"name":"status:verify-retry"}]',
+                        stderr="",
+                    )
+                return mock.Mock(returncode=0, stdout="", stderr="")
+
+            gh_mock.side_effect = fake_gh
+
+            daemon_mod.dry_run()
+
+        # No subprocess call should have pi/kimi in argv
+        for call in subp_run.call_args_list:
+            argv = call.args[0] if call.args else []
+            assert not any(
+                agent in str(argv).lower() for agent in ("pi", "kimi")
+            ), f"dry_run should not invoke agent subprocess; got argv={argv}"
