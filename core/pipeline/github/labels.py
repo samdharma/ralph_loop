@@ -78,9 +78,8 @@ def transition_label(
             from core.project_sync import sync_status as _sync_status
 
             _sync_status(issue_num, add)
-            # Lazy import — _emit_trajectory lives in core.engine at this
-            # point in the cascade (will move to retry.py in step 14).
-            from core.engine import _emit_trajectory
+            # Lazy import — _emit_trajectory lives in core.pipeline.retry.
+            from core.pipeline.retry import _emit_trajectory
 
             _emit_trajectory(
                 issue_num,
@@ -107,9 +106,8 @@ def transition_label(
             from core.project_sync import sync_status as _sync_status
 
             _sync_status(issue_num, add)
-            # Lazy import — _emit_trajectory lives in core.engine at this
-            # point in the cascade (will move to retry.py in step 14).
-            from core.engine import _emit_trajectory
+            # Lazy import — _emit_trajectory lives in core.pipeline.retry.
+            from core.pipeline.retry import _emit_trajectory
 
             _emit_trajectory(
                 issue_num,

@@ -22,9 +22,9 @@ import pytest
 class TestRunnerAtNewPath:
     """C1.3: runner module is at core/pipeline/runner.py."""
 
-    def test_run_loop_importable_from_runner(self) -> None:
-        """``from core.pipeline.runner import run_loop`` succeeds."""
-        from core.pipeline.runner import run_loop
+    def test_run_loop_importable_from_daemon(self) -> None:
+        """``from core.pipeline.daemon import run_loop`` succeeds."""
+        from core.pipeline.daemon import run_loop
 
         assert callable(run_loop)
 
@@ -36,7 +36,7 @@ class TestRunnerAtNewPath:
 
     def test_run_loop_has_docstring(self) -> None:
         """run_loop preserves its docstring (parity with original)."""
-        from core.pipeline.runner import run_loop
+        from core.pipeline.daemon import run_loop
 
         assert run_loop.__doc__, "run_loop must have a docstring"
         # Should mention it's the main loop.
@@ -52,7 +52,7 @@ class TestRunnerAtNewPath:
 
     def test_run_loop_signature_preserved(self) -> None:
         """run_loop accepts the same arguments as the original."""
-        from core.pipeline.runner import run_loop
+        from core.pipeline.daemon import run_loop
 
         sig = inspect.signature(run_loop)
         # Original signature: (auto_close=False, single_issue=None)

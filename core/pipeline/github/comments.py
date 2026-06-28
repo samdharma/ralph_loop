@@ -72,8 +72,8 @@ def gh_comment(issue_num: int, body: str, run_id: Optional[str] = None) -> bool:
     # Comments don't have a dedicated TrajectoryEvent variant; reusing
     # SubagentInvocation with agent_binary='gh' is the documented
     # mapping per spec §10.2 B4.
-    # Lazy import — _emit_trajectory will move to retry.py in step 14.
-    from core.engine import _emit_trajectory
+    # Lazy import — _emit_trajectory lives in core.pipeline.retry.
+    from core.pipeline.retry import _emit_trajectory
 
     _emit_trajectory(
         issue_num,

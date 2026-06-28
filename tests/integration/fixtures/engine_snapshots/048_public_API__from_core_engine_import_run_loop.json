@@ -4,8 +4,8 @@
     "-c",
     "from core.engine import run_loop; print('ok')"
   ],
-  "exit_code": 1,
-  "stdout_pattern": "",
-  "stderr_pattern": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    from core.engine import run_loop; print('ok')\n    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/Users/sam.dharma/Trading/ralph",
+  "exit_code": 0,
+  "stdout_pattern": "ok\n",
+  "stderr_pattern": "",
   "description": "public API: from core.engine import run_loop"
 }

@@ -15,13 +15,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "core"))
 
 import engine  # noqa: E402
 
+from core.pipeline import daemon as daemon_mod  # noqa: E402
 from core.pipeline import (  # noqa: E402
     issue_ops,
     prompts,
     recovery,
     reporting,
+    shell,
     test_tracking,
 )
+from core.pipeline.github import board as board_mod  # noqa: E402
 from core.pipeline.stages import build_subagents  # noqa: E402
 from core.pipeline.stages import verify as verify_stage  # noqa: E402
 
@@ -908,9 +911,7 @@ def _make_sleep_shutdown():
 
 def test_run_loop_reverts_ready_and_sleeps_on_rate_limit():
     """A provider rate-limit pauses the loop, reverts the ticket to ready, and does not block it."""
-    # Reset canonical state in recovery.py; engine re-exports may be rebound by other tests.
-    engine._shutdown_requested = False
-    engine._in_cleanup = False
+    # Reset canonical state in recovery.py.
     recovery._shutdown_requested = False
     recovery._in_cleanup = False
     os.environ.pop("RALPH_AGENT", None)
@@ -922,24 +923,26 @@ def test_run_loop_reverts_ready_and_sleeps_on_rate_limit():
     from core.pipeline import providers as providers_mod
 
     with (
-        mock.patch.object(engine, "acquire_pid_file", return_value=True),
-        mock.patch.object(engine, "recover_from_crash", return_value=None),
-        mock.patch.object(engine, "fetch_ready_ticket", side_effect=[issue, None]),
-        mock.patch.object(engine, "transition_label") as mock_transition,
+        mock.patch.object(recovery, "acquire_pid_file", return_value=True),
+        mock.patch.object(recovery, "recover_from_crash", return_value=None),
+        mock.patch.object(daemon_mod, "fetch_ready_ticket", side_effect=[issue, None]),
+        mock.patch.object(daemon_mod, "transition_label") as mock_transition,
         mock.patch.object(
-            engine, "run_pipeline", side_effect=engine.ProviderRateLimitError("429")
+            daemon_mod,
+            "run_pipeline",
+            side_effect=providers_mod.ProviderRateLimitError("429"),
         ),
         mock.patch.object(providers_mod, "_find_alternate_agent", return_value=None),
         mock.patch.object(providers_mod, "_revert_to_ready") as mock_revert,
         mock.patch.object(providers_mod, "time") as mock_time,
-        mock.patch.object(engine, "gh", return_value=mock.Mock(stdout="[]")),
-        mock.patch.object(engine, "sync_status"),
-        mock.patch.object(engine, "gh_comment"),
-        mock.patch.object(engine, "log_metrics"),
-        mock.patch.object(engine, "release_pid_file"),
+        mock.patch.object(shell, "gh", return_value=mock.Mock(stdout="[]")),
+        mock.patch.object(board_mod, "sync_status"),
+        mock.patch.object(daemon_mod, "gh_comment"),
+        mock.patch.object(daemon_mod, "log_metrics"),
+        mock.patch.object(recovery, "release_pid_file"),
     ):
         mock_time.sleep.side_effect = _make_sleep_shutdown()
-        engine.run_loop()
+        daemon_mod.run_loop()
 
     # Claimed to design, then reverted to ready.
     mock_transition.assert_any_call(42, "status:design", "status:ready")
@@ -950,46 +953,44 @@ def test_run_loop_reverts_ready_and_sleeps_on_rate_limit():
 
 def test_run_loop_falls_back_to_alternate_agent():
     """When the current agent is rate-limited, the loop tries the alternate agent once."""
-    engine._shutdown_requested = False
-    engine._in_cleanup = False
     recovery._shutdown_requested = False
     recovery._in_cleanup = False
     os.environ.pop("RALPH_AGENT", None)
     issue = {"number": 42, "title": "Test"}
     calls = []
 
+    from core.pipeline import providers as providers_mod
+
     def fail_then_succeed(*args, **kwargs):
         calls.append(1)
         if len(calls) == 1:
-            raise engine.ProviderRateLimitError("429")
+            raise providers_mod.ProviderRateLimitError("429")
         return True
 
     def fetch_gen():
         # First claim (with original agent), then re-claim after fallback.
         yield issue
         yield issue
-        engine._shutdown_requested = True
+        recovery._shutdown_requested = True
         while True:
             yield None
 
-    from core.pipeline import providers as providers_mod
-
     with (
-        mock.patch.object(engine, "acquire_pid_file", return_value=True),
-        mock.patch.object(engine, "recover_from_crash", return_value=None),
-        mock.patch.object(engine, "fetch_ready_ticket", side_effect=fetch_gen()),
-        mock.patch.object(engine, "transition_label") as mock_transition,
-        mock.patch.object(engine, "run_pipeline", side_effect=fail_then_succeed),
+        mock.patch.object(recovery, "acquire_pid_file", return_value=True),
+        mock.patch.object(recovery, "recover_from_crash", return_value=None),
+        mock.patch.object(daemon_mod, "fetch_ready_ticket", side_effect=fetch_gen()),
+        mock.patch.object(daemon_mod, "transition_label") as mock_transition,
+        mock.patch.object(daemon_mod, "run_pipeline", side_effect=fail_then_succeed),
         mock.patch.object(providers_mod, "_find_alternate_agent", return_value="pi"),
         mock.patch.object(providers_mod, "_revert_to_ready") as mock_revert,
-        mock.patch.object(engine, "time"),
-        mock.patch.object(engine, "gh", return_value=mock.Mock(stdout="[]")),
-        mock.patch.object(engine, "sync_status"),
-        mock.patch.object(engine, "gh_comment"),
-        mock.patch.object(engine, "log_metrics"),
-        mock.patch.object(engine, "release_pid_file"),
+        mock.patch("time.sleep"),
+        mock.patch.object(shell, "gh", return_value=mock.Mock(stdout="[]")),
+        mock.patch.object(board_mod, "sync_status"),
+        mock.patch.object(daemon_mod, "gh_comment"),
+        mock.patch.object(daemon_mod, "log_metrics"),
+        mock.patch.object(recovery, "release_pid_file"),
     ):
-        engine.run_loop()
+        daemon_mod.run_loop()
 
     # Reverted to ready before retrying with alternate agent.
     mock_revert.assert_called_once_with(42)
@@ -1000,8 +1001,6 @@ def test_run_loop_falls_back_to_alternate_agent():
 
 def test_run_loop_creates_project_issue_when_all_agents_exhausted():
     """When all agents hit quota/rate-limit, the loop logs a project issue and stops."""
-    engine._shutdown_requested = False
-    engine._in_cleanup = False
     recovery._shutdown_requested = False
     recovery._in_cleanup = False
     os.environ.pop("RALPH_AGENT", None)
@@ -1010,24 +1009,26 @@ def test_run_loop_creates_project_issue_when_all_agents_exhausted():
     from core.pipeline import providers as providers_mod
 
     with (
-        mock.patch.object(engine, "acquire_pid_file", return_value=True),
-        mock.patch.object(engine, "recover_from_crash", return_value=None),
-        mock.patch.object(engine, "fetch_ready_ticket", side_effect=[issue, None]),
-        mock.patch.object(engine, "transition_label"),
+        mock.patch.object(recovery, "acquire_pid_file", return_value=True),
+        mock.patch.object(recovery, "recover_from_crash", return_value=None),
+        mock.patch.object(daemon_mod, "fetch_ready_ticket", side_effect=[issue, None]),
+        mock.patch.object(daemon_mod, "transition_label"),
         mock.patch.object(
-            engine, "run_pipeline", side_effect=engine.ProviderQuotaError("quota")
+            daemon_mod,
+            "run_pipeline",
+            side_effect=providers_mod.ProviderQuotaError("quota"),
         ),
         mock.patch.object(providers_mod, "_find_alternate_agent", return_value=None),
         mock.patch.object(providers_mod, "_revert_to_ready"),
         mock.patch.object(providers_mod, "_create_provider_issue") as mock_create,
-        mock.patch.object(engine, "time"),
-        mock.patch.object(engine, "gh", return_value=mock.Mock(stdout="[]")),
-        mock.patch.object(engine, "sync_status"),
-        mock.patch.object(engine, "gh_comment"),
-        mock.patch.object(engine, "log_metrics"),
-        mock.patch.object(engine, "release_pid_file"),
+        mock.patch("time.sleep"),
+        mock.patch.object(shell, "gh", return_value=mock.Mock(stdout="[]")),
+        mock.patch.object(board_mod, "sync_status"),
+        mock.patch.object(daemon_mod, "gh_comment"),
+        mock.patch.object(daemon_mod, "log_metrics"),
+        mock.patch.object(recovery, "release_pid_file"),
     ):
-        engine.run_loop()
+        daemon_mod.run_loop()
 
     mock_create.assert_called_once()
 

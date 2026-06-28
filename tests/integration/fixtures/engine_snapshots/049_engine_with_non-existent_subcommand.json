@@ -4,8 +4,8 @@
     "/Users/sam.dharma/Trading/ralph/core/engine.py",
     "this_is_not_a_real_subcommand"
   ],
-  "exit_code": 1,
+  "exit_code": 2,
   "stdout_pattern": "",
-  "stderr_pattern": "Traceback (most recent call last):\n  File \"/Users/sam.dharma/Trading/ralph/core/engine.py\", line 26, in <module>\n    from core.project_sync import _get_config, sync_closed, sync_status\nModuleNotFoundE",
+  "stderr_pattern": "usage: engine.py [-h] [--auto-close] [--agent {pi,kimi}] [--issue N]\n                 [--pi-flag FLAG]\nengine.py: error: unrecognized arguments: this_is_not_a_real_subcommand\n",
   "description": "engine with non-existent subcommand"
 }

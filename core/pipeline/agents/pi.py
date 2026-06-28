@@ -266,9 +266,8 @@ def invoke_agent(
         return False
 
     print(f"[ralph] Invoking {agent_bin} for #{issue_num} (artifact-based handoff)...")
-    # Lazy import — log_metrics still lives in core.engine at this
-    # point in the cascade (will move to retry.py in step 14).
-    from core.engine import log_metrics
+    # Lazy import — log_metrics lives in core.pipeline.retry.
+    from core.pipeline.retry import log_metrics
 
     log_metrics(
         "agent_invoke",
@@ -333,9 +332,8 @@ def invoke_agent(
             + "\n"
             + (result.stderr or b"").decode("utf-8", errors="replace")
         )
-        # Lazy import — provider error machinery still in core.engine
-        # at this point (will move to providers.py in step 14).
-        from core.engine import (
+        # Lazy import — provider error machinery lives in core.pipeline.providers.
+        from core.pipeline.providers import (
             ProviderError,
             ProviderQuotaError,
             ProviderRateLimitError,

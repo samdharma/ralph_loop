@@ -57,9 +57,8 @@ def run_design_stage(issue: dict) -> bool:
     from core.pipeline.github.comments import gh_comment
 
     gh_comment(issue_num, "🎨 DESIGN stage started.")
-    # Lazy import — log_metrics lives at core.pipeline.retry as of
-    # C1 step 14b; core.engine still re-exports it for back-compat.
-    from core.engine import log_metrics
+    # Lazy import — log_metrics lives at core.pipeline.retry.
+    from core.pipeline.retry import log_metrics
 
     log_metrics("stage_start", issue=str(issue_num), stage="design")
 
@@ -77,10 +76,9 @@ def run_design_stage(issue: dict) -> bool:
         print(f"[ralph] Created placeholder {design_file}")
 
     session_file = PROJECT_ROOT / ".ralph" / f"session-{issue_num}.jsonl"
-    # Lazy import — assemble_stage_prompt will move to prompts.py
-    # (per plan cascade step 14).
-    from core.engine import assemble_stage_prompt
+    # assemble_stage_prompt lives in core.pipeline.prompts.
     from core.pipeline.agents.pi import invoke_agent
+    from core.pipeline.prompts import assemble_stage_prompt
 
     prompt = assemble_stage_prompt(issue, "design.md")
     success = invoke_agent(prompt, issue_num, session_file=session_file)

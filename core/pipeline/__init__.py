@@ -44,6 +44,9 @@ from core.pipeline.checkpoint import (  # noqa: F401
     recover_from_crash,
     save_checkpoint,
 )
+
+# Runner
+from core.pipeline.daemon import run_loop  # noqa: F401
 from core.pipeline.github.board import sync_closed, sync_status  # noqa: F401
 
 # GitHub
@@ -55,12 +58,7 @@ from core.pipeline.metrics import (  # noqa: F401
     read_trajectory,
 )
 from core.pipeline.recovery import recover_from_crash as _recovery_fn  # noqa: F401
-
-# Runner
-from core.pipeline.runner import (  # noqa: F401
-    run_loop,
-    run_pipeline,
-)
+from core.pipeline.runner import run_pipeline  # noqa: F401
 
 # Stages
 from core.pipeline.stages.base import Stage as StageABC  # noqa: F401

@@ -136,15 +136,15 @@ def _revert_to_ready(issue_num: int):
         STATUS_LABEL[Stage.BLOCKED],
     ]:
         try:
-            # Lazy import — gh lives in core.engine at this point in
-            # the cascade (will move to client.py later if needed).
-            from core.engine import gh
+            # Lazy import — gh lives in core.pipeline.shell.
+            from core.pipeline.shell import gh
 
             gh("issue", "edit", str(issue_num), "--remove-label", label)
         except subprocess.CalledProcessError:
             pass
     try:
-        from core.engine import gh, sync_status
+        from core.pipeline.github.board import sync_status
+        from core.pipeline.shell import gh
 
         gh("issue", "edit", str(issue_num), "--add-label", "status:ready")
         sync_status(issue_num, "status:ready")
@@ -164,8 +164,9 @@ def _create_provider_issue(agent: str, error: ProviderError) -> Optional[str]:
         f"then restart the Ralph daemon.\n"
     )
     try:
-        # Lazy import — gh lives in core.engine.
-        from core.engine import gh, log_metrics
+        # Lazy imports — avoid module-load cycles.
+        from core.pipeline.retry import log_metrics
+        from core.pipeline.shell import gh
 
         result = gh(
             "issue",
@@ -183,8 +184,8 @@ def _create_provider_issue(agent: str, error: ProviderError) -> Optional[str]:
         return url
     except subprocess.CalledProcessError as e:
         print(f"[ralph] WARNING: could not create provider issue: {e}")
-        # Lazy import — log_metrics still lives in core.engine.
-        from core.engine import log_metrics
+        # Lazy import — avoid module-load cycles.
+        from core.pipeline.retry import log_metrics
 
         log_metrics("provider_exhausted", agent=agent, error=str(e))
         return None
@@ -212,14 +213,11 @@ def _handle_provider_error(
         ``"continue"`` if the loop should continue (fallback or pause),
         ``"break"`` if the daemon should stop (quota exhausted, no fallback).
     """
-    # Lazy imports for everything we touch from engine.py / recovery.py
-    # / checkpoint.py.
-    from core.engine import (
-        _resolve_agent_binary,
-        clear_checkpoint,
-        gh_comment,
-        log_metrics,
-    )
+    # Lazy imports — avoid module-load cycles.
+    from core.pipeline.agents.pi import _resolve_agent_binary
+    from core.pipeline.checkpoint import clear_checkpoint
+    from core.pipeline.github.comments import gh_comment
+    from core.pipeline.retry import log_metrics
 
     issue_num = issue["number"]
     current_agent = _resolve_agent_binary()

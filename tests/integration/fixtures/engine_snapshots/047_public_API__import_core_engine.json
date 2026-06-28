@@ -4,8 +4,8 @@
     "-c",
     "import core.engine; print('ok')"
   ],
-  "exit_code": 1,
-  "stdout_pattern": "",
-  "stderr_pattern": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n    import core.engine; print('ok')\n    ^^^^^^^^^^^^^^^^^^\n  File \"/Users/sam.dharma/Trading/ralph/core/engine.py\", line 46, i",
+  "exit_code": 0,
+  "stdout_pattern": "ok\n",
+  "stderr_pattern": "",
   "description": "public API: import core.engine"
 }
