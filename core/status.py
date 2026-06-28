@@ -15,6 +15,14 @@ import os
 import sys
 from pathlib import Path
 
+# Ensure the project root (parent of ``core/``) is on sys.path so
+# ``from core.pipeline.shell import ...`` works whether status.py is
+# invoked as ``python core/status.py`` (bin/ralph flow) or as a
+# module.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 PID_FILE = Path("/tmp") / f"ralph_daemon_{PROJECT_ROOT.name}.pid"
 METRICS_FILE = PROJECT_ROOT / "logs" / "ralph_metrics.jsonl"
