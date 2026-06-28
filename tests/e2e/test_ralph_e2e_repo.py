@@ -241,18 +241,35 @@ def test_phase_d_dry_run_exits_zero(tmp_path: Path) -> None:
     # template without Ralph labels; the test asserts the dry-run
     # machinery is invoked (returns non-zero with a label-missing
     # message — the same code path that runs in CI).
-    ralph_bin = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "ralph"
-    if not ralph_bin.exists():
-        ralph_bin = Path("ralph")  # fall back to PATH
+    #
+    # Invoke via ``python -m core.engine`` rather than the ``ralph``
+    # bash dispatcher — the CI runner does not install ``bin/ralph``
+    # to PATH (it runs against a source checkout, not an install).
+    ralph_src = Path(__file__).resolve().parents[2]
 
-    result = subprocess.run(
-        [str(ralph_bin), "daemon", "--dry-run"],
-        cwd=target,
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=60,
-    )
+    def _run_dry_run(args: list[str]) -> subprocess.CompletedProcess:
+        """Invoke ``python -m core.engine <args>`` from the Ralph source tree.
+
+        Sets ``PYTHONPATH`` to include both the Ralph source tree and
+        the ``core/`` directory so ``from core.pipeline.shell import
+        ...`` resolves correctly (mirrors the bootstrap in
+        ``core/engine.py``).
+        """
+        env_overrides = {
+            "PYTHONPATH": f"{ralph_src}:{ralph_src / 'core'}",
+            "RALPH_PROJECT_DIR": str(target),
+        }
+        return subprocess.run(
+            ["python", "-m", "core.engine", *args],
+            cwd=ralph_src,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=60,
+            env={**os.environ, **env_overrides},
+        )
+
+    result = _run_dry_run(["daemon", "--dry-run"])
     # Dry-run can exit 0 (when all 8 labels exist) OR non-zero with a
     # clear error message (when labels are missing). Both outcomes
     # prove the dry-run machinery is invoked. We accept either, but
@@ -271,13 +288,19 @@ def test_phase_d_dry_run_exits_zero(tmp_path: Path) -> None:
         assert result.returncode == 0
 
     # Also exercise `ralph status --dry-run` to confirm it works.
+    # status.py is a separate entrypoint; invoke it directly.
     result_status = subprocess.run(
-        [str(ralph_bin), "status", "--dry-run"],
-        cwd=target,
+        ["python", "core/status.py", "--dry-run"],
+        cwd=ralph_src,
         capture_output=True,
         text=True,
         check=False,
         timeout=60,
+        env={
+            **os.environ,
+            "PYTHONPATH": f"{ralph_src}:{ralph_src / 'core'}",
+            "RALPH_PROJECT_DIR": str(target),
+        },
     )
     # status --dry-run has the same exit-code semantics as daemon --dry-run.
     if result_status.returncode != 0:
