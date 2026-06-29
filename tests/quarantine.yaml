@@ -1,0 +1,14 @@
+# tests/quarantine.yaml
+#
+# Per spec §10.3 C3: tests listed here are deselected from
+# ``bin/ralph validate`` invocations. Schema per entry:
+#
+#   - test_id: <pytest node-id>
+#     added_at: <iso8601 timestamp>
+#     reason: <human-readable explanation>
+#     auto_added: <true|false>
+#
+# Auto-add on 2 consecutive failures (C3.2). Auto-remove after 7 days
+# via ``bin/ralph validate --unquarantine-stale`` (C3.3).
+#
+# This file is intentionally empty at v3.1.2 release time.

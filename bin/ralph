@@ -17,8 +17,14 @@ else
 fi
 
 CORE_DIR="${RALPH_HOME}/core"
-PYTHON_CMD="${RALPH_PYTHON_CMD:-python3}"
+PYTHON_CMD="${RALPH_PYTHON_CMD:-}"
 PROJECT_DIR="${RALPH_PROJECT_DIR:-$(pwd)}"
+
+# Prefer the project's virtual environment if it exists.
+if [[ -z "${PYTHON_CMD}" && -x "${RALPH_HOME}/.venv/bin/python" ]]; then
+    PYTHON_CMD="${RALPH_HOME}/.venv/bin/python"
+fi
+PYTHON_CMD="${PYTHON_CMD:-python3}"
 
 export RALPH_PROJECT_DIR="${PROJECT_DIR}"
 export RALPH_CORE_DIR="${CORE_DIR}"
@@ -28,7 +34,7 @@ export RALPH_CORE_DIR="${CORE_DIR}"
 # ─────────────────────────────────────────────────────────
 
 cmd_version() {
-    echo "ralph v3.0.0"
+    echo "ralph v3.1.3"
 }
 
 cmd_help() {
@@ -44,6 +50,9 @@ cmd_help() {
     echo "  validate [opts]    Run the validation gate"
     echo "  report             Generate daily/weekly summary"
     echo "  generate-test-map  Auto-generate TEST_MAP.yaml from project structure"
+    echo "  migrate [opts]     Migrate v3 state files to v3.1 layout (--dry-run supported)"
+    echo "  trajectory <N>     Print the timeline of trajectory events for issue #N"
+    echo "  doctor [N]         Diagnose Ralph's runtime health (5 categories)"
     echo "  version            Show version"
     echo "  help               Show this help"
     echo ""
@@ -103,6 +112,18 @@ cmd_generate_test_map() {
     exec "${PYTHON_CMD}" "${CORE_DIR}/generate_test_map.py" "$@"
 }
 
+cmd_migrate() {
+    exec "${PYTHON_CMD}" "${CORE_DIR}/migrate.py" "$@"
+}
+
+cmd_trajectory() {
+    exec "${PYTHON_CMD}" "${CORE_DIR}/trajectory.py" "$@"
+}
+
+cmd_doctor() {
+    exec "${PYTHON_CMD}" "${CORE_DIR}/doctor.py" "$@"
+}
+
 # ─────────────────────────────────────────────────────────
 # Dispatch
 # ─────────────────────────────────────────────────────────
@@ -117,6 +138,9 @@ case "${1:-help}" in
     validate)                  shift; cmd_validate "$@" ;;
     report)                    shift; cmd_report "$@" ;;
     generate-test-map)         shift; cmd_generate_test_map "$@" ;;
+    migrate)                   shift; cmd_migrate "$@" ;;
+    trajectory)                shift; cmd_trajectory "$@" ;;
+    doctor)                    shift; cmd_doctor "$@" ;;
     *)
         echo "ralph: unknown command '${1}'"
         echo "Run 'ralph help' for usage."

@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/validate.py",
+    "--help"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "usage: validate.py [-h]\n                   [--tier {smoke,targeted,integration,full,e2e,performance}]\n                   [--pytest-paths [PYTEST_PATHS ...]] [--junitxml PATH]\n                   [--cri",
+  "stderr_pattern": "",
+  "description": "validate --help"
+}

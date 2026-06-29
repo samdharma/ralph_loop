@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "bash",
+    "/Users/sam.dharma/Trading/ralph/bin/ralph",
+    "--help"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "Ralph v3 \u2014 Automated Build System\n\nUsage: ralph <command> [options]\n\nCommands:\n  init [dir]         Scaffold a Ralph project (default: current directory)\n  setup              Check prerequisites and p",
+  "stderr_pattern": "",
+  "description": "bin/ralph --help (bash dispatcher)"
+}

@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/detect_affected_tests.py",
+    "--help"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "usage: detect_affected_tests.py [-h] [--git-diff-args GIT_DIFF_ARGS] [--json]\n\nDetect affected tests from git diff\n\noptions:\n  -h, --help            show this help message and exit\n  --git-diff-args G",
+  "stderr_pattern": "",
+  "description": "detect_affected_tests --help"
+}

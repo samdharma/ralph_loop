@@ -34,9 +34,9 @@ TEST_MAP_PATH = Path(
 def parse_test_map_simple(path: Path) -> dict:
     """Minimal YAML parser sufficient for our TEST_MAP format."""
     text = path.read_text(encoding="utf-8")
-    mappings = []
-    default_tests = []
-    current = None
+    mappings: list = []
+    default_tests: list = []
+    current: dict | None = None
     in_mappings = False
     in_defaults = False
     for line in text.splitlines():
@@ -62,6 +62,7 @@ def parse_test_map_simple(path: Path) -> dict:
             elif stripped.startswith("tests: ["):
                 arr = stripped.split("[", 1)[1].rsplit("]", 1)[0]
                 tests = [t.strip().strip('"').strip("'") for t in arr.split(",")]
+                assert current is not None
                 current["tests"] = tests
             elif stripped.startswith("-") and "tests:" in stripped:
                 pass
@@ -90,7 +91,9 @@ def get_modified_files(git_diff_args: str = "HEAD") -> list[str]:
         text=True,
         cwd=PROJECT_ROOT,
     )
-    modified = [f.strip() for f in result.stdout.splitlines() if f.strip().endswith(".py")]
+    modified = [
+        f.strip() for f in result.stdout.splitlines() if f.strip().endswith(".py")
+    ]
 
     result2 = subprocess.run(
         ["git", "ls-files", "--others", "--exclude-standard"],
@@ -98,7 +101,9 @@ def get_modified_files(git_diff_args: str = "HEAD") -> list[str]:
         text=True,
         cwd=PROJECT_ROOT,
     )
-    untracked = [f.strip() for f in result2.stdout.splitlines() if f.strip().endswith(".py")]
+    untracked = [
+        f.strip() for f in result2.stdout.splitlines() if f.strip().endswith(".py")
+    ]
 
     return list(set(modified + untracked))
 
@@ -118,7 +123,9 @@ def map_files_to_tests(modified_files: list[str], test_map: dict) -> list[str]:
             matched = False
             if f_norm == src:
                 matched = True
-            elif "/" in src and (f_norm.endswith("/" + src) or src.endswith("/" + f_norm)):
+            elif "/" in src and (
+                f_norm.endswith("/" + src) or src.endswith("/" + f_norm)
+            ):
                 matched = True
             if matched:
                 for t in m.get("tests", []):

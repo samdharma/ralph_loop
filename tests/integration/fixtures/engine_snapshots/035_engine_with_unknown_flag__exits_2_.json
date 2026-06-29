@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/engine.py",
+    "--not-a-flag"
+  ],
+  "exit_code": 2,
+  "stdout_pattern": "",
+  "stderr_pattern": "usage: engine.py [-h] [--auto-close] [--agent {pi,kimi}] [--issue N]\n                 [--pi-flag FLAG]\nengine.py: error: unrecognized arguments: --not-a-flag\n",
+  "description": "engine with unknown flag (exits 2)"
+}

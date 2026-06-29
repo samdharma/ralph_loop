@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "-c",
+    "from core.pipeline.agents.artifacts import write_design, write_files_in_scope; print('ok')"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "ok\n",
+  "stderr_pattern": "",
+  "description": "public API: from core.pipeline.agents.artifacts import write_design, wri"
+}

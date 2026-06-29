@@ -1,0 +1,154 @@
+"""Label transition helper (C1 step 5 — per plan §1.1 C1).
+
+Per docs/IMPROVEMENT_ROADMAP_SPEC.md §6.1, ``transition_label``
+lives at ``core/pipeline/github/labels.py``. It updates issue
+labels via ``gh issue edit`` with retry-on-transient-failure and
+optional idempotency wrapping (when ``run_id`` is provided).
+
+The underlying ``gh`` wrapper and ``_build_github_client`` factory
+live in ``core.pipeline.github.client`` (C1 step 6). The
+``sync_status`` board mirror and the ``_emit_trajectory`` event
+emission live in ``core.pipeline.github.board`` and
+``core.pipeline.retry`` respectively (per plan cascade steps 6
+and 14).
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+from typing import Optional
+
+# Bootstrap sys.path.
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_CORE_DIR = _PROJECT_ROOT / "core"
+for p in (str(_PROJECT_ROOT), str(_CORE_DIR)):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+
+def _run_gh(argv: list[str]) -> "subprocess.CompletedProcess[bytes]":
+    """Invoke ``gh`` with the given arguments. Tests patch this seam."""
+    return subprocess.run(  # noqa: S603
+        ["gh", *argv],
+        capture_output=True,
+        check=False,
+    )
+
+
+def transition_label(
+    issue_num: int,
+    add: str,
+    remove: Optional[str] = None,
+    retries: int = 3,
+    backoff: float = 2.0,
+    run_id: Optional[str] = None,
+):
+    """Update issue labels via ``gh issue edit``. Retries on transient failures.
+
+    When ``run_id`` is provided (or ``RALPH_RUN_ID`` is set in the
+    environment) the call is wrapped in an idempotency check via
+    :class:`GitHubClient`. The ``(run_id, action, issue_num,
+    label-pair-hash)`` tuple is recorded to
+    ``.ralph/issues/<N>/idempotency.jsonl`` BEFORE invoking ``gh``.
+    Subsequent calls with the same tuple short-circuit and return
+    without invoking ``gh``.
+
+    Per spec §10.2 B2 this is what makes the engine crash-restart
+    safe — a daemon SIGKILL followed by a restart must not
+    double-transition labels.
+    """
+    if run_id is None:
+        run_id = os.environ.get("RALPH_RUN_ID")
+
+    labels_action = f"+{add}" + (f" / -{remove}" if remove else "")
+    cmd = ["issue", "edit", str(issue_num), "--add-label", add]
+    if remove:
+        cmd += ["--remove-label", remove]
+
+    def _record_success() -> None:
+        print(f"[ralph] #{issue_num} labels: {labels_action}")
+        # Lazy import — sync_status lives in core.pipeline.github.board
+        # (will move in step 6 if not already there).
+        from core.project_sync import sync_status as _sync_status
+
+        _sync_status(issue_num, add)
+        # Lazy import — _emit_trajectory lives in core.pipeline.retry.
+        from core.pipeline.retry import _emit_trajectory
+
+        _emit_trajectory(
+            issue_num,
+            run_id,
+            "label_transition",
+            added=[add] if add else [],
+            removed=[remove] if remove else [],
+        )
+
+    def _record_failure(source: str) -> None:
+        print(
+            f"[ralph] WARNING: {source} label transition failed for #{issue_num} "
+            f"({labels_action}). The issue state may be out of sync."
+        )
+        from core.pipeline.retry import _emit_trajectory
+
+        _emit_trajectory(
+            issue_num,
+            run_id,
+            "label_transition_failed",
+            source=source,
+            added=[add] if add else [],
+            removed=[remove] if remove else [],
+        )
+
+    def _transition_with_direct_gh() -> bool:
+        """Run direct ``gh`` with retries. Return True on success."""
+        for attempt in range(1, retries + 1):
+            result = _run_gh(cmd)
+            if result.returncode == 0:
+                return True
+            if attempt < retries:
+                wait = backoff**attempt
+                print(
+                    f"[ralph] Label transition failed (attempt {attempt}/{retries}), "
+                    f"retrying in {wait:.0f}s..."
+                )
+                # Lazy import — _check_interrupt lives in core.pipeline.recovery
+                # (C1 step 3).
+                from core.pipeline.recovery import _check_interrupt
+
+                _check_interrupt()
+                time.sleep(wait)
+        return False
+
+    if run_id is not None:
+        # Lazy import — _build_github_client lives in
+        # core.pipeline.github.client (C1 step 6).
+        from core.pipeline.github.client import _build_github_client
+
+        gh_client = _build_github_client(run_id)
+        ok = gh_client.transition_label(
+            issue_num, [add] if add else [], [remove] if remove else []
+        )
+        if ok:
+            _record_success()
+            return
+        # The idempotent client returned False (gh returned non-zero).
+        # Surface the failure and fall back to direct gh so a transient
+        # API failure does not leave the issue state silently out of sync.
+        _record_failure("idempotent")
+        if _transition_with_direct_gh():
+            _record_success()
+            return
+        _record_failure("direct_gh")
+        return
+
+    if _transition_with_direct_gh():
+        _record_success()
+        return
+    _record_failure("direct_gh")
+
+
+__all__ = ["transition_label"]

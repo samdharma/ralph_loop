@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "-c",
+    "from core.pipeline import Stage; print('ok')"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "ok\n",
+  "stderr_pattern": "",
+  "description": "public API: from core.pipeline import Stage"
+}

@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/engine.py",
+    "--issue",
+    "42",
+    "--help"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "usage: engine.py [-h] [--auto-close] [--agent {pi,kimi}] [--issue N]\n                 [--pi-flag FLAG] [--dry-run]\n\nRalph v3 Daemon\n\noptions:\n  -h, --help         show this help message and exit\n  --a",
+  "stderr_pattern": "",
+  "description": "engine --issue 42 --help"
+}

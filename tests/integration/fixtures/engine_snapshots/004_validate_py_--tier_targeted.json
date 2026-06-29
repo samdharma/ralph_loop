@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/validate.py",
+    "--tier",
+    "targeted"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "=========================================\n[ralph] Validation Gate Starting...\n[ralph] Test tier: targeted\n[ralph] Python: /Users/sam.dharma/Trading/ralph/.venv/bin/python\n=============================",
+  "stderr_pattern": "Warning: Python 3.14 cannot parse code formatted for Python 3.15. To fix this: run Black with Python 3.15, set --target-version to py314, or use --fast to skip the safety check. Black's safety check v",
+  "description": "validate.py --tier targeted",
+  "skip_runtime": true
+}

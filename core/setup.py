@@ -15,11 +15,11 @@ import sys
 from pathlib import Path
 
 import project_sync
-
+from constants import REQUIRED_LABELS
 
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 
-CHECKS = []
+CHECKS: list = []
 
 
 def ok(msg: str):
@@ -53,12 +53,10 @@ def check(desc: str, fn) -> bool:
 # Individual checks
 # ─────────────────────────────────────────────────────────
 
+
 def check_gh_auth():
     """Verify GitHub CLI is authenticated."""
-    result = subprocess.run(
-        ["gh", "auth", "status"],
-        capture_output=True, text=True
-    )
+    result = subprocess.run(["gh", "auth", "status"], capture_output=True, text=True)
     if result.returncode == 0:
         return True, "authenticated"
     return False, "run: gh auth login"
@@ -68,7 +66,9 @@ def check_git_remote():
     """Verify we're in a git repo with a remote."""
     result = subprocess.run(
         ["git", "remote", "get-url", "origin"],
-        capture_output=True, text=True, cwd=PROJECT_ROOT
+        capture_output=True,
+        text=True,
+        cwd=PROJECT_ROOT,
     )
     if result.returncode == 0:
         return True, result.stdout.strip()
@@ -78,8 +78,7 @@ def check_git_remote():
 def check_python():
     """Verify Python 3.10+ is available."""
     result = subprocess.run(
-        [sys.executable, "--version"],
-        capture_output=True, text=True
+        [sys.executable, "--version"], capture_output=True, text=True
     )
     ver_str = result.stdout.strip()
     # Parse "Python 3.x.y"
@@ -96,9 +95,7 @@ def check_python():
 def check_agent():
     """Verify at least one AI agent is available."""
     for agent in ["pi", "kimi"]:
-        result = subprocess.run(
-            ["which", agent], capture_output=True, text=True
-        )
+        result = subprocess.run(["which", agent], capture_output=True, text=True)
         if result.returncode == 0:
             return True, agent
     return False, "install pi or kimi"
@@ -107,17 +104,12 @@ def check_agent():
 def check_pi_subagent():
     """Verify pi-subagent extension is installed (required for Phase 3 sub-agents)."""
     # First check if pi is available
-    pi_result = subprocess.run(
-        ["which", "pi"], capture_output=True, text=True
-    )
+    pi_result = subprocess.run(["which", "pi"], capture_output=True, text=True)
     if pi_result.returncode != 0:
         return True, "pi not installed (skipped)"
 
     # Check if the subagent extension is installed
-    result = subprocess.run(
-        ["pi", "extension", "list"],
-        capture_output=True, text=True
-    )
+    result = subprocess.run(["pi", "extension", "list"], capture_output=True, text=True)
     if "pi-subagent" in result.stdout or "@mjakl/pi-subagent" in result.stdout:
         return True, "pi-subagent installed"
 
@@ -130,14 +122,16 @@ def check_gh_repo_access():
     try:
         remote = subprocess.run(
             ["git", "remote", "get-url", "origin"],
-            capture_output=True, text=True, cwd=PROJECT_ROOT
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
         ).stdout.strip()
 
         # Extract owner/repo from remote URL
         repo = None
         for prefix in ["https://github.com/", "git@github.com:"]:
             if remote.startswith(prefix):
-                path = remote[len(prefix):]
+                path = remote[len(prefix) :]
                 if path.endswith(".git"):
                     path = path[:-4]
                 repo = path
@@ -148,7 +142,8 @@ def check_gh_repo_access():
 
         result = subprocess.run(
             ["gh", "issue", "list", "--repo", repo, "--limit", "1"],
-            capture_output=True, text=True
+            capture_output=True,
+            text=True,
         )
         if result.returncode == 0:
             return True, repo
@@ -162,13 +157,15 @@ def check_gh_labels():
     try:
         remote = subprocess.run(
             ["git", "remote", "get-url", "origin"],
-            capture_output=True, text=True, cwd=PROJECT_ROOT
+            capture_output=True,
+            text=True,
+            cwd=PROJECT_ROOT,
         ).stdout.strip()
 
         repo = None
         for prefix in ["https://github.com/", "git@github.com:"]:
             if remote.startswith(prefix):
-                path = remote[len(prefix):]
+                path = remote[len(prefix) :]
                 if path.endswith(".git"):
                     path = path[:-4]
                 repo = path
@@ -179,20 +176,21 @@ def check_gh_labels():
 
         result = subprocess.run(
             ["gh", "label", "list", "--repo", repo, "--json", "name"],
-            capture_output=True, text=True
+            capture_output=True,
+            text=True,
         )
         import json
-        labels = [l["name"] for l in json.loads(result.stdout)]
 
-        required = [
-            "status:ready", "status:design", "status:build",
-            "status:verify", "status:review", "status:blocked",
-        ]
-        missing = [l for l in required if l not in labels]
+        labels = [item["name"] for item in json.loads(result.stdout)]
+
+        missing = [label for label in REQUIRED_LABELS if label not in labels]
 
         if not missing:
             return True, "all required labels present"
-        return False, f"missing: {', '.join(missing)} (run 'ralph init --create-labels' to auto-create)"
+        return (
+            False,
+            f"missing: {', '.join(missing)} (run 'ralph init --create-labels' to auto-create)",
+        )
     except Exception as e:
         return False, str(e)
 
@@ -200,16 +198,23 @@ def check_gh_labels():
 def check_project_sync():
     """Verify GitHub Project board sync if a project is configured."""
     if not project_sync.project_enabled():
-        return True, "board sync disabled (set ticket.project in .ralph/config.toml or run 'ralph init' again)"
+        return (
+            True,
+            "board sync disabled (set ticket.project in .ralph/config.toml or run 'ralph init' again)",
+        )
     ok, detail = project_sync.check_project_access()
     if ok:
         return True, f"board sync enabled — {detail}"
-    return True, f"board sync enabled but {detail} (sync will warn but not block the pipeline)"
+    return (
+        True,
+        f"board sync enabled but {detail} (sync will warn but not block the pipeline)",
+    )
 
 
 # ─────────────────────────────────────────────────────────
 # Main
 # ─────────────────────────────────────────────────────────
+
 
 def main() -> int:
     print("╔══════════════════════════════════════════╗")

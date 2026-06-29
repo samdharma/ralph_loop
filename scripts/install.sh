@@ -1,14 +1,24 @@
 #!/usr/bin/env bash
-# Ralph v3 — One-Line Installer
+# Ralph v3.1 — Installer
 #
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/samdharma/Ralph_loop/ralph-v3/scripts/install.sh | bash
+# Usage (new in v3.1, replaces the v3 curl|bash flow):
+#   git clone https://github.com/samdharma/Ralph_loop
+#   cd Ralph_loop
+#   git checkout ralph-v3.1
+#   ./scripts/install.sh
 #
 # Or from a local clone:
-#   bash scripts/install.sh
+#   bash scripts/install.sh [--help]
 #
 # Installs ralph CLI to /usr/local/bin (or ~/.local/bin) and sets RALPH_HOME.
+# Preserves the bash dispatcher bin/ralph per spec §3.7 (only v3.2 may drop it).
 # Validates all prerequisites before installation.
+#
+# Prerequisites (per spec §4.1):
+#   - git 2.30+
+#   - gh 2.0+ (GitHub CLI)
+#   - python 3.10+
+#   - pi or kimi (one of the AI agent CLIs)
 
 set -euo pipefail
 
@@ -27,7 +37,6 @@ MISSING=()
 WARNINGS=()
 
 RALPH_HOME="${RALPH_HOME:-$HOME/.ralph}"
-RALPH_VERSION="3.0.0"
 
 # Determine the source directory (where this script lives)
 # When run via `curl ... | bash`, BASH_SOURCE may be unset.
@@ -39,11 +48,25 @@ else
     REPO_DIR=""
 fi
 
+# Derive version from pyproject.toml, git tags, or fallback to 3.1.0
+if [[ -n "${REPO_DIR}" && -f "${REPO_DIR}/pyproject.toml" ]]; then
+    RALPH_VERSION=$(grep -oE '^version = "[^"]+"' "${REPO_DIR}/pyproject.toml" | head -1 | sed -E 's/version = "([^"]+)"/\1/')
+elif command -v git &>/dev/null && [[ -n "${REPO_DIR}" ]] && git -C "${REPO_DIR}" describe --tags --always &>/dev/null; then
+    RALPH_VERSION=$(git -C "${REPO_DIR}" describe --tags --always)
+fi
+RALPH_VERSION="${RALPH_VERSION:-3.1.0}"
+
 echo "╔══════════════════════════════════════════╗"
-echo "║   Ralph v3 — Automated Build System      ║"
+echo "║   Ralph v${RALPH_VERSION} — Automated Build System    ║"
 echo "║   Installer v${RALPH_VERSION}                     ║"
 echo "╚══════════════════════════════════════════╝"
 echo ""
+
+# --help prints usage and exits 0.
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+    sed -n '2,30p' "$0"
+    exit 0
+fi
 
 # ──────────────────────────────────────────────────────────────
 # Step 1: Prerequisite Checks
@@ -182,8 +205,15 @@ if [[ ! -f "${RALPH_HOME}/bin/ralph" ]]; then
         echo "    export RALPH_HOME=/path/to/ralph"
         exit 1
     fi
-    # Checkout the ralph-v3 branch
-    git -C "${RALPH_HOME}" checkout ralph-v3 2>/dev/null || true
+    # Checkout the target branch (derive from current clone or default to ralph-v3.1)
+    TARGET_BRANCH="ralph-v3.1"
+    if [[ -n "${REPO_DIR}" ]]; then
+        CURRENT_BRANCH=$(git -C "${REPO_DIR}" branch --show-current 2>/dev/null || true)
+        if [[ -n "${CURRENT_BRANCH}" && "${CURRENT_BRANCH}" == ralph-v* ]]; then
+            TARGET_BRANCH="${CURRENT_BRANCH}"
+        fi
+    fi
+    git -C "${RALPH_HOME}" checkout "${TARGET_BRANCH}" 2>/dev/null || true
     pass "Cloned Ralph v3 to ${RALPH_HOME}"
 fi
 

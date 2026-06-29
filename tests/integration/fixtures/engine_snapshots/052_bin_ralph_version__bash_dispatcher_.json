@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "bash",
+    "/Users/sam.dharma/Trading/ralph/bin/ralph",
+    "version"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "ralph v3.1.3\n",
+  "stderr_pattern": "",
+  "description": "bin/ralph version (bash dispatcher)"
+}

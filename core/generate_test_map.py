@@ -32,7 +32,6 @@ import os
 import sys
 from pathlib import Path
 
-
 PROJECT_ROOT = Path(os.environ.get("RALPH_PROJECT_DIR", Path.cwd()))
 SRC_DIR = PROJECT_ROOT / "src"
 TEST_DIR = PROJECT_ROOT / "tests"
@@ -95,17 +94,23 @@ def guess_test_file(source_rel: Path) -> list[str]:
 
     # Candidate 1: tests/unit/test_<module>.py
     if sub_path:
-        candidates.append(f"tests/unit/test_{sub_path.replace('/', '_')}_{source_name}.py")
+        candidates.append(
+            f"tests/unit/test_{sub_path.replace('/', '_')}_{source_name}.py"
+        )
     candidates.append(f"tests/unit/test_{source_name}.py")
 
     # Candidate 2: tests/unit/<module>_test.py
     if sub_path:
-        candidates.append(f"tests/unit/{sub_path.replace('/', '_')}_{source_name}_test.py")
+        candidates.append(
+            f"tests/unit/{sub_path.replace('/', '_')}_{source_name}_test.py"
+        )
     candidates.append(f"tests/unit/{source_name}_test.py")
 
     # Candidate 3: tests/integration/test_<module>_integration.py
     if sub_path:
-        candidates.append(f"tests/integration/test_{sub_path.replace('/', '_')}_{source_name}_integration.py")
+        candidates.append(
+            f"tests/integration/test_{sub_path.replace('/', '_')}_{source_name}_integration.py"
+        )
     candidates.append(f"tests/integration/test_{source_name}_integration.py")
 
     # Filter to only existing files
@@ -119,7 +124,6 @@ def generate_test_map(dry_run: bool = False) -> dict:
     Returns the mappings dict.
     """
     source_files = find_python_files(SRC_DIR)
-    test_files = {str(f) for f in find_python_files(TEST_DIR)}
 
     mappings = []
     unmatched = 0
@@ -127,10 +131,12 @@ def generate_test_map(dry_run: bool = False) -> dict:
     for src_file in source_files:
         tests = guess_test_file(src_file)
         if tests:
-            mappings.append({
-                "source": str(src_file),
-                "tests": list(sorted(set(tests))),
-            })
+            mappings.append(
+                {
+                    "source": str(src_file),
+                    "tests": list(sorted(set(tests))),
+                }
+            )
         else:
             unmatched += 1
 
@@ -176,7 +182,7 @@ def format_yaml(data: dict) -> str:
         lines.append(f'  - "{dt}"')
 
     if not data.get("default_tests"):
-        lines.append("  - \"tests/unit/\"")
+        lines.append('  - "tests/unit/"')
 
     return "\n".join(lines) + "\n"
 

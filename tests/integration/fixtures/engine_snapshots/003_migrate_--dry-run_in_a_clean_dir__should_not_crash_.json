@@ -1,0 +1,12 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "-m",
+    "core.migrate",
+    "--dry-run"
+  ],
+  "exit_code": 0,
+  "stdout_pattern": "{\n  \"actions\": [],\n  \"archive_dir\": \"\",\n  \"errors\": []\n}\n",
+  "stderr_pattern": "",
+  "description": "core.migrate --dry-run in a clean dir (should not crash)"
+}

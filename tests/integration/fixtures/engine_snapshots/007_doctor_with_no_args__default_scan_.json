@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/doctor.py"
+  ],
+  "exit_code": 2,
+  "stdout_pattern": "Ralph doctor: scanning 2 issue(s)\u2026\n\n=== Environment problems (severity 2) ===\n  - ('missing_label', 'status:blocked')\n  - ('missing_label', 'status:build')\n  - ('missing_label', 'status:design')\n  - (",
+  "stderr_pattern": "",
+  "description": "doctor with no args (default scan)",
+  "skip_runtime": true
+}

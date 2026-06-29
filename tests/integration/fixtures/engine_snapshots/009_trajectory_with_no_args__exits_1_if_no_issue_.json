@@ -1,0 +1,11 @@
+{
+  "argv": [
+    "/Users/sam.dharma/Trading/ralph/.venv/bin/python",
+    "/Users/sam.dharma/Trading/ralph/core/trajectory.py"
+  ],
+  "exit_code": 1,
+  "stdout_pattern": "",
+  "stderr_pattern": "Traceback (most recent call last):\n  File \"/Users/sam.dharma/Trading/ralph/core/trajectory.py\", line 29, in <module>\n    from core.schemas.events import TrajectoryEvent\nModuleNotFoundError: No module ",
+  "description": "trajectory with no args (exits 1 if no issue)",
+  "skip_runtime": true
+}
